@@ -18,7 +18,10 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 INSTRUCTIONS = """Genera imágenes y videos con los modelos de Higgsfield a través de HF Studio.
-Flujo: 1) find_models por capacidad (text-to-video, image-to-video, first-last-frame, video-input,
+Atajos: recommend_models("lo que quiere el usuario") sugiere modelos con su costo; list_presets y
+run_preset ejecutan recetas listas (primero con dry_run=True para mostrar costo y entrada final);
+generate_batch hace variantes (primero dry_run=True) y wait_generations espera varias.
+Flujo manual: 1) find_models por capacidad (text-to-video, image-to-video, first-last-frame, video-input,
 reference-to-video, image-references, video-edit, video-extend, motion-transfer, text-to-image);
 2) get_model para leer input_schema y notes; 3) upload_media si la entrada es un archivo local;
 4) opcional estimate_cost; 5) generate; 6) get_generation con wait_seconds hasta terminal=true;
@@ -147,6 +150,72 @@ def download_outputs(generation_id: str, dest_dir: str = ".") -> dict:
         "files": saved,
         "remote": [urljoin(base, o["file_url"]) if o.get("file_url") else o["url"] for o in job["outputs"]],
     }
+
+
+@mcp.tool()
+def recommend_models(task: str, output: str | None = None, limit: int = 5) -> dict:
+    """Sugiere modelos para una tarea en lenguaje natural (es/en), p. ej. 'video barato entre dos fotos',
+    con el costo de una configuración estándar (5 s, 720p). output opcional: video | image."""
+    params = {"task": task, "limit": limit, **({"output": output} if output else {})}
+    return _call("GET", "/v1/recommend", params=params)
+
+
+@mcp.tool()
+def generate_batch(items: list[dict], dry_run: bool = True, idempotency_key: str | None = None) -> dict:
+    """Varias generaciones de una vez. items: [{model, input, count}] (count = variantes, máx. 8).
+    Llama primero con dry_run=True, muestra el total al usuario y solo luego con dry_run=False,
+    reutilizando la misma idempotency_key si reintentas."""
+    headers = {} if dry_run else {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+    return _call("POST", "/v1/generations/batch", json={"items": items, "dry_run": dry_run}, headers=headers)
+
+
+@mcp.tool()
+def wait_generations(generation_ids: list[str], wait_seconds: int = 60) -> dict:
+    """Espera hasta wait_seconds (máx. 120) a que terminen varias generaciones y devuelve su estado.
+    Repite mientras all_terminal sea false."""
+    params = {"ids": ",".join(generation_ids), "wait": max(0, min(wait_seconds, 120)), "limit": 100}
+    return _call("GET", "/v1/generations", params=params)
+
+
+@mcp.tool()
+def list_presets() -> dict:
+    """Recetas disponibles (de serie y propias): slug, modelo, variables que piden y salida."""
+    presets = _call("GET", "/v1/presets")["presets"]
+    return {
+        "presets": [
+            {
+                k: p[k]
+                for k in (
+                    "slug",
+                    "title",
+                    "description",
+                    "category",
+                    "output",
+                    "model",
+                    "variables",
+                    "builtin",
+                )
+            }
+            for p in presets
+        ]
+    }
+
+
+@mcp.tool()
+def run_preset(slug: str, variables: dict, dry_run: bool = True, idempotency_key: str | None = None) -> dict:
+    """Ejecuta un preset. Variables de medios (image/images/video) llevan URLs públicas (usa upload_media).
+    Con dry_run=True devuelve la entrada final y el costo sin generar: muéstralo antes de confirmar."""
+    headers = {} if dry_run else {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+    return _call(
+        "POST", f"/v1/presets/{slug}/run", json={"variables": variables, "dry_run": dry_run}, headers=headers
+    )
+
+
+@mcp.tool()
+def save_preset(generation_id: str, slug: str, title: str, description: str = "") -> dict:
+    """Guarda una generación como preset propio: mismos ajustes y medios, con el prompt como variable."""
+    body = {"slug": slug, "title": title, "description": description}
+    return _call("POST", f"/v1/presets/from-generation/{generation_id}", json=body)
 
 
 def main() -> None:

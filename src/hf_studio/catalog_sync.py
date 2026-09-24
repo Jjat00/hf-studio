@@ -94,7 +94,8 @@ def parse_workflow(path: str) -> dict | None:
         "workflow": path.rsplit("/", 1)[-1],
         "family": path.split("/")[3],
         "output": output,
-        "capabilities": capabilities(path.rsplit("/", 1)[-1], output, input_schema),
+        # La familia (p. ej. kling-3-motion-control) también describe el flujo: /pro y /std no lo hacen.
+        "capabilities": capabilities(f"{path.split('/')[3]} {path.rsplit('/', 1)[-1]}", output, input_schema),
         "notes": [n.lstrip("* ").strip() for n in notes.group(1).splitlines() if n.strip()] if notes else [],
         "docs_url": DOCS + path,
         "input_schema": input_schema,

@@ -66,6 +66,9 @@ def parse_task(task: str) -> dict:
         if re.search(pattern, t) and cap not in caps:
             caps.append(cap)
             reasons.append(why)
+    if "motion-transfer" in caps and "image-references" in caps:
+        caps.remove("image-references")  # «personaje» en una tarea de movimiento es la imagen del sujeto
+        reasons.remove("accepts reference images")
     wants_video = bool(re.search(VIDEO_WORDS, t)) or any(
         c in caps
         for c in (

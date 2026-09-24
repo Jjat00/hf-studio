@@ -2635,6 +2635,7 @@
       "output": "video",
       "capabilities": [
         "image-to-video",
+        "motion-transfer",
         "video-input"
       ],
       "notes": [
@@ -2700,6 +2701,7 @@
       "output": "video",
       "capabilities": [
         "image-to-video",
+        "motion-transfer",
         "video-input"
       ],
       "notes": [
@@ -4488,6 +4490,7 @@
       "output": "video",
       "capabilities": [
         "image-to-video",
+        "motion-transfer",
         "video-input"
       ],
       "notes": [
@@ -4553,6 +4556,7 @@
       "output": "video",
       "capabilities": [
         "image-to-video",
+        "motion-transfer",
         "video-input"
       ],
       "notes": [
