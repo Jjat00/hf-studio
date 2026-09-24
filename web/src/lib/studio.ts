@@ -48,7 +48,7 @@ export const studio = {
       body: JSON.stringify({ model, input }),
     }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
-  get: (id: string) => call<Generation>(`/v1/generations/${id}`),
+  get: (id: string, wait = 0) => call<Generation>(`/v1/generations/${id}${wait ? `?wait=${wait}` : ""}`),
   presets: () => call<{ presets: Preset[] }>("/v1/presets"),
   preset: (slug: string) => call<Preset>(`/v1/presets/${slug}`),
   previewPreset: (slug: string, variables: Record<string, unknown>, hints: Record<string, number> = {}) =>

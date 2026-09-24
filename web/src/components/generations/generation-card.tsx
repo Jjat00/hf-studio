@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, Ban, Bookmark, Check, Copy, Download, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, Ban, Bookmark, Check, Copy, Download, Info, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { Locale } from "@/lib/i18n";
@@ -20,6 +21,9 @@ const RATIO: Record<string, string> = {
   "2:3": "2 / 3",
 };
 
+const ICON_BUTTON =
+  "flex size-8 items-center justify-center rounded-lg bg-glass text-fg-2 transition-colors hover:bg-white/10 hover:text-fg disabled:opacity-40";
+
 function useElapsed(g: Generation) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -32,7 +36,7 @@ function useElapsed(g: Generation) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
-function modelName(id: string, locale: Locale, models?: Map<string, ModelSummary>) {
+export function modelName(id: string, locale: Locale, models?: Map<string, ModelSummary>) {
   const m = models?.get(id);
   if (!m) return id;
   const { name, workflow } = modelLabel(m.title);
@@ -113,8 +117,12 @@ export function GenerationCard({
     </div>
   );
 
+  const detailHref = `/history/${g.id}`;
   const actions = (
     <div className="flex items-center gap-1">
+      <Link href={detailHref} title={t.history.detail.open} aria-label={t.history.detail.open} className={ICON_BUTTON}>
+        <Info className="size-4" />
+      </Link>
       {g.status === "completed" && main && (
         <IconButton label={t.generation.download} href={outputSrc(main)}>
           <Download className="size-4" />
@@ -179,9 +187,12 @@ export function GenerationCard({
             <StatusPill g={g} />
             {actions}
           </div>
-          <p className={clsx("text-[15px] leading-relaxed", prompt ? "text-fg" : "text-fg-3 italic")}>
+          <Link
+            href={detailHref}
+            className={clsx("text-[15px] leading-relaxed hover:underline", prompt ? "text-fg" : "text-fg-3 italic")}
+          >
             {prompt || t.generation.noPrompt}
-          </p>
+          </Link>
           <div className="mt-auto">{meta}</div>
         </div>
       </article>
@@ -191,14 +202,16 @@ export function GenerationCard({
     <article className="group flex flex-col gap-2">
       {media}
       <div className="flex items-start justify-between gap-2 px-1">
-        <p className="line-clamp-2 min-w-0 text-sm text-fg-2">{prompt || modelName(g.model, locale, models)}</p>
+        <Link href={detailHref} className="line-clamp-2 min-w-0 text-sm text-fg-2 hover:text-fg">
+          {prompt || modelName(g.model, locale, models)}
+        </Link>
         <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
       </div>
     </article>
   );
 }
 
-function StatusPill({ g }: { g: Generation }) {
+export function StatusPill({ g }: { g: Generation }) {
   const STAGE = useI18n().t.generation.stage;
   const tone =
     g.status === "completed"
@@ -209,7 +222,7 @@ function StatusPill({ g }: { g: Generation }) {
   return <span className={clsx("rounded-md px-2 py-0.5 text-xs font-semibold", tone)}>{STAGE[g.status] ?? g.stage}</span>;
 }
 
-function IconButton({
+export function IconButton({
   children,
   label,
   onClick,
@@ -222,8 +235,7 @@ function IconButton({
   href?: string;
   disabled?: boolean;
 }) {
-  const cls =
-    "flex size-8 items-center justify-center rounded-lg bg-glass text-fg-2 transition-colors hover:bg-white/10 hover:text-fg disabled:opacity-40";
+  const cls = ICON_BUTTON;
   return href ? (
     <a href={href} download title={label} aria-label={label} className={cls} target="_blank" rel="noreferrer">
       {children}
