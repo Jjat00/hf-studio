@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
+import { Masonry } from "@/components/masonry";
 import { useI18n } from "@/components/i18n-provider";
 import { studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
@@ -65,10 +66,15 @@ export default function HistoryPage() {
       ) : shown.length === 0 ? (
         <p className="mt-16 text-center text-fg-3">{t.history.nothing}</p>
       ) : (
-        <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-          {shown.map((g) => (
-            <GenerationCard key={g.id} g={g} layout="grid" models={models} onReuse={reuse} onDelete={remove} />
-          ))}
+        <div className="mt-6">
+          <Masonry
+            items={shown}
+            itemKey={(g) => g.id}
+            maxColumns={4}
+            minColumnWidth={280}
+            gap={20}
+            render={(g) => <GenerationCard g={g} layout="grid" models={models} onReuse={reuse} onDelete={remove} />}
+          />
         </div>
       )}
     </div>

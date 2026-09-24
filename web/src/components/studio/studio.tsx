@@ -28,6 +28,7 @@ import { probeDuration } from "@/lib/media";
 import { costShort, modelLabel, studio, StudioError, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
+import { Masonry } from "@/components/masonry";
 import { Chip, FieldControl, SettingCard } from "./controls";
 import { EmptyState } from "./empty-state";
 import { MediaSlot } from "./media-slot";
@@ -457,14 +458,13 @@ export function Studio({ output }: { output: "video" | "image" }) {
               ))}
             </div>
           ) : layout === "grid" ? (
-            <div
-              className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]"
-              style={{ "--cols": columns } as React.CSSProperties}
-            >
-              {history.map((g) => (
-                <GenerationCard key={g.id} g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} />
-              ))}
-            </div>
+            <Masonry
+              items={history}
+              itemKey={(g) => g.id}
+              maxColumns={columns}
+              minColumnWidth={200}
+              render={(g) => <GenerationCard g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} />}
+            />
           ) : (
             <div className="flex flex-col gap-3">
               {history.map((g) => (
