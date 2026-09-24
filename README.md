@@ -12,7 +12,8 @@ Tu propio «Higgsfield»: una API sobre la [API de Higgsfield](https://docs.higg
 
 ```bash
 uv sync
-cp .env.example .env          # rellena HF_API_KEY_ID y HF_API_KEY_SECRET
+cp .env.example .env          # pega tu clave de Higgsfield en HF_API_KEY
+uv run hf-studio check-credentials        # valida la clave sin gastar créditos
 uv run hf-studio create-key claude-code   # muestra la clave hfs_… una sola vez
 uv run hf-studio create-key codex
 uv run hf-studio serve        # http://127.0.0.1:8787  ·  docs interactivas en /docs

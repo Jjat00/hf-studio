@@ -294,3 +294,30 @@ async def test_upload(env):
     assert r.status_code == 201 and r.json()["url"] == "https://cdn.test/in.png"
     r = await http.post("/v1/uploads", files={"file": ("a.txt", b"hola", "text/plain")})
     assert r.status_code == 415
+
+
+def test_single_key_and_split_credentials_build_same_header():
+    single = Settings(_env_file=None, hf_api_key="kid:ksecret")
+    split = Settings(_env_file=None, hf_api_key_id="kid", hf_api_key_secret="ksecret")
+    prefixed = Settings(_env_file=None, hf_api_key="Key kid:ksecret")
+    assert single.hf_credential == split.hf_credential == prefixed.hf_credential == "kid:ksecret"
+    assert not Settings(_env_file=None).hf_configured
+
+
+async def test_check_credentials_uses_free_status_probe():
+    from hf_studio.higgsfield import HiggsfieldClient
+
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        ok = request.headers["authorization"] == "Key kid:ksecret"
+        return httpx.Response(404 if ok else 401, json={"detail": "x"})
+
+    good = HiggsfieldClient(Settings(_env_file=None, hf_api_key="kid:ksecret"), httpx.MockTransport(handler))
+    bad = HiggsfieldClient(Settings(_env_file=None, hf_api_key="otra"), httpx.MockTransport(handler))
+    assert await good.check_credentials() is True
+    assert await bad.check_credentials() is False
+    assert all(m == "GET" and p.endswith("/status") for m, p in seen)  # nunca un POST que cobre
+    await good.aclose()
+    await bad.aclose()

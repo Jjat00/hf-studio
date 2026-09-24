@@ -67,7 +67,7 @@ def create_app(
         app.state.worker = Worker(app.state.sessions, app.state.hf, settings)
         app.state.tasks = set()
         if not settings.hf_configured:
-            log.warning("Faltan HF_API_KEY_ID / HF_API_KEY_SECRET: los envíos fallarán")
+            log.warning("Falta HF_API_KEY (o HF_API_KEY_ID + HF_API_KEY_SECRET): los envíos fallarán")
         if settings.worker_enabled:
             app.state.worker.start()
         yield

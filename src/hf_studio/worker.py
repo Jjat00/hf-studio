@@ -164,7 +164,9 @@ class Worker:
         if exc.kind == "ambiguous":
             message += "; not retried automatically to avoid a duplicate generation and charge"
         elif exc.kind == "auth":
-            message = "Invalid Higgsfield credentials on the server (HF_API_KEY_ID/HF_API_KEY_SECRET)"
+            message = (
+                "Invalid Higgsfield credentials on the server (HF_API_KEY); run `hf-studio check-credentials`"
+            )
         self._finish(job, "failed", kind, message)
         return exc.kind != "auth"
 

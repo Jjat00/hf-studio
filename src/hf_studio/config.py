@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # La consola de Higgsfield entrega la credencial como una sola cadena `KEY_ID:KEY_SECRET`
+    # (el SDK oficial la lee así). También se aceptan las dos partes por separado.
+    hf_api_key: SecretStr = SecretStr("")
     hf_api_key_id: str = ""
     hf_api_key_secret: SecretStr = SecretStr("")
     hf_base_url: str = "https://api.higgsfield.ai"
@@ -35,7 +38,16 @@ class Settings(BaseSettings):
 
     @property
     def hf_configured(self) -> bool:
-        return bool(self.hf_api_key_id and self.hf_api_key_secret.get_secret_value())
+        return bool(self.hf_credential)
+
+    @property
+    def hf_credential(self) -> str:
+        """Valor para `Authorization: Key <valor>`: la clave única o `id:secret`."""
+        single = self.hf_api_key.get_secret_value().strip()
+        if single:
+            return single.removeprefix("Key ").strip()
+        secret = self.hf_api_key_secret.get_secret_value()
+        return f"{self.hf_api_key_id}:{secret}" if self.hf_api_key_id and secret else ""
 
     @property
     def cors_origin_list(self) -> list[str]:

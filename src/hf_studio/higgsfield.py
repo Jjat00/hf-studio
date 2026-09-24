@@ -75,7 +75,7 @@ def _raise_for(response: httpx.Response) -> None:
 class HiggsfieldClient:
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         self.base_url = settings.hf_base_url.rstrip("/")
-        auth = f"Key {settings.hf_api_key_id}:{settings.hf_api_key_secret.get_secret_value()}"
+        auth = f"Key {settings.hf_credential}"
         timeout = httpx.Timeout(30.0, connect=10.0)
         self._api = httpx.AsyncClient(
             base_url=self.base_url, headers={"Authorization": auth}, timeout=timeout, transport=transport
@@ -111,6 +111,17 @@ class HiggsfieldClient:
             raise HiggsfieldError("network", f"Network error while checking status: {exc}") from exc
         _raise_for(response)
         return response.json()
+
+    async def check_credentials(self) -> bool:
+        """Comprueba la clave sin gastar créditos: el estado de una solicitud inexistente
+        responde 404 con credenciales válidas y 401 con inválidas."""
+        response = await self._api.get("/requests/00000000-0000-0000-0000-000000000000/status")
+        if response.status_code == 401:
+            return False
+        if response.status_code == 404:
+            return True
+        _raise_for(response)
+        return True
 
     async def cancel(self, request_id: str, cancel_url: str | None = None) -> None:
         url = self._own_url(cancel_url, f"/requests/{quote(request_id)}/cancel")

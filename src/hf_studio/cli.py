@@ -1,4 +1,4 @@
-"""hf-studio serve | create-key NAME | list-keys | revoke-key NAME | sync-catalog | mcp"""
+"""hf-studio serve | create-key NAME | list-keys | revoke-key NAME | check-credentials | sync-catalog | mcp"""
 
 from __future__ import annotations
 
@@ -51,6 +51,28 @@ async def _revoke_key(session, name: str) -> int:
     return 0
 
 
+async def _check_credentials() -> int:
+    from .higgsfield import HiggsfieldClient, HiggsfieldError
+
+    settings = get_settings()
+    if not settings.hf_configured:
+        print("Falta HF_API_KEY en .env", file=sys.stderr)
+        return 1
+    client = HiggsfieldClient(settings)
+    try:
+        ok = await client.check_credentials()
+    except HiggsfieldError as exc:
+        print(f"Respuesta inesperada de Higgsfield ({exc.status}): {exc.message}", file=sys.stderr)
+        return 1
+    finally:
+        await client.aclose()
+    if ok:
+        print("Credenciales válidas: Higgsfield aceptó la clave (sin gastar créditos).")
+        return 0
+    print("Credenciales inválidas (401). Revisa HF_API_KEY: debe ser `KEY_ID:KEY_SECRET`.", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="hf-studio")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -61,6 +83,7 @@ def main() -> int:
     sub.add_parser("create-key", help="Crea un cliente (agente, UI…) y muestra su clave").add_argument("name")
     sub.add_parser("list-keys", help="Lista los clientes")
     sub.add_parser("revoke-key", help="Revoca la clave de un cliente").add_argument("name")
+    sub.add_parser("check-credentials", help="Verifica la clave de Higgsfield sin gastar créditos")
     sub.add_parser("sync-catalog", help="Regenera catalog.json desde docs.higgsfield.ai")
     sub.add_parser("mcp", help="Servidor MCP por stdio para Claude Code / Codex")
     args = parser.parse_args()
@@ -77,6 +100,8 @@ def main() -> int:
         return asyncio.run(_with_session(_list_keys))
     if args.cmd == "revoke-key":
         return asyncio.run(_with_session(lambda s: _revoke_key(s, args.name)))
+    if args.cmd == "check-credentials":
+        return asyncio.run(_check_credentials())
     if args.cmd == "sync-catalog":
         from .catalog_sync import main as sync
 
