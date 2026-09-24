@@ -37,7 +37,9 @@ export function FieldControl({
   const hint = field.schema.description && t.controls.externalHint(field.schema.description);
   switch (field.kind) {
     case "enum": {
-      const many = field.options.length > 6;
+      // El formato siempre va en botones, con su rectángulo, aunque haya muchas opciones.
+      const ratio = field.key === "aspect_ratio";
+      const many = field.options.length > 6 && !ratio;
       return (
         <SettingCard label={label} error={error}>
           {many ? (
@@ -66,7 +68,14 @@ export function FieldControl({
               )}
               {field.options.map((o) => (
                 <Chip key={String(o)} active={value === o} onClick={() => onChange(o)}>
-                  {formatOption(field.key, o)}
+                  {ratio ? (
+                    <span className="flex items-center gap-1.5">
+                      <RatioIcon value={String(o)} />
+                      {formatOption(field.key, o)}
+                    </span>
+                  ) : (
+                    formatOption(field.key, o)
+                  )}
                 </Chip>
               ))}
             </div>
@@ -190,5 +199,20 @@ export function Chip({ active, onClick, children }: { active: boolean; onClick: 
     >
       {children}
     </button>
+  );
+}
+
+/** Rectángulo con la proporción del formato (16:9 apaisado, 9:16 vertical…); punteado si es automático. */
+export function RatioIcon({ value, size = 14 }: { value: string; size?: number }) {
+  const [a, b] = value.split(":").map(Number);
+  if (!a || !b) {
+    return <span aria-hidden className="block shrink-0 rounded-[2px] border border-dashed border-current opacity-70" style={{ width: size - 2, height: size - 2 }} />;
+  }
+  const w = a >= b ? size : Math.max(4, (size * a) / b);
+  const h = a >= b ? Math.max(4, (size * b) / a) : size;
+  return (
+    <span aria-hidden className="flex shrink-0 items-center justify-center" style={{ width: size, height: size }}>
+      <span className="block rounded-[2px] border-[1.5px] border-current" style={{ width: w, height: h }} />
+    </span>
   );
 }
