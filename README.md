@@ -1,48 +1,73 @@
 # HF Studio
 
-Tu propio «Higgsfield»: una API sobre la [API de Higgsfield](https://docs.higgsfield.ai) que usan tus agentes
-(Claude Code, Codex) por MCP o REST, y que servirá también de backend para una UI propia.
+Tu propio estudio de video e imagen con IA sobre la [API de Higgsfield](https://docs.higgsfield.ai): una **API** y un
+**servidor MCP** para que tus agentes (Claude Code, Codex) generen por ti, y una **interfaz web** para hacerlo a mano.
+Todo comparte el mismo historial.
 
-- **82 endpoints** (66 de video, 15 de imagen y 1 de referencias personalizadas) con su JSON Schema, sacados de la documentación oficial (`hf-studio sync-catalog`).
-- **Texto a video, imagen a video, imagen inicial y final, video(s) de referencia, edición y extensión de video, transferencia de movimiento, texto a imagen.** Busca por capacidad y no por marca.
-- Los trabajos son **asíncronos y persistentes**, cada uno pertenece a un cliente y otro cliente no puede verlo.
-- Validación antes de gastar créditos, deduplicación, `Idempotency-Key`, cola local según la concurrencia de la cuenta, sondeo con backoff, webhooks opcionales y copia local de las salidas (Higgsfield solo las garantiza 7 días).
+*Your own AI video and image studio on top of the Higgsfield API: a REST API, an MCP server for coding agents and a
+web UI (Spanish by default, English available).*
+
+![Estudio de video](docs/img/estudio-video.png)
+
+## Qué incluye
+
+- **82 endpoints de Higgsfield** (66 de video, 15 de imagen y 1 de referencias personalizadas), cada uno con su JSON
+  Schema sacado de la documentación oficial (`hf-studio sync-catalog`).
+- **Todas las capacidades:** texto a video, imagen a video, fotograma inicial y final, videos de referencia, edición y
+  extensión de video, transferencia de movimiento, cambio de objetos (Genjutsu), texto a imagen y edición de imagen.
+  Se busca por capacidad, no por marca.
+- **El costo siempre se ve antes de generar.** En la UI aparece junto al botón. Por MCP, generar exige el `quote_id`
+  de una cotización previa de esa misma petición.
+- **Trabajos asíncronos y persistentes:** validación antes de gastar créditos, deduplicación, `Idempotency-Key`, cola
+  local según la concurrencia de la cuenta, sondeo con backoff, webhooks opcionales y copia local de las salidas
+  (Higgsfield solo las guarda 7 días).
+- **Presets** (recetas con variables), **lotes** con cotización total, **recomendador** de modelos en lenguaje
+  natural (es/en) y **12 casos de uso** con tutorial paso a paso para la UI y para los agentes.
+- **Interfaz bilingüe:** español por defecto e inglés con un clic.
+
+| Casos de uso | Catálogo de modelos |
+| --- | --- |
+| ![Casos de uso](docs/img/casos-de-uso.png) | ![Modelos](docs/img/modelos.png) |
+
+## Requisitos
+
+- Python 3.12+ y [uv](https://docs.astral.sh/uv/)
+- Node.js 20+ y [pnpm](https://pnpm.io/) (para la UI)
+- Una clave de API de Higgsfield ([console.higgsfield.ai](https://console.higgsfield.ai)). Generar consume tus créditos.
 
 ## Puesta en marcha
 
 ```bash
+git clone https://github.com/Jjat00/hf-studio.git && cd hf-studio
 uv sync
-cp .env.example .env          # pega tu clave de Higgsfield en HF_API_KEY
+cp .env.example .env                      # pega tu clave de Higgsfield en HF_API_KEY
 uv run hf-studio check-credentials        # valida la clave sin gastar créditos
-uv run hf-studio create-key claude-code   # muestra la clave hfs_… una sola vez
-uv run hf-studio create-key codex
-uv run hf-studio serve        # http://127.0.0.1:8787  ·  docs interactivas en /docs
+uv run hf-studio create-key web-ui        # clave hfs_… para la UI (se muestra una sola vez)
+cp web/.env.example web/.env.local        # pega esa clave en HF_STUDIO_TOKEN
+cd web && pnpm install && cd ..
+./dev.sh                                  # API en :8787 (docs en /docs) y UI en :3000
 ```
 
-Otros comandos: `hf-studio list-keys`, `hf-studio revoke-key NOMBRE`, `hf-studio sync-catalog`.
-
-## Arranque rápido
-
-```bash
-./dev.sh     # valida la clave, arranca la API en :8787 y la UI en :3000
-```
+Otros comandos: `hf-studio create-key NOMBRE`, `list-keys`, `revoke-key NOMBRE`, `sync-catalog` y `serve`.
+Cada cliente (la UI, Claude Code, Codex…) tiene su propia clave `hfs_…`. Las credenciales de Higgsfield solo las
+conoce la API.
 
 ## UI web (`web/`)
 
-Next.js 16 con el look de Higgsfield: Inter con eje óptico (hace de Inter Display), Space Grotesk 700 en mayúsculas para titulares, superficies «cool» `#131416` y lima `#d1fe17`. Los valores se midieron en higgsfield.ai el 2026-09-24. El logo, el nombre y las ilustraciones son propios: las imágenes se generaron con la herramienta de imágenes de Codex.
+Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nombre y las ilustraciones son propios.
 
-```bash
-uv run hf-studio create-key web-ui
-cp web/.env.example web/.env.local    # HF_STUDIO_URL y HF_STUDIO_TOKEN=hfs_…
-uv run hf-studio serve &              # API en :8787
-cd web && pnpm install && pnpm dev    # UI en :3000
-```
-
-- **Páginas:** Explore, Video (Create Video: Text, Start & End, References · Edit Video: Edit, Extend, Objects swap · Motion Control), Image, Use cases, Presets, Library, Models y MCP.
-- **Use cases** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): 12 casos con mini tutorial por pasos en la UI y con el MCP, la petición exacta para el agente, prompts de ejemplo y costo orientativo en vivo. `?case=<slug>` abre uno; «Use in studio» abre el estudio con `?prompt=` precargado.
-- **Idiomas:** español por defecto e inglés con el botón del globo en la barra. La elección se guarda en la cookie `hfs-lang`, así que las URLs no cambian. Los textos viven en `web/src/lib/i18n/dictionaries.ts` y los datos bilingües (modos, portada, casos de uso) usan `l("es", "en")`. La API y el MCP siguen en inglés: la UI traduce en el cliente los presets de serie (`i18n/presets.ts`), las frases de costo (`i18n/cost.ts`) y los nombres de flujo del catálogo (`i18n/workflow.ts`). Los prompts de ejemplo y las opciones de los presets que entran al prompt se envían en inglés; en la UI las opciones se muestran traducidas.
-- **Formularios:** se generan desde el `input_schema` de cada modelo, así que cualquiera de los 82 endpoints funciona sin código específico.
-- **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave `hfs_…`. La clave nunca llega al cliente.
+- **Páginas:** Explorar, Video (Crear: texto, fotograma inicial y final, referencias · Genjutsu · Editar video ·
+  Control de movimiento), Imagen, Casos de uso, Presets, Biblioteca, Modelos y MCP.
+- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 82 endpoints funcionan sin código
+  específico.
+- **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave
+  `hfs_…`. La clave nunca llega al cliente.
+- **Casos de uso** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): `?case=<slug>` abre uno y «Usar en el
+  estudio» abre el estudio con `?prompt=` ya relleno.
+- **Idiomas:** el idioma se guarda en la cookie `hfs-lang`, así que las URLs no cambian. Los textos están en
+  `web/src/lib/i18n/dictionaries.ts` y los datos bilingües usan `l("es", "en")`. La API y el MCP siguen en inglés,
+  así que la UI traduce en el cliente los presets de serie, las frases de costo y los nombres de flujo del
+  catálogo. Los prompts de ejemplo y las opciones de los presets se envían en inglés.
 
 ## Conectar agentes (MCP)
 
@@ -51,7 +76,7 @@ Claude Code:
 ```bash
 claude mcp add hf-studio --scope user \
   -e HF_STUDIO_URL=http://127.0.0.1:8787 -e HF_STUDIO_TOKEN=hfs_… \
-  -- uv run --directory ~/projects/hf-studio hf-studio mcp
+  -- uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp
 ```
 
 Codex (`~/.codex/config.toml`):
@@ -59,7 +84,7 @@ Codex (`~/.codex/config.toml`):
 ```toml
 [mcp_servers.hf-studio]
 command = "uv"
-args = ["run", "--directory", "/home/jjat00/projects/hf-studio", "hf-studio", "mcp"]
+args = ["run", "--directory", "/ruta/absoluta/a/hf-studio", "hf-studio", "mcp"]
 env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }
 ```
 
@@ -127,10 +152,12 @@ uv run pytest            # Higgsfield simulado con httpx.MockTransport: no gasta
 uv run ruff check src tests
 ```
 
-## Skills de producción de Higgsfield (TouchDesigner, Blender…)
+## Revisiones
 
-No pasan por la API de generación: son integraciones locales que se usan con el MCP de Higgsfield
-(`claude.ai Higgsfield`) más un servidor MCP local por programa. `/use-touchdesigner` está instalado
-en Windows (`%USERPROFILE%\.higgsfield\touch-designer-mcp-client`) y registrado como
-`higgsfield-use-touch-designer` en Claude Code y en Codex. Usa el Node de Windows porque WSL está en
-modo NAT y TouchDesigner escucha en el `127.0.0.1:9981` de Windows.
+El código pasó por revisiones adversariales con Codex (gpt-6-sol) hasta un veredicto de aprobado. Están en
+[`docs/revisiones/`](docs/revisiones/).
+
+## Aviso
+
+Proyecto personal, no afiliado a Higgsfield. Usa su API pública con tu propia clave y tus créditos. Higgsfield y los
+nombres de los modelos pertenecen a sus dueños.

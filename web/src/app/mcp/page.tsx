@@ -8,12 +8,12 @@ const claude = (comment: string) => `uv run hf-studio create-key claude-code   $
 
 claude mcp add hf-studio --scope user \\
   -e HF_STUDIO_URL=http://127.0.0.1:8787 -e HF_STUDIO_TOKEN=hfs_… \\
-  -- uv run --directory ~/projects/hf-studio hf-studio mcp`;
+  -- uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp`;
 
 const CODEX = `# ~/.codex/config.toml
 [mcp_servers.hf-studio]
 command = "uv"
-args = ["run", "--directory", "/home/jjat00/projects/hf-studio", "hf-studio", "mcp"]
+args = ["run", "--directory", "/ruta/absoluta/a/hf-studio", "hf-studio", "mcp"]
 env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }`;
 
 const TOOLS = [
