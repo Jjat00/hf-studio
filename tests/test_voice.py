@@ -259,3 +259,16 @@ async def test_cancelling_kills_ffmpeg():
         "pgrep", "-f", "^sleep 30$", stdout=asyncio.subprocess.DEVNULL
     )
     assert await pgrep.wait() == 1  # ningún proceso vivo
+
+
+async def test_one_quote_cannot_pay_two_simultaneous_runs(voice_env):
+    app, http, fake, src = voice_env
+    body = {"source_generation_id": src, "start": 1, "end": 3, "voice_id": "v_demon"}
+    quote = (await http.post("/v1/voice/estimate", json=body)).json()["voice_quote"]
+    runs = await asyncio.gather(*[
+        http.post("/v1/voice/changes", json={**body, "voice_quote": quote}, headers={"Idempotency-Key": key})
+        for key in ("a", "b")
+    ])  # fmt: skip
+    assert sorted(r.status_code for r in runs) == [202, 409]
+    await asyncio.gather(*app.state.tasks)
+    assert len([c for c in fake.calls if "speech-to-speech" in c.url.path]) == 1

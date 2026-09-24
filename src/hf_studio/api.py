@@ -817,48 +817,57 @@ def create_app(
                 "quote_invalid",
                 "Missing, expired, used or mismatched voice_quote. Quote this exact request again",
             )
-        source, start, end = await voice_plan(session, owner, body)
-        if abs((end - start) - quote["seconds"]) > 0.05:
-            raise ServiceError(
-                409,
-                "cost_changed",
-                f"The segment now lasts {end - start:.2f}s, not the quoted {quote['seconds']:.2f}s. "
-                "Quote again and show the new cost",
-            )
-        active = await session.scalar(
-            select(func.count()).select_from(Job).where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
-        )
-        if active >= settings.max_active_jobs_per_client:
-            raise ServiceError(
-                429,
-                "too_many_active",
-                f"You have {active} active jobs (maximum {settings.max_active_jobs_per_client})",
-            )
-        args = {**request_args, "start": start, "end": end}
-        job = Job(
-            owner_id=owner.id,
-            model=VOICE_MODEL,
-            input=args,
-            input_hash=digest,
-            idempotency_key=idempotency_key,
-            status="in_progress",
-            submitted_at=utcnow(),
-        )
-        session.add(job)
-        try:
-            await session.commit()
-        except IntegrityError:
-            # Dos envíos simultáneos con la misma Idempotency-Key: gana el primero.
-            await session.rollback()
-            existing = await session.scalar(
-                select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
-            )
-            if existing and existing.input_hash == digest:
-                return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
-            raise ServiceError(
-                409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"
-            ) from None
+        # Reserva atómica: entre la comprobación y esta línea no hay ningún await, así que dos envíos
+        # simultáneos no pueden canjear la misma cotización. Si algo falla antes de crear el trabajo, se libera.
         quote["used"] = True
+        try:
+            source, start, end = await voice_plan(session, owner, body)
+            if abs((end - start) - quote["seconds"]) > 0.05:
+                raise ServiceError(
+                    409,
+                    "cost_changed",
+                    f"The segment now lasts {end - start:.2f}s, not the quoted {quote['seconds']:.2f}s. "
+                    "Quote again and show the new cost",
+                )
+            active = await session.scalar(
+                select(func.count()).select_from(Job).where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
+            )
+            if active >= settings.max_active_jobs_per_client:
+                raise ServiceError(
+                    429,
+                    "too_many_active",
+                    f"You have {active} active jobs (maximum {settings.max_active_jobs_per_client})",
+                )
+            args = {**request_args, "start": start, "end": end}
+            job = Job(
+                owner_id=owner.id,
+                model=VOICE_MODEL,
+                input=args,
+                input_hash=digest,
+                idempotency_key=idempotency_key,
+                status="in_progress",
+                submitted_at=utcnow(),
+            )
+            session.add(job)
+            try:
+                await session.commit()
+            except IntegrityError:
+                # Dos envíos simultáneos con la misma Idempotency-Key: gana el primero.
+                await session.rollback()
+                existing = await session.scalar(
+                    select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
+                )
+                if existing and existing.input_hash == digest:
+                    quote["used"] = False  # ese trabajo ya existía: esta petición no gasta
+                    return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
+                raise ServiceError(
+                    409,
+                    "idempotency_conflict",
+                    "This Idempotency-Key was already used for a different request",
+                ) from None
+        except BaseException:
+            quote["used"] = False
+            raise
         task = asyncio.create_task(run_voice_change(request.app, job.id, body, source, start, end))
         request.app.state.tasks.add(task)
         task.add_done_callback(request.app.state.tasks.discard)
