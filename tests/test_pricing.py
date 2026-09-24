@@ -51,3 +51,15 @@ def test_exact_estimate_keeps_discount():
     raw = {"type": "estimate", "credits": "8.568", "usd": "0.536", "discount": {"percentage": "15.00"}}
     r = normalize(raw, {}, {}, ["image_url"])
     assert r["kind"] == "exact" and r["credits"] == 8.568 and r["discount_pct"] == 15.0
+
+
+def test_rate_at_end_of_sentence_ignores_the_period():
+    # Seedance 2.5 video-edit/extend: el precio cierra la frase («$0.01284.»); antes daba un 500.
+    desc = (
+        "Token-metered pricing. Billable video tokens = ceil((input video seconds + generated video seconds) × output"
+        " width × output height × 24 fps / 1024). Video input is required. At 480p or 720p, each 1,000 video tokens"
+        " cost $0.01284. Both input and generated video durations are billable."
+    )
+    args = {"duration": 5, "resolution": "480p", "aspect_ratio": "16:9", "video_url": "https://x/v.mp4"}
+    r = approximate(desc, args, {"input_video_seconds": 5})
+    assert "$0.01284/1K" in r["basis"] and r["usd"] > 0

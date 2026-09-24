@@ -21,7 +21,7 @@ PLACEHOLDER = {
     "audio": "https://example.com/hf-studio-placeholder.wav",
 }
 SHORT_SIDE = {"480p": 480, "720p": 720, "1080p": 1080, "2k": 1440, "4k": 2160}
-MONEY = r"\$([\d.]+)"
+MONEY = r"\$(\d+(?:\.\d+)?)"  # sin el punto final de la frase
 
 
 def _media_kind(key: str) -> str | None:
