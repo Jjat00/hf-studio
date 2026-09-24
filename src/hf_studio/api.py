@@ -21,6 +21,7 @@ from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
 from .db import TERMINAL, ApiClient, Job, Upload, hash_token, init_db, make_engine, make_sessionmaker, utcnow
 from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
+from .pricing import fill_placeholders, normalize
 from .service import ServiceError, check_input, create_generation, get_owned_job
 from .worker import Worker
 
@@ -52,6 +53,9 @@ class GenerationIn(BaseModel):
 class EstimateIn(BaseModel):
     model: str
     input: dict[str, Any]
+    hints: dict[str, float] = Field(
+        default_factory=dict, description="Datos que la API no puede medir, p. ej. input_video_seconds"
+    )
 
 
 def create_app(
@@ -211,8 +215,25 @@ def create_app(
 
     @app.post("/v1/estimate", tags=["generaciones"])
     async def estimate(body: EstimateIn, request: Request, _: Owner, catalog: CatalogDep) -> dict:
-        model = check_input(catalog, body.model, body.input)
-        return await request.app.state.hf.estimate(model["id"], body.input)
+        """Costo antes de generar: exacto, aproximado por fórmula o no disponible (con el motivo)."""
+        model = catalog.get(body.model)
+        if not model:
+            raise ServiceError(404, "unknown_model", f"Unknown model: {body.model}")
+        filled, placeholders = fill_placeholders(model["input_schema"], body.input)
+        check_input(catalog, model["id"], filled)
+        try:
+            raw = await request.app.state.hf.estimate(model["id"], filled)
+        except HiggsfieldError as exc:
+            if exc.kind == "auth":
+                raise
+            reason = (
+                "Higgsfield needs the real media to price this model; upload it first"
+                if placeholders
+                else f"Higgsfield could not price this request ({exc.message})"
+            )
+            return {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
+                    "basis": reason, "missing": placeholders, "description": None}  # fmt: skip
+        return normalize(raw, filled, body.hints, placeholders)
 
     @app.post("/v1/uploads", status_code=201, tags=["archivos"])
     async def upload(
