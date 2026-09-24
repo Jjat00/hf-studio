@@ -21,6 +21,12 @@ uv run hf-studio serve        # http://127.0.0.1:8787  ·  docs interactivas en 
 
 Otros comandos: `hf-studio list-keys`, `hf-studio revoke-key NOMBRE`, `hf-studio sync-catalog`.
 
+## Arranque rápido
+
+```bash
+./dev.sh     # valida la clave, arranca la API en :8787 y la UI en :3000
+```
+
 ## UI web (`web/`)
 
 Next.js 16 con el look de Higgsfield: Inter con eje óptico (hace de Inter Display), Space Grotesk 700 en mayúsculas para titulares, superficies «cool» `#131416` y lima `#d1fe17`. Los valores se midieron en higgsfield.ai el 2026-09-24. El logo, el nombre y las ilustraciones son propios: las imágenes se generaron con la herramienta de imágenes de Codex.
