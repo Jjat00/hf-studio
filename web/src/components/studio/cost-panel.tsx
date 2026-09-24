@@ -81,7 +81,7 @@ export function CostPanel({
       <div className="flex items-center justify-between gap-3">
         <span className="text-[13px] text-fg-3">{t.cost.estimated}</span>
         {estimate?.description && (
-          <span title={estimate.description} className="cursor-help text-fg-3 hover:text-fg-2">
+          <span title={t.empty.externalNote ? `${t.empty.externalNote}: ${estimate.description}` : estimate.description} className="cursor-help text-fg-3 hover:text-fg-2">
             <Info className="size-4" />
           </span>
         )}

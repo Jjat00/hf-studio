@@ -26,7 +26,10 @@ export function EmptyState({ empty, art, notes }: { empty: Empty; art: string; n
       </div>
       {notes && notes.length > 0 && (
         <div className="mt-12 w-full max-w-3xl rounded-card border border-line bg-surface-2 p-5">
-          <p className="mb-2 text-sm font-semibold">{t.empty.modelNotes}</p>
+          <p className="mb-2 text-sm font-semibold">
+            {t.empty.modelNotes}
+            {t.empty.externalNote && <span className="font-normal text-fg-3"> · {t.empty.externalNote}</span>}
+          </p>
           <ul className="list-disc space-y-1 pl-5 text-sm text-fg-2">
             {notes.map((n) => (
               <li key={n}>{n.replace(/\\_/g, "_")}</li>

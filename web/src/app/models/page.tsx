@@ -5,7 +5,7 @@ import { ExternalLink, ImageIcon, Search, Video } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import { workflowLabel } from "@/lib/i18n/workflow";
+import { matchesModel, workflowLabel } from "@/lib/i18n/workflow";
 import { modelLabel, studio } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
@@ -42,9 +42,9 @@ export default function ModelsPage() {
   const shown = useMemo(
     () =>
       models.filter(
-        (m) => (!cap || m.capabilities.includes(cap)) && (!q || `${m.id} ${m.title}`.toLowerCase().includes(q.toLowerCase())),
+        (m) => (!cap || m.capabilities.includes(cap)) && matchesModel(m, q, locale),
       ),
-    [models, cap, q],
+    [models, cap, q, locale],
   );
   return (
     <div className="px-4 py-8 md:px-8">
@@ -95,7 +95,7 @@ export default function ModelsPage() {
               <div className="mt-3 flex flex-wrap gap-1">
                 {m.capabilities.slice(0, 5).map((c) => (
                   <span key={c} className="rounded-md bg-glass px-1.5 py-0.5 text-[11px] text-fg-2">
-                    {c}
+                    {t.capabilities[c] ?? c}
                   </span>
                 ))}
               </div>

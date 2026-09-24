@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { Check, ChevronRight, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import { workflowLabel } from "@/lib/i18n/workflow";
+import { matchesModel, workflowLabel } from "@/lib/i18n/workflow";
 import { modelLabel } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
@@ -53,15 +53,14 @@ export function ModelPicker({
   }, [open, onClose]);
 
   const groups = useMemo(() => {
-    const term = q.toLowerCase();
-    const list = models.filter((m) => !term || m.id.includes(term) || m.title.toLowerCase().includes(term));
+    const list = models.filter((m) => matchesModel(m, q.trim(), locale));
     const map = new Map<string, ModelSummary[]>();
     for (const m of list) {
       const name = modelLabel(m.title).name;
       map.set(name, [...(map.get(name) ?? []), m]);
     }
     return [...map.entries()];
-  }, [models, q]);
+  }, [models, q, locale]);
 
   if (!open) return null;
   return (

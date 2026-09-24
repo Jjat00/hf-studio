@@ -27,7 +27,7 @@ const PRESETS_ES: Record<string, PresetEs> = {
     placeholders: { subject: "un barista sirviendo arte latte" },
   },
   "cinematic-establishing": {
-    title: "Plano de establecimiento cinematográfico",
+    title: "Plano de apertura cinematográfico",
     description: "Plano de apertura amplio de cualquier lugar, con movimiento de cámara y sonido ambiente.",
     labels: { place: "Lugar", move: "Cámara", resolution: "Calidad" },
     placeholders: { place: "un pueblo pesquero con niebla al amanecer" },

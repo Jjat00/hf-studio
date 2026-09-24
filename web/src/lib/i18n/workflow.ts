@@ -25,3 +25,12 @@ export function workflowLabel(workflow: string, locale: Locale) {
   const out = WORKFLOW_ES.reduce((acc, [re, to]) => acc.replace(re, to), workflow);
   return out.charAt(0).toUpperCase() + out.slice(1);
 }
+
+const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+
+/** ¿Coincide la búsqueda con el id, el título original o el flujo tal como se muestra en este idioma? */
+export function matchesModel(m: { id: string; title: string }, query: string, locale: Locale) {
+  if (!query) return true;
+  const workflow = m.title.replace(/ API$/, "").split(" — ")[1] ?? "";
+  return fold(`${m.id} ${m.title} ${workflowLabel(workflow, locale)}`).includes(fold(query));
+}

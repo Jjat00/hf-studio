@@ -35,7 +35,7 @@ export function FeatureCard({ f }: { f: Feature }) {
                   : "rounded-md bg-lime px-1.5 py-0.5 text-[13px] font-extrabold text-ink italic"
               }
             >
-              {f.badge}
+              {t.badges[f.badge]}
             </span>
           )}
         </p>

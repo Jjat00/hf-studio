@@ -38,7 +38,7 @@ const studioHref = (path: "video" | "image", tab: string, mode: string, model: s
 export const USE_CASES: UseCase[] = [
   {
     slug: "establishing-shot",
-    title: l("Plano de establecimiento cinematográfico", "Cinematic establishing shot"),
+    title: l("Plano de apertura cinematográfico", "Cinematic establishing shot"),
     tagline: l("Abre tu película, reel o landing con un plano amplio de cualquier lugar.", "Open your film, reel or landing page with a sweeping shot of any place."),
     category: "Cinematic",
     output: "video",
@@ -56,11 +56,11 @@ export const USE_CASES: UseCase[] = [
       { title: l("Itera", "Iterate"), body: l("Desde la Biblioteca, reutiliza la generación, ajusta la línea de cámara y sube a 720p o 1080p.", "From the Library, Reuse the generation, tweak the camera line and upscale to 720p or 1080p.") },
     ],
     ask: l(
-      "Hazme un plano de establecimiento de 5 segundos en 21:9 de un pueblo pesquero con niebla al amanecer. Muéstrame primero el costo.",
+      "Hazme un plano de apertura de 5 segundos en 21:9 de un pueblo pesquero con niebla al amanecer. Muéstrame primero el costo.",
       "Make me a 5 second 21:9 establishing shot of a foggy fishing village at dawn. Show me the cost first.",
     ),
     mcp: [
-      { title: l("Busca la receta", "Find the recipe"), body: l("El agente lista las recetas listas y elige la de plano de establecimiento.", "The agent lists ready-made recipes and picks the establishing-shot one."), tool: "list_presets" },
+      { title: l("Busca la receta", "Find the recipe"), body: l("El agente lista las recetas listas y elige la de plano de apertura.", "The agent lists ready-made recipes and picks the establishing-shot one."), tool: "list_presets" },
       { title: l("Cotiza", "Quote it"), body: l("Ejecuta el preset con dry_run y te muestra los créditos y los USD.", "Runs the preset with dry_run and shows you the credits and USD."), tool: "run_preset" },
       { title: l("Genera con tu OK", "Generate on your OK"), body: l("La misma llamada con dry_run: false, el quote_id de la cotización (prueba de que viste el precio) y una clave de idempotencia, para que nunca cobre dos veces.", "Same call with dry_run: false, the quote_id from the quote (proof you saw the price) and an idempotency key, so it never charges twice."), tool: "run_preset" },
       { title: l("Espera y descarga", "Wait and download"), body: l("Espera con long-poll hasta que termina y guarda el MP4 en tu proyecto.", "Long-polls until it finishes and saves the MP4 to your project."), tool: "get_generation → download_outputs" },
