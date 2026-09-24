@@ -88,8 +88,9 @@ def upload_media(path: str) -> dict:
 def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None = None) -> dict:
     """Costo de una generación sin ejecutarla. Funciona aunque falten los medios. Si el modelo cobra
     por segundos de video de entrada, pasa input_video_seconds (duración del video que subirás)."""
-    hints = {"input_video_seconds": input_video_seconds} if input_video_seconds else {}
-    return _call("POST", "/v1/estimate", json={"model": model_id, "input": input, "hints": hints})
+    return _call(
+        "POST", "/v1/estimate", json={"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
+    )
 
 
 @mcp.tool()
@@ -160,13 +161,44 @@ def recommend_models(task: str, output: str | None = None, limit: int = 5) -> di
     return _call("GET", "/v1/recommend", params=params)
 
 
+def _hints(input_video_seconds: float | None) -> dict:
+    return {"input_video_seconds": input_video_seconds} if input_video_seconds else {}
+
+
+def _require_price(estimate: dict, confirm_unknown_cost: bool) -> None:
+    """Regla del dueño: no se gasta sin un precio visible. Si falta, el usuario debe confirmarlo a sabiendas."""
+    complete = estimate.get("complete", estimate.get("usd") is not None and not estimate.get("missing"))
+    if complete or confirm_unknown_cost:
+        return
+    missing = ", ".join(estimate.get("missing") or []) or "price not available"
+    raise ToolError(
+        f"No complete price for this request ({missing}). Pass input_video_seconds with the real length of the "
+        "input video, or show the user that the cost is unknown and, only if they explicitly accept, "
+        "retry with confirm_unknown_cost=True."
+    )
+
+
 @mcp.tool()
-def generate_batch(items: list[dict], dry_run: bool = True, idempotency_key: str | None = None) -> dict:
+def generate_batch(
+    items: list[dict],
+    dry_run: bool = True,
+    idempotency_key: str | None = None,
+    input_video_seconds: float | None = None,
+    confirm_unknown_cost: bool = False,
+) -> dict:
     """Varias generaciones de una vez. items: [{model, input, count}] (count = variantes, máx. 8).
     Llama primero con dry_run=True, muestra el total al usuario y solo luego con dry_run=False,
-    reutilizando la misma idempotency_key si reintentas."""
-    headers = {} if dry_run else {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
-    return _call("POST", "/v1/generations/batch", json={"items": items, "dry_run": dry_run}, headers=headers)
+    reutilizando la misma idempotency_key si reintentas. Si los ítems parten de un video subido, pasa
+    input_video_seconds (su duración) para que el total sea completo. Sin total completo, dry_run=False
+    se rechaza salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
+    body = {"items": items, "hints": _hints(input_video_seconds)}
+    if dry_run:
+        return _call("POST", "/v1/generations/batch", json={**body, "dry_run": True})
+    _require_price(
+        _call("POST", "/v1/generations/batch", json={**body, "dry_run": True})["total"], confirm_unknown_cost
+    )
+    headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+    return _call("POST", "/v1/generations/batch", json={**body, "dry_run": False}, headers=headers)
 
 
 @mcp.tool()
@@ -202,13 +234,27 @@ def list_presets() -> dict:
 
 
 @mcp.tool()
-def run_preset(slug: str, variables: dict, dry_run: bool = True, idempotency_key: str | None = None) -> dict:
+def run_preset(
+    slug: str,
+    variables: dict,
+    dry_run: bool = True,
+    idempotency_key: str | None = None,
+    input_video_seconds: float | None = None,
+    confirm_unknown_cost: bool = False,
+) -> dict:
     """Ejecuta un preset. Variables de medios (image/images/video) llevan URLs públicas (usa upload_media).
-    Con dry_run=True devuelve la entrada final y el costo sin generar: muéstralo antes de confirmar."""
-    headers = {} if dry_run else {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
-    return _call(
-        "POST", f"/v1/presets/{slug}/run", json={"variables": variables, "dry_run": dry_run}, headers=headers
+    Con dry_run=True devuelve la entrada final y el costo sin generar: muéstralo antes de confirmar.
+    Si el preset usa un video, pasa input_video_seconds. Sin precio completo, dry_run=False se rechaza
+    salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
+    body = {"variables": variables, "hints": _hints(input_video_seconds)}
+    if dry_run:
+        return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
+    _require_price(
+        _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})["estimate"],
+        confirm_unknown_cost,
     )
+    headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+    return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": False}, headers=headers)
 
 
 @mcp.tool()
