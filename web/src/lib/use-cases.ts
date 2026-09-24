@@ -15,6 +15,8 @@ export type UseCase = {
   model: string;
   /** Entrada de ejemplo para cotizar en vivo (el costo se muestra siempre antes de generar). */
   sample: Record<string, unknown>;
+  /** Qué cubre el costo de ejemplo cuando el caso tiene varias etapas. */
+  costNote?: string;
   /** Estudio de la UI (sin el prompt): `?prompt=` se añade al usar un ejemplo. */
   uiHref?: string;
   preset?: string;
@@ -73,20 +75,22 @@ export const USE_CASES: UseCase[] = [
     art: "/art/use-cases/product-launch.webp",
     model: "higgsfield-ai/soul/v2/standard",
     sample: { prompt: "cost preview", aspect_ratio: "4:3", resolution: "1080p" },
+    costNote: "Hero image only. The 360° video is quoted separately, before you generate it.",
     uiHref: studioHref("image", "create", "text", "higgsfield-ai/soul/v2/standard"),
     preset: "hero-shot",
     ui: [
-      { title: "Generate the hero image", body: "Image › Text to image with Soul 2.0. Describe the product, the surface and the light." },
-      { title: "Pick the best frame", body: "Generate 2–3 variants and keep the one with the cleanest reflections." },
-      { title: "Animate it", body: "Open the preset Product 360 orbit and drop the image in; or Video › Start & End with the image as start frame." },
-      { title: "Check both costs", body: "The image costs cents; the 5 s video at 480p is the expensive part. Confirm before generating." },
+      { title: "Write the hero image", body: "Image › Text to image with Soul 2.0. Describe the product, the surface and the light." },
+      { title: "Check the cost, then generate", body: "Images cost cents. Generate 2–3 variants and keep the one with the cleanest reflections." },
+      { title: "Set up the video", body: "Open the preset Product 360 orbit and drop the image in. It opens at 720p: switch to 480p for a cheaper first test." },
+      { title: "Check the video cost, then generate", body: "The video is the expensive part. Its price is shown before you press Generate." },
       { title: "Export", body: "Download both from the Library for the landing page and the ad." },
     ],
     ask: "Create a hero shot of matte black wireless headphones on polished concrete, then animate it as a 360 orbit video. Quote both steps before generating.",
     mcp: [
       { title: "Quote the image", body: "Runs the hero-shot preset with dry_run.", tool: "run_preset" },
       { title: "Generate and wait", body: "Generates the image and waits for the URL.", tool: "run_preset → get_generation" },
-      { title: "Chain into video", body: "Uses the output URL as photo for product-orbit, quoted first.", tool: "run_preset (product-orbit)" },
+      { title: "Quote the video", body: "Uses the output URL as photo for product-orbit and shows you the price.", tool: "run_preset (product-orbit, dry_run)" },
+      { title: "Generate it on your OK", body: "", tool: "run_preset → get_generation" },
       { title: "Save the files", body: "Downloads the PNG and the MP4 into your repo's public folder.", tool: "download_outputs" },
     ],
     prompts: [
@@ -172,7 +176,7 @@ export const USE_CASES: UseCase[] = [
     uiHref: studioHref("video", "create", "references", "bytedance/seedance-2.0/reference-to-video"),
     preset: "character-in-scene",
     ui: [
-      { title: "Open Video › References", body: "Add 1–4 images of your character under Add elements (front, side, full body)." },
+      { title: "Open Video › References", body: "Add images of your character under Add elements (up to 9; 3–4 angles such as front, side and full body are usually enough)." },
       { title: "Describe the new scene", body: "Where they are, what they do and how the camera moves. Don't re-describe their face." },
       { title: "Generate one scene", body: "480p first. Check the cost chip." },
       { title: "Repeat for the next shot", body: "Reuse from the Library and only change the scene line." },
@@ -213,7 +217,7 @@ export const USE_CASES: UseCase[] = [
     mcp: [
       { title: "Upload both files", body: "Image and video.", tool: "upload_media ×2" },
       { title: "Quote with the video length", body: "The agent passes input_video_seconds so the price is exact.", tool: "estimate_cost" },
-      { title: "Generate on your OK", body: "Runs the dance-transfer preset.", tool: "run_preset" },
+      { title: "Generate on your OK", body: "Runs the dance-transfer preset with the same video length.", tool: "run_preset (input_video_seconds)" },
       { title: "Wait and download", body: "", tool: "get_generation → download_outputs" },
     ],
     prompts: [
@@ -236,7 +240,7 @@ export const USE_CASES: UseCase[] = [
     uiHref: studioHref("video", "genjutsu", "swap", "higgsfiled/genjutsu/object-swap/v1.0"),
     preset: "ad-multiplier",
     ui: [
-      { title: "Open Genjutsu › Objects swap", body: "Upload the original ad (4–30 s, at least 640×640)." },
+      { title: "Open Genjutsu › Objects swap", body: "Upload the original ad (4–30 s, at least 409,600 pixels per frame, e.g. 640×640)." },
       { title: "Add the new product", body: "Clean product photos, ideally on a plain background." },
       { title: "Say what to replace", body: "Point at the object: 'replace the bottle in her hand'." },
       { title: "Check the cost and generate", body: "Repeat with each product to get the variants." },
@@ -244,7 +248,7 @@ export const USE_CASES: UseCase[] = [
     ask: "Take ./ad.mp4 and make three versions swapping the bottle for each photo in ./bottles. Quote the batch, wait for my OK.",
     mcp: [
       { title: "Upload the ad and products", body: "", tool: "upload_media" },
-      { title: "Quote all variants", body: "One item per product, total cost first.", tool: "generate_batch (dry_run)" },
+      { title: "Quote all variants", body: "One item per product; passes the ad's length so the total is complete.", tool: "generate_batch (dry_run, input_video_seconds)" },
       { title: "Generate and wait", body: "", tool: "generate_batch → wait_generations" },
       { title: "Save as a preset", body: "Keep the winning setup for next campaign.", tool: "save_preset" },
     ],

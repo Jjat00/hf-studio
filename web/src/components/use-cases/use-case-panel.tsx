@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { ArrowRight, Bot, Check, Copy, Lightbulb, MonitorPlay, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { formatUsd, studio, type Estimate } from "@/lib/studio";
 import type { Channel, Step, UseCase } from "@/lib/use-cases";
 
@@ -40,14 +40,22 @@ function CostHint({ useCase }: { useCase: UseCase }) {
   }, [useCase]);
   const e = state.value;
   let text = "Checking price…";
-  if (state.failed) text = "Price shown in the studio before generating";
+  let note = useCase.costNote;
+  if (state.failed) text = "Price not available here";
   else if (e?.kind === "exact" && e.credits !== null) text = `${+e.credits.toFixed(3)} credits${e.usd !== null ? ` · ${formatUsd(e.usd)}` : ""}`;
-  else if (e?.kind === "approx" && e.usd !== null) text = `~${formatUsd(e.usd)}`;
-  else if (e) text = "Priced once your media is added";
+  else if (e?.kind === "approx" && e.usd !== null && e.missing.length === 0) text = `~${formatUsd(e.usd)}`;
+  else if (e?.usd != null) {
+    // Subtotal: aún falta un dato facturable (p. ej. la duración del video de entrada).
+    text = `From ~${formatUsd(e.usd)}`;
+    note = `Plus the ${e.missing.join(", ")}: the studio shows the full price once your media is added.`;
+  } else if (e) text = "Priced once your media is added";
+  if (state.failed || (e && e.usd == null))
+    note ??= "The studio shows the price before generating; if it can't, it asks you to confirm an unknown cost.";
   return (
     <div className="rounded-2xl border border-line bg-surface-2 px-4 py-3">
       <p className="text-[13px] text-fg-3">Example cost</p>
       <p className="mt-0.5 text-[15px] font-semibold">{text}</p>
+      {note && <p className="mt-1 text-[12px] leading-snug text-fg-3">{note}</p>}
       <p className="mt-0.5 truncate font-mono text-[11px] text-fg-4" title={useCase.model}>
         {useCase.model}
       </p>
@@ -82,21 +90,40 @@ function Steps({ steps }: { steps: Step[] }) {
 export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClose: () => void }) {
   const [channel, setChannel] = useState<Channel>(u.channels[0]);
   const close = useEffectEvent(onClose);
+  const panel = useRef<HTMLElement>(null);
+  // Diálogo modal: foco dentro, Tab atrapado, Escape cierra; al salir se devuelven foco y scroll.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
+    const opener = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    panel.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return close();
+      if (e.key !== "Tab" || !panel.current) return;
+      const items = [...panel.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")];
+      if (!items.length) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && (document.activeElement === first || !panel.current.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !panel.current.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = overflow;
+      opener?.focus?.();
     };
   }, []);
   const tryHref = (prompt?: string) => (u.uiHref ? `${u.uiHref}${prompt ? `&${new URLSearchParams({ prompt })}` : ""}` : undefined);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={u.title}>
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <aside className="thin-scrollbar relative flex h-full w-full max-w-[720px] flex-col overflow-y-auto bg-surface-1 shadow-2xl">
+      <button type="button" tabIndex={-1} aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <aside ref={panel} className="thin-scrollbar relative flex h-full w-full max-w-[720px] flex-col overflow-y-auto bg-surface-1 shadow-2xl">
         <div className="grain relative aspect-[16/8] shrink-0 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={u.art} alt="" className="absolute inset-0 size-full object-cover" />
@@ -105,6 +132,7 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
             type="button"
             onClick={onClose}
             aria-label="Close"
+            data-autofocus
             className="absolute top-4 right-4 flex size-9 items-center justify-center rounded-xl bg-black/60 text-fg backdrop-blur hover:bg-black/80"
           >
             <X className="size-4" />
@@ -178,7 +206,8 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
                   </div>
                   <Steps steps={u.mcp} />
                   <p className="text-[13px] leading-snug text-fg-3">
-                    The agent always quotes first (dry run) and waits for your OK before spending credits. Setup on the{" "}
+                    The agent quotes first (dry run) and waits for your OK. Batches and presets without a complete price are
+                    refused unless you explicitly accept an unknown cost. Setup on the{" "}
                     <Link href="/mcp" className="text-lime hover:underline">
                       MCP page
                     </Link>

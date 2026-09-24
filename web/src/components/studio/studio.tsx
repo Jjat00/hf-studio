@@ -68,8 +68,6 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [columns, setColumns] = useState(3);
   const idempotency = useRef<string | null>(null);
   const pendingValues = useRef<Record<string, unknown> | null>(null);
-  // ?prompt=… desde Use cases: se aplica una sola vez, al cargar el primer esquema que tenga prompt.
-  const initialPrompt = useRef(params.get("prompt"));
   const { items, add, loading, remove } = useGenerations();
 
   useEffect(() => {
@@ -95,8 +93,6 @@ export function Studio({ output }: { output: "video" | "image" }) {
         setErrors({});
         setFormError(null);
         const props = d.input_schema.properties ?? {};
-        const urlPrompt = props.prompt ? initialPrompt.current : null;
-        if (urlPrompt) initialPrompt.current = null;
         setValues((prev) => {
           if (pendingValues.current) {
             const v = pendingValues.current;
@@ -110,7 +106,6 @@ export function Studio({ output }: { output: "video" | "image" }) {
             if (s.enum && !s.enum.includes(v as string)) continue;
             next[k] = v;
           }
-          if (urlPrompt) next.prompt = urlPrompt;
           return next;
         });
       })
@@ -206,6 +201,19 @@ export function Studio({ output }: { output: "video" | "image" }) {
     if (!reuseId || models.length === 0) return;
     studio.get(reuseId).then(onReuseLoaded).catch(() => undefined);
   }, [reuseId, models.length]);
+
+  // ?prompt=… desde Use cases: se aplica cada vez que cambia, una vez cargado un esquema con prompt.
+  // Si también hay ?reuse=, manda la generación reutilizada.
+  const promptParam = reuseId ? null : params.get("prompt");
+  const appliedPrompt = useRef<string | null>(null);
+  const onPromptParam = useEffectEvent((p: string) => {
+    if (!detail?.input_schema.properties?.prompt || appliedPrompt.current === p) return;
+    appliedPrompt.current = p;
+    setValues((v) => ({ ...v, prompt: p }));
+  });
+  useEffect(() => {
+    if (promptParam) onPromptParam(promptParam);
+  }, [promptParam, detail]);
 
   // ?model=<id> desde el catálogo: si el modo actual no lo admite, salta al que sí.
   useEffect(() => {
