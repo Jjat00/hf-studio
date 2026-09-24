@@ -7,6 +7,7 @@ el sondeo lo gobierna el worker con estado persistido y los webhooks se piden po
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -141,8 +142,21 @@ class HiggsfieldClient:
         _raise_for(response)
         return response.json()
 
-    async def upload(self, data: bytes, content_type: str) -> str:
-        """Sube un archivo por URL prefirmada y devuelve su `public_url` para usarla como entrada."""
+    async def upload(self, data: bytes, content_type: str, attempts: int = 3) -> str:
+        """Sube un archivo por URL prefirmada y devuelve su `public_url` para usarla como entrada.
+
+        Reintenta los fallos transitorios (5xx, red): Higgsfield a veces responde 500 a
+        `generate-upload-url` durante un minuto. Subir es gratis, así que repetir no cobra nada."""
+        for attempt in range(attempts):
+            try:
+                return await self._upload_once(data, content_type)
+            except HiggsfieldError as exc:
+                if not exc.retryable or attempt == attempts - 1:
+                    raise
+                await asyncio.sleep(2**attempt)
+        raise AssertionError("unreachable")
+
+    async def _upload_once(self, data: bytes, content_type: str) -> str:
         try:
             response = await self._api.post("/files/generate-upload-url", json={"content_type": content_type})
             _raise_for(response)

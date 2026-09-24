@@ -25,6 +25,7 @@ class FakeHiggsfield:
         self.submits: list[httpx.Request] = []
         self.remote: dict[str, dict] = {}
         self.submit_mode = "ok"
+        self.upload_failures = 0  # cuántas veces responde 500 a generate-upload-url antes de funcionar
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         url, path = str(request.url), request.url.path
@@ -34,6 +35,9 @@ class FakeHiggsfield:
             return httpx.Response(200)
         assert request.headers["authorization"] == "Key kid:ksecret"
         if path == "/files/generate-upload-url":
+            if self.upload_failures:
+                self.upload_failures -= 1
+                return httpx.Response(500, json={"detail": "Internal Server Error"})
             return httpx.Response(200, json={"public_url": "https://cdn.test/in.png",
                                              "upload_url": "https://storage.test/put",
                                              "upload_headers": {"Content-Type": "image/png"}})  # fmt: skip
@@ -299,6 +303,18 @@ async def test_upload(env):
     assert r.status_code == 201 and r.json()["url"] == "https://cdn.test/in.png"
     r = await http.post("/v1/uploads", files={"file": ("a.txt", b"hola", "text/plain")})
     assert r.status_code == 415
+
+
+async def test_upload_retries_transient_higgsfield_errors(env, monkeypatch):
+    _, http, fake = env
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr("hf_studio.higgsfield.asyncio.sleep", lambda s: real_sleep(0))
+    fake.upload_failures = 2
+    r = await http.post("/v1/uploads", files={"file": ("a.png", b"\x89PNG", "image/png")})
+    assert r.status_code == 201 and fake.upload_failures == 0
+    fake.upload_failures = 5
+    r = await http.post("/v1/uploads", files={"file": ("a.png", b"\x89PNG", "image/png")})
+    assert r.status_code == 502 and fake.upload_failures == 2
 
 
 def test_single_key_and_split_credentials_build_same_header():

@@ -10,6 +10,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import threading
 import time
 import uuid
@@ -79,11 +80,21 @@ def get_model(model_id: str) -> dict:
     return _call("GET", f"/v1/models/{model_id}")
 
 
+def _local_path(path: str) -> Path:
+    """Traduce `C:\\Users\\…` o `C:/Users/…` a `/mnt/c/Users/…` cuando el MCP corre en WSL y el cliente
+    (ChatGPT o Claude Desktop de Windows) pasa rutas de Windows."""
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", path.strip())
+    if match and os.name != "nt" and Path("/mnt").is_dir():
+        drive, rest = match.groups()
+        return Path("/mnt", drive.lower(), *[p for p in re.split(r"[\\/]+", rest) if p])
+    return Path(path).expanduser()
+
+
 @mcp.tool()
 def upload_media(path: str) -> dict:
     """Sube una imagen (jpg/png/webp/gif), video mp4 o audio wav local y devuelve una URL pública
-    para usar en campos *_url / *_urls del modelo."""
-    file = Path(path).expanduser()
+    para usar en campos *_url / *_urls del modelo. Acepta rutas de Windows (C:\\...) si el MCP corre en WSL."""
+    file = _local_path(path)
     if not file.is_file():
         raise ToolError(f"No existe el archivo {file}")
     content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"

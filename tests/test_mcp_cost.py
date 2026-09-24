@@ -117,3 +117,12 @@ def test_concurrent_redeems_accept_a_single_key(monkeypatch):
     for t in threads:
         t.join()
     assert len(accepted) == 1
+
+
+def test_upload_media_accepts_windows_paths(monkeypatch):
+    monkeypatch.setattr(mcp_server.os, "name", "posix")
+    monkeypatch.setattr(mcp_server.Path, "is_dir", lambda self: True)
+    expected = mcp_server.Path("/mnt/c/Users/Jaime Jjat/Documents/a b.mp4")
+    assert mcp_server._local_path(r"C:\Users\Jaime Jjat\Documents\a b.mp4") == expected
+    assert mcp_server._local_path("c:/Users/Jaime Jjat/Documents/a b.mp4") == expected
+    assert mcp_server._local_path("/home/x/a.png") == mcp_server.Path("/home/x/a.png")
