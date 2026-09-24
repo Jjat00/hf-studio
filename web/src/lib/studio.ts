@@ -41,11 +41,11 @@ export const studio = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, input, hints }),
     }),
-  generate: (model: string, input: Record<string, unknown>, idempotencyKey: string) =>
+  generate: (model: string, input: Record<string, unknown>, idempotencyKey: string, keepSourceAudio = false) =>
     call<Generation>("/v1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ model, input }),
+      body: JSON.stringify({ model, input, keep_source_audio: keepSourceAudio }),
     }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
   get: (id: string, wait = 0) => call<Generation>(`/v1/generations/${id}${wait ? `?wait=${wait}` : ""}`),

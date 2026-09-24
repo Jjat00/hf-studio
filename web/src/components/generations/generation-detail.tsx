@@ -191,6 +191,12 @@ export function GenerationDetail({ id }: { id: string }) {
                   <dd>{sourceLabel(g.source, d.webUi)}</dd>
                 </>
               )}
+              {g.keep_source_audio && (
+                <>
+                  <dt className="text-fg-3">{d.sourceAudio}</dt>
+                  <dd>{d.sourceAudioState[g.outputs.find((o) => o.audio)?.audio ?? "pending"] ?? d.sourceAudioState.pending}</dd>
+                </>
+              )}
               <dt className="text-fg-3">{d.created}</dt>
               <dd>{new Date(g.created_at).toLocaleString(locale)}</dd>
               {g.terminal && (

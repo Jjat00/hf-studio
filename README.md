@@ -49,7 +49,7 @@ cd web && pnpm install && cd ..
 ./dev.sh                                  # API en :8787 (docs en /docs) y UI en :3000
 ```
 
-Otros comandos: `hf-studio create-key NOMBRE`, `list-keys`, `revoke-key NOMBRE`, `see-all NOMBRE [--off]`, `sync-catalog` y `serve`.
+Otros comandos: `hf-studio create-key NOMBRE`, `list-keys`, `revoke-key NOMBRE`, `see-all NOMBRE [--off]`, `keep-source-audio ID` (pone a una edición ya hecha el audio de su video de origen), `sync-catalog` y `serve`.
 Por defecto cada cliente solo ve sus generaciones; con `see-all` uno (pensado para la UI) ve y gestiona las de todos, con su origen.
 Cada cliente (la UI, Claude Code, Codex…) tiene su propia clave `hfs_…`. Las credenciales de Higgsfield solo las
 conoce la API.

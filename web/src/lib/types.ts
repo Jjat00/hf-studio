@@ -41,6 +41,8 @@ export type Output = {
   url: string;
   content_type?: string | null;
   file_url?: string;
+  /** Resultado de conservar el audio de origen: source | source_has_no_audio | mux_failed. */
+  audio?: string;
 };
 
 export type JobStatus =
@@ -61,6 +63,7 @@ export type Generation = {
   stage: string;
   terminal: boolean;
   input: Record<string, unknown>;
+  keep_source_audio?: boolean;
   outputs: Output[];
   error: string | null;
   error_kind: string | null;

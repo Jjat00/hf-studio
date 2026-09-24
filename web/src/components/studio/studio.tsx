@@ -28,7 +28,7 @@ import { probeDuration } from "@/lib/media";
 import { costShort, modelLabel, studio, StudioError, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
-import { FieldControl } from "./controls";
+import { Chip, FieldControl, SettingCard } from "./controls";
 import { EmptyState } from "./empty-state";
 import { MediaSlot } from "./media-slot";
 import { ModelPicker, ModelRow } from "./model-picker";
@@ -66,6 +66,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [submitting, setSubmitting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<"history" | "how">("how");
+  const [keepAudio, setKeepAudio] = useState(false);
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   const [columns, setColumns] = useState(3);
   const idempotency = useRef<string | null>(null);
@@ -126,6 +127,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
     .sort((a, b) => rankMedia(a.key) - rankMedia(b.key));
   const prompt = fields.find((f) => f.kind === "prompt");
   const settings = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
+  // Opción de HF Studio (no de Higgsfield): mismo criterio que audio.supports_source_audio en la API.
+  const canKeepAudio = detail?.output === "video" && "video_url" in (detail.input_schema.properties ?? {});
   const advanced = fields.filter((f) => ["text", "number", "json"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
 
   const setValue = useCallback((key: string, v: unknown) => {
@@ -186,6 +189,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
         const m = tb.modes.find((x) => x.filter(byId.get(g.model) ?? ({ id: g.model, capabilities: [], output: output } as never)));
         if (!m) continue;
         pendingValues.current = g.input;
+        setKeepAudio(!!g.keep_source_audio);
         setChosen((c) => ({ ...c, [`${tb.key}/${m.key}`]: g.model }));
         if (g.model === modelId) {
           setValues(g.input);
@@ -242,7 +246,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     setFormError(null);
     idempotency.current ??= crypto.randomUUID();
     try {
-      const g = await studio.generate(detail.id, cleanInput(values), idempotency.current);
+      const g = await studio.generate(detail.id, cleanInput(values), idempotency.current, canKeepAudio && keepAudio);
       add(g);
       setView("history");
       idempotency.current = null;
@@ -363,6 +367,20 @@ export function Studio({ output }: { output: "video" | "image" }) {
               {settings.map((f) => (
                 <FieldControl key={`${detail.id}/${f.key}`} field={f} value={values[f.key]} onChange={(v) => setValue(f.key, v)} error={errors[f.key]} />
               ))}
+
+              {canKeepAudio && (
+                <SettingCard label={t.studio.keepSourceAudio}>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Chip active={keepAudio} onClick={() => setKeepAudio(true)}>
+                      {t.controls.on}
+                    </Chip>
+                    <Chip active={!keepAudio} onClick={() => setKeepAudio(false)}>
+                      {t.controls.off}
+                    </Chip>
+                  </div>
+                  <p className="mt-2 text-xs text-fg-3">{t.studio.keepSourceAudioHint}</p>
+                </SettingCard>
+              )}
 
               {advanced.length > 0 && (
                 <details className="group rounded-2xl border border-line bg-surface-2">
