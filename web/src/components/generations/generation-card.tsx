@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, Ban, Copy, Download, Loader2, RotateCcw, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, Ban, Copy, Download, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { outputSrc, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
@@ -51,11 +51,13 @@ export function GenerationCard({
   layout,
   models,
   onReuse,
+  onDelete,
 }: {
   g: Generation;
   layout: "grid" | "list";
   models?: Map<string, ModelSummary>;
   onReuse?: (g: Generation) => void;
+  onDelete?: (id: string) => void;
 }) {
   const elapsed = useElapsed(g);
   const [busy, setBusy] = useState(false);
@@ -118,6 +120,11 @@ export function GenerationCard({
       {prompt && (
         <IconButton label="Copy prompt" onClick={() => navigator.clipboard.writeText(prompt)}>
           <Copy className="size-4" />
+        </IconButton>
+      )}
+      {onDelete && g.terminal && (
+        <IconButton label="Delete" onClick={() => onDelete(g.id)}>
+          <Trash2 className="size-4" />
         </IconButton>
       )}
       {(g.status === "pending" || g.status === "queued") && (

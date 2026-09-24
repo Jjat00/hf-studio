@@ -67,7 +67,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [columns, setColumns] = useState(3);
   const idempotency = useRef<string | null>(null);
   const pendingValues = useRef<Record<string, unknown> | null>(null);
-  const { items, add, loading } = useGenerations();
+  const { items, add, loading, remove } = useGenerations();
 
   useEffect(() => {
     studio
@@ -382,13 +382,13 @@ export function Studio({ output }: { output: "video" | "image" }) {
               style={{ "--cols": columns } as React.CSSProperties}
             >
               {history.map((g) => (
-                <GenerationCard key={g.id} g={g} layout="grid" models={byId} onReuse={reuse} />
+                <GenerationCard key={g.id} g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} />
               ))}
             </div>
           ) : (
             <div className="flex flex-col gap-3">
               {history.map((g) => (
-                <GenerationCard key={g.id} g={g} layout="list" models={byId} onReuse={reuse} />
+                <GenerationCard key={g.id} g={g} layout="list" models={byId} onReuse={reuse} onDelete={remove} />
               ))}
             </div>
           )}

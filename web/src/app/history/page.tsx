@@ -18,7 +18,7 @@ const FILTERS = [
 
 export default function HistoryPage() {
   const router = useRouter();
-  const { items, loading, error } = useGenerations();
+  const { items, loading, error, remove } = useGenerations();
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
   useEffect(() => {
@@ -71,7 +71,7 @@ export default function HistoryPage() {
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {shown.map((g) => (
-            <GenerationCard key={g.id} g={g} layout="grid" models={models} onReuse={reuse} />
+            <GenerationCard key={g.id} g={g} layout="grid" models={models} onReuse={reuse} onDelete={remove} />
           ))}
         </div>
       )}

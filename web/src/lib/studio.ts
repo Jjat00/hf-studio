@@ -25,6 +25,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       body.error?.details,
     );
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -48,6 +49,7 @@ export const studio = {
     }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
   get: (id: string) => call<Generation>(`/v1/generations/${id}`),
+  remove: (id: string) => call<void>(`/v1/generations/${id}`, { method: "DELETE" }),
   cancel: (id: string) => call<Generation>(`/v1/generations/${id}/cancel`, { method: "POST" }),
   upload: async (file: File) => {
     const form = new FormData();

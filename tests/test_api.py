@@ -322,3 +322,14 @@ async def test_check_credentials_uses_free_status_probe():
     assert all(m == "GET" and p.endswith("/status") for m, p in seen)  # nunca un POST que cobre
     await good.aclose()
     await bad.aclose()
+
+
+async def test_delete_generation(env):
+    _, http, _ = env
+    job_id = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO})).json()["id"]
+    assert (await http.delete(f"/v1/generations/{job_id}")).status_code == 409  # aún activa
+    await http.post(f"/v1/generations/{job_id}/cancel")
+    other = {"Authorization": "Bearer hfs_b"}
+    assert (await http.delete(f"/v1/generations/{job_id}", headers=other)).status_code == 404
+    assert (await http.delete(f"/v1/generations/{job_id}")).status_code == 204
+    assert (await http.get(f"/v1/generations/{job_id}")).status_code == 404

@@ -57,5 +57,14 @@ export function useGenerations() {
     [refresh],
   );
 
-  return { items, loading, error, refresh, add };
+  /** Borra del historial una generación terminada (optimista; si falla, se recarga). */
+  const remove = useCallback(
+    async (id: string) => {
+      setItems((prev) => prev.filter((g) => g.id !== id));
+      await studio.remove(id).catch(() => refresh());
+    },
+    [refresh],
+  );
+
+  return { items, loading, error, refresh, add, remove };
 }

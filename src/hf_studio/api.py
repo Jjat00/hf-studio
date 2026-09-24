@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import logging
 import mimetypes
+import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -306,6 +307,16 @@ def create_app(
             await asyncio.sleep(1)
             await session.refresh(job)
         return job_out(job)
+
+    @app.delete("/v1/generations/{job_id}", tags=["generaciones"], status_code=204)
+    async def delete_generation(job_id: str, session: Session, owner: Owner) -> None:
+        """Quita una generación terminada del historial y borra su copia local."""
+        job = await get_owned_job(session, owner, job_id)
+        if job.status not in TERMINAL:
+            raise ServiceError(409, "still_active", "Cancel the generation before deleting it")
+        await session.delete(job)
+        await session.commit()
+        shutil.rmtree(Path(settings.storage_dir) / "outputs" / job_id, ignore_errors=True)
 
     @app.post("/v1/generations/{job_id}/cancel", tags=["generaciones"])
     async def cancel(job_id: str, request: Request, session: Session, owner: Owner) -> dict:
