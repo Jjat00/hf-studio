@@ -17,6 +17,7 @@ const PRIMARY: Item[] = [
   { href: "/models", label: "Models", match: (p) => p.startsWith("/models") },
 ];
 const SECONDARY: Item[] = [
+  { href: "/video?tab=genjutsu", label: "Genjutsu", match: (p, t) => p.startsWith("/video") && t === "genjutsu" },
   { href: "/video?tab=edit", label: "Edit Video", match: (p, t) => p.startsWith("/video") && t === "edit" },
   { href: "/video?tab=motion", label: "Motion Control", match: (p, t) => p.startsWith("/video") && t === "motion" },
   { href: "/history", label: "History", match: (p) => p.startsWith("/history") },

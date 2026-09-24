@@ -23,7 +23,9 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
-import { estimateLabel, modelLabel, studio, StudioError, type Estimate } from "@/lib/studio";
+import { probeDuration } from "@/lib/media";
+import { costShort, modelLabel, studio, StudioError, type Estimate } from "@/lib/studio";
+import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { FieldControl } from "./controls";
 import { EmptyState } from "./empty-state";
@@ -59,7 +61,6 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [estimated, setEstimated] = useState<{ key: string; value: Estimate } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<"history" | "how">("history");
@@ -131,19 +132,42 @@ export function Studio({ output }: { output: "video" | "image" }) {
     setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)));
   }, []);
 
-  // Estimación de créditos con debounce; si la entrada aún no es válida, simplemente no se muestra.
-  const estimateKey = detail ? `${detail.id}:${JSON.stringify(cleanInput(values))}` : "";
-  const estimate = estimated?.key === estimateKey ? estimateLabel(estimated.value, values) : null;
+  // Duración de los videos de entrada (algunos modelos cobran por segundos de entrada).
+  const [videoSecs, setVideoSecs] = useState<Record<string, number>>({});
+  const videoUrls = media
+    .filter((f) => f.media === "video")
+    .flatMap((f) => {
+      const v = values[f.key];
+      return Array.isArray(v) ? (v as string[]) : typeof v === "string" ? [v] : [];
+    });
+  const videoKey = videoUrls.join("|");
+  useEffect(() => {
+    for (const url of videoKey ? videoKey.split("|") : []) {
+      probeDuration(url).then((secs) => secs && setVideoSecs((prev) => (prev[url] ? prev : { ...prev, [url]: secs })));
+    }
+  }, [videoKey]);
+  const hints: Record<string, number> = {};
+  if (videoUrls.length && videoUrls.every((u) => videoSecs[u])) {
+    hints.input_video_seconds = videoUrls.reduce((acc, u) => acc + videoSecs[u], 0);
+  }
+
+  // Costo antes de generar: se recalcula con debounce en cada cambio y siempre se muestra.
+  const hintsKey = JSON.stringify(hints);
+  const estimateKey = detail ? `${detail.id}|${JSON.stringify(cleanInput(values))}|${hintsKey}` : "";
+  const [estimated, setEstimated] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
+  const current = estimated?.key === estimateKey ? estimated : null;
+  const [confirmUnknown, setConfirmUnknown] = useState<string | null>(null);
   useEffect(() => {
     if (!detail) return;
+    const h = JSON.parse(hintsKey) as Record<string, number>;
     const t = setTimeout(() => {
       studio
-        .estimate(detail.id, cleanInput(values))
+        .estimate(detail.id, cleanInput(values), h)
         .then((r) => setEstimated({ key: estimateKey, value: r }))
-        .catch(() => undefined);
-    }, 700);
+        .catch((e) => setEstimated({ key: estimateKey, value: null, error: e instanceof Error ? e.message : String(e) }));
+    }, 500);
     return () => clearTimeout(t);
-  }, [detail, values, estimateKey]);
+  }, [detail, values, estimateKey, hintsKey]);
 
   function go(next: { tab?: string; mode?: string }) {
       const sp = new URLSearchParams(params.toString());
@@ -192,6 +216,12 @@ export function Studio({ output }: { output: "video" | "image" }) {
 
   async function submit() {
     if (!detail || submitting) return;
+    // Nunca se genera sin que Jaime vea el costo: si no hay precio, se pide una segunda confirmación.
+    if (!costAllowsDirectSubmit(current?.value ?? null) && confirmUnknown !== estimateKey) {
+      setConfirmUnknown(estimateKey);
+      return;
+    }
+    setConfirmUnknown(null);
     setSubmitting(true);
     setFormError(null);
     idempotency.current ??= crypto.randomUUID();
@@ -332,7 +362,19 @@ export function Studio({ output }: { output: "video" | "image" }) {
 
         <div className="sticky bottom-0 z-10 rounded-b-panel border-t border-line bg-surface-1 p-3">
           {formError && <p className="mb-2 px-1 text-sm text-danger">{formError}</p>}
-          <GenerateButton onClick={submit} busy={submitting} disabled={!detail} estimate={estimate} />
+          <CostPanel
+            loading={!!detail && !current}
+            estimate={current?.value ?? null}
+            error={current?.error}
+            needsConfirm={confirmUnknown === estimateKey}
+          />
+          <GenerateButton
+            onClick={submit}
+            busy={submitting}
+            disabled={!detail}
+            estimate={current?.value ?? null}
+            confirming={confirmUnknown === estimateKey}
+          />
         </div>
       </aside>
 
@@ -446,25 +488,33 @@ function GenerateButton({
   busy,
   disabled,
   estimate,
+  confirming,
 }: {
   onClick: () => void;
   busy: boolean;
   disabled: boolean;
-  estimate: { text: string; hint?: string } | null;
+  estimate: Estimate | null;
+  confirming: boolean;
 }) {
+  const short = costShort(estimate);
   return (
     <button
       type="button"
-      title={estimate?.hint}
       onClick={onClick}
       disabled={disabled || busy}
       className="flex h-16 w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-b from-[#e3ff4d] to-lime text-[21px] font-semibold text-ink shadow-[inset_0_-5px_0_rgba(80,100,0,0.35),0_10px_30px_-10px_rgba(209,254,23,0.45)] transition-[filter,transform] hover:brightness-105 active:translate-y-px disabled:opacity-50"
     >
-      {busy ? <Loader2 className="size-6 animate-spin" /> : "Generate"}
-      {!busy && estimate && (
+      {busy ? (
+        <Loader2 className="size-6 animate-spin" />
+      ) : confirming ? (
+        "Generate anyway"
+      ) : (
+        "Generate"
+      )}
+      {!busy && !confirming && short && (
         <span className="flex items-center gap-1 text-[19px]">
-          <Sparkles className="size-5 fill-ink" />
-          {estimate.text}
+          {estimate?.kind === "exact" && <Sparkles className="size-5 fill-ink" />}
+          {short}
         </span>
       )}
     </button>

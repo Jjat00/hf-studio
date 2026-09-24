@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { AudioLines, ImageIcon, Link2, Loader2, Plus, Video, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { probeDuration } from "@/lib/media";
 import { studio } from "@/lib/studio";
 
 type Kind = "image" | "video" | "audio";
@@ -86,6 +87,8 @@ export function MediaSlot({
       try {
         const res = await studio.upload(file);
         previews.set(res.url, URL.createObjectURL(file));
+        // Mide la duración con el archivo local (sin descargarlo de nuevo) para cotizar.
+        if (kind === "video") probeDuration(previews.get(res.url)!, res.url);
         done.push(res.url);
       } catch (e) {
         setUploadError(e instanceof Error ? e.message : "Upload failed");

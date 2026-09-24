@@ -71,6 +71,44 @@ export const VIDEO_TABS: Tab[] = [
     ],
   },
   {
+    key: "genjutsu",
+    label: "Genjutsu",
+    empty: {
+      title: "Turn one video into many",
+      steps: [
+        { title: "Add a reference video", body: "4 to 30 seconds. Its motion, timing and camera are kept." },
+        { title: "Add your elements", body: "Up to eight characters, locations or products to recast the scene." },
+        { title: "Generate", body: "Recast the motion, or swap specific elements while keeping the rest untouched." },
+      ],
+    },
+    modes: [
+      {
+        key: "motion",
+        label: "Motion transfer",
+        icon: "move",
+        defaultModel: "higgsfiled/genjutsu/motion-transfer/v1.0",
+        filter: (m) => m.id.includes("genjutsu/motion-transfer"),
+        hero: { title: "Higgsfield Genjutsu", subtitle: "Reality manipulation · recast the motion", tone: "lime", art: "/art/references.webp" },
+        labels: {
+          video_url: ["Add a reference video", "to extract motion · 4–30 seconds"],
+          image_urls: ["Add your elements", "Characters, locations or products · up to 8"],
+        },
+      },
+      {
+        key: "swap",
+        label: "Objects swap",
+        icon: "swap",
+        defaultModel: "higgsfiled/genjutsu/object-swap/v1.0",
+        filter: (m) => m.id.includes("genjutsu/object-swap"),
+        hero: { title: "Higgsfield Genjutsu", subtitle: "Reality manipulation · swap one element, keep the rest", tone: "violet", art: "/art/object-swap.webp" },
+        labels: {
+          video_url: ["Add a reference video", "4–30 seconds · at least 640×640 px per frame"],
+          image_urls: ["Add the new object", "Product, outfit or prop to swap in · up to 8"],
+        },
+      },
+    ],
+  },
+  {
     key: "edit",
     label: "Edit Video",
     empty: {
@@ -100,18 +138,6 @@ export const VIDEO_TABS: Tab[] = [
         hero: { title: "Video extend", subtitle: "Continue the shot where it ended", tone: "amber", art: "/art/video-extend.webp" },
         labels: { video_url: ["Add a video to extend", "The new footage continues from its last frame"] },
       },
-      {
-        key: "swap",
-        label: "Objects swap",
-        icon: "swap",
-        defaultModel: "higgsfiled/genjutsu/object-swap/v1.0",
-        filter: (m) => has(m, "object-swap"),
-        hero: { title: "Higgsfield Genjutsu", subtitle: "Reality manipulation · swap one element, keep the rest", tone: "violet", art: "/art/object-swap.webp" },
-        labels: {
-          video_url: ["Add a reference video", "Video duration: 4–30 seconds"],
-          image_urls: ["Add the new object", "Product, outfit or prop to swap in"],
-        },
-      },
     ],
   },
   {
@@ -131,7 +157,7 @@ export const VIDEO_TABS: Tab[] = [
         label: "Motion transfer",
         icon: "move",
         defaultModel: "kling-video/v3/motion-control/std",
-        filter: (m) => /motion-control|motion-transfer/.test(m.id),
+        filter: (m) => m.id.includes("motion-control"),
         hero: { title: "Motion control", subtitle: "Control motion with video references", tone: "lime", art: "/art/motion.webp" },
         labels: {
           video_url: ["Add motion to copy", "Video duration: 3–30 seconds"],
