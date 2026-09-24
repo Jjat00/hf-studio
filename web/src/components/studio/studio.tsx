@@ -175,6 +175,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
       if (next.mode) sp.set("mode", next.mode);
       sp.delete("reuse");
       sp.delete("model");
+      sp.delete("prompt"); // ya está en el formulario; si quedara, pisaría lo reutilizado
       router.replace(`${pathname}?${sp}`, { scroll: false });
   }
 

@@ -55,7 +55,7 @@ export const USE_CASES: UseCase[] = [
     mcp: [
       { title: "Find the recipe", body: "The agent lists ready-made recipes and picks the establishing-shot one.", tool: "list_presets" },
       { title: "Quote it", body: "Runs the preset with dry_run and shows you the credits and USD.", tool: "run_preset" },
-      { title: "Generate on your OK", body: "Same call with dry_run: false and an idempotency key, so it never charges twice.", tool: "run_preset" },
+      { title: "Generate on your OK", body: "Same call with dry_run: false, the quote_id from the quote (proof you saw the price) and an idempotency key, so it never charges twice.", tool: "run_preset" },
       { title: "Wait and download", body: "Long-polls until it finishes and saves the MP4 to your project.", tool: "get_generation → download_outputs" },
     ],
     prompts: [

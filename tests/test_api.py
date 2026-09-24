@@ -350,6 +350,18 @@ async def test_batch_dry_run_quotes_without_submitting(env):
     assert fake.submits == []
 
 
+async def test_negative_or_infinite_hints_are_rejected(env):
+    _, http, _ = env
+    for bad in (-4, 0):
+        r = await http.post(
+            "/v1/estimate", json={"model": T2V, "input": VIDEO, "hints": {"input_video_seconds": bad}}
+        )
+        assert r.status_code == 422
+    item = {"model": T2V, "input": VIDEO, "hints": {"input_video_seconds": -1}}
+    r = await http.post("/v1/generations/batch", json={"items": [item], "dry_run": True})
+    assert r.status_code == 422
+
+
 async def test_batch_creates_variants_and_waits_for_all(env):
     app, http, fake = env
     body = {"items": [{"model": T2V, "input": VIDEO, "count": 2}]}

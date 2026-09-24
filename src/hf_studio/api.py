@@ -58,6 +58,10 @@ HF_ERROR_STATUS = {
 }  # fmt: skip
 
 
+# Datos de cotización (p. ej. input_video_seconds): positivos y finitos, o el precio saldría falso.
+Hint = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
+
 class GenerationIn(BaseModel):
     model: str = Field(description="ID del endpoint, p. ej. bytedance/seedance-2.0/text-to-video")
     input: dict[str, Any] = Field(description="Argumentos según el input_schema del modelo")
@@ -68,12 +72,15 @@ class BatchItem(BaseModel):
     model: str
     input: dict[str, Any]
     count: int = Field(1, ge=1, le=8, description="Copias de esta entrada (variantes)")
+    hints: dict[str, Hint] = Field(
+        default_factory=dict, description="Datos de cotización propios de este ítem"
+    )
 
 
 class BatchIn(BaseModel):
     items: list[BatchItem] = Field(min_length=1, max_length=20)
     dry_run: bool = Field(False, description="Solo cotiza: devuelve costo por ítem y total, sin generar")
-    hints: dict[str, float] = Field(default_factory=dict)
+    hints: dict[str, Hint] = Field(default_factory=dict)
 
 
 class PresetIn(BaseModel):
@@ -96,13 +103,13 @@ class PresetFromGeneration(BaseModel):
 class PresetRun(BaseModel):
     variables: dict[str, Any] = Field(default_factory=dict)
     dry_run: bool = False
-    hints: dict[str, float] = Field(default_factory=dict)
+    hints: dict[str, Hint] = Field(default_factory=dict)
 
 
 class EstimateIn(BaseModel):
     model: str
     input: dict[str, Any]
-    hints: dict[str, float] = Field(
+    hints: dict[str, Hint] = Field(
         default_factory=dict, description="Datos que la API no puede medir, p. ej. input_video_seconds"
     )
 
@@ -406,7 +413,13 @@ def create_app(
         if body.dry_run:
             quotes = await asyncio.gather(
                 *(
-                    quote(request.app.state.hf, catalog, catalog.get(i.model), i.input, body.hints)
+                    quote(
+                        request.app.state.hf,
+                        catalog,
+                        catalog.get(i.model),
+                        i.input,
+                        {**body.hints, **i.hints},
+                    )
                     for i in body.items
                 )
             )

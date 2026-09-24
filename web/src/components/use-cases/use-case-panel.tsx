@@ -47,7 +47,7 @@ function CostHint({ useCase }: { useCase: UseCase }) {
   else if (e?.usd != null) {
     // Subtotal: aún falta un dato facturable (p. ej. la duración del video de entrada).
     text = `From ~${formatUsd(e.usd)}`;
-    note = `Plus the ${e.missing.join(", ")}: the studio shows the full price once your media is added.`;
+    note = `Plus the ${e.missing.join(", ")}. The studio tries to complete the price once your media is added; if it can't, it asks you to confirm an unknown cost.`;
   } else if (e) text = "Priced once your media is added";
   if (state.failed || (e && e.usd == null))
     note ??= "The studio shows the price before generating; if it can't, it asks you to confirm an unknown cost.";
@@ -206,8 +206,8 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
                   </div>
                   <Steps steps={u.mcp} />
                   <p className="text-[13px] leading-snug text-fg-3">
-                    The agent quotes first (dry run) and waits for your OK. Batches and presets without a complete price are
-                    refused unless you explicitly accept an unknown cost. Setup on the{" "}
+                    The agent quotes first and waits for your OK: HF Studio only generates with the quote_id of that exact quote,
+                    and without a complete price it also needs you to explicitly accept an unknown cost. Setup on the{" "}
                     <Link href="/mcp" className="text-lime hover:underline">
                       MCP page
                     </Link>

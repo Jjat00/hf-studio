@@ -6,6 +6,8 @@ HF_STUDIO_URL y HF_STUDIO_TOKEN (una clave `hfs_…` creada con `hf-studio creat
 
 from __future__ import annotations
 
+import hashlib
+import json
 import mimetypes
 import os
 import uuid
@@ -24,10 +26,12 @@ generate_batch hace variantes (primero dry_run=True) y wait_generations espera v
 Flujo manual: 1) find_models por capacidad (text-to-video, image-to-video, first-last-frame, video-input,
 reference-to-video, image-references, video-edit, video-extend, motion-transfer, text-to-image);
 2) get_model para leer input_schema y notes; 3) upload_media si la entrada es un archivo local;
-4) opcional estimate_cost; 5) generate; 6) get_generation con wait_seconds hasta terminal=true;
-7) download_outputs. La generación es asíncrona y cobra créditos: ANTES de cada generate llama a
-estimate_cost y dile al usuario el costo (kind exact = créditos y USD; approx = USD aproximado;
-formula/unavailable = falta subir medios o pasar hints.input_video_seconds). No repitas generate
+4) estimate_cost; 5) generate con su quote_id; 6) get_generation con wait_seconds hasta terminal=true;
+7) download_outputs. La generación es asíncrona y cobra créditos: ANTES de generar, cotiza (estimate_cost,
+o dry_run en lotes y presets), dile al usuario el costo y espera su OK (kind exact = créditos y USD;
+approx = USD aproximado; formula/unavailable = falta subir medios o pasar input_video_seconds). Generar
+exige el quote_id de esa cotización; con precio incompleto, además confirm_unknown_cost=True solo si el
+usuario acepta explícitamente un costo desconocido. No repitas generate
 tras un error ambiguo, consulta list_generations primero. Reutiliza idempotency_key al reintentar."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
@@ -87,18 +91,28 @@ def upload_media(path: str) -> dict:
 @mcp.tool()
 def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None = None) -> dict:
     """Costo de una generación sin ejecutarla. Funciona aunque falten los medios. Si el modelo cobra
-    por segundos de video de entrada, pasa input_video_seconds (duración del video que subirás)."""
-    return _call(
-        "POST", "/v1/estimate", json={"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
-    )
+    por segundos de video de entrada, pasa input_video_seconds (duración del video que subirás).
+    Devuelve quote_id: muéstrale el costo al usuario y pásalo a generate con los mismos parámetros."""
+    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
+    estimate = _call("POST", "/v1/estimate", json=payload)
+    return {**estimate, "quote_id": _quote_id(payload, estimate)}
 
 
 @mcp.tool()
 def generate(
-    model_id: str, input: dict, idempotency_key: str | None = None, allow_duplicate: bool = False
+    model_id: str,
+    input: dict,
+    quote_id: str,
+    idempotency_key: str | None = None,
+    allow_duplicate: bool = False,
+    input_video_seconds: float | None = None,
+    confirm_unknown_cost: bool = False,
 ) -> dict:
     """Encola una generación y devuelve el trabajo (id, status). No espera: usa get_generation.
-    Si reintentas tras un fallo de red, pasa la misma idempotency_key para no duplicar el cobro."""
+    Requiere el quote_id de estimate_cost con los mismos model_id, input e input_video_seconds (el
+    usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key."""
+    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
+    _require_quote(payload, _call("POST", "/v1/estimate", json=payload), quote_id, confirm_unknown_cost)
     headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
     body = {"model": model_id, "input": input, "allow_duplicate": allow_duplicate}
     return _call("POST", "/v1/generations", json=body, headers=headers)
@@ -162,43 +176,61 @@ def recommend_models(task: str, output: str | None = None, limit: int = 5) -> di
 
 
 def _hints(input_video_seconds: float | None) -> dict:
-    return {"input_video_seconds": input_video_seconds} if input_video_seconds else {}
+    return {"input_video_seconds": input_video_seconds} if input_video_seconds is not None else {}
 
 
-def _require_price(estimate: dict, confirm_unknown_cost: bool) -> None:
-    """Regla del dueño: no se gasta sin un precio visible. Si falta, el usuario debe confirmarlo a sabiendas."""
-    complete = estimate.get("complete", estimate.get("usd") is not None and not estimate.get("missing"))
-    if complete or confirm_unknown_cost:
-        return
-    missing = ", ".join(estimate.get("missing") or []) or "price not available"
-    raise ToolError(
-        f"No complete price for this request ({missing}). Pass input_video_seconds with the real length of the "
-        "input video, or show the user that the cost is unknown and, only if they explicitly accept, "
-        "retry with confirm_unknown_cost=True."
-    )
+def _complete(estimate: dict) -> bool:
+    if "complete" in estimate:
+        return bool(estimate["complete"])
+    return estimate.get("usd") is not None and not estimate.get("missing")
+
+
+def _quote_id(payload: dict, estimate: dict) -> str:
+    """Huella de la petición y de su precio: cambia si cambian los parámetros o el importe."""
+    price = {k: estimate.get(k) for k in ("usd", "credits", "complete", "missing")}
+    raw = json.dumps({"payload": payload, "price": price}, sort_keys=True, default=str)
+    return "q_" + hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _require_quote(payload: dict, estimate: dict, quote_id: str | None, confirm_unknown_cost: bool) -> None:
+    """Regla del dueño: no se gasta sin que el usuario haya visto el precio de esta misma petición.
+    Si el precio está incompleto, además hace falta su aceptación explícita (confirm_unknown_cost)."""
+    if quote_id != _quote_id(payload, estimate):
+        raise ToolError(
+            "Missing or stale quote_id. Quote this exact request first (dry_run / estimate_cost), show the "
+            "cost to the user, and call again with the returned quote_id once they agree."
+        )
+    if not _complete(estimate) and not confirm_unknown_cost:
+        missing = ", ".join(estimate.get("missing") or []) or "price not available"
+        raise ToolError(
+            f"No complete price for this request ({missing}). Pass input_video_seconds with the real length "
+            "of the input video, or tell the user the cost is unknown and, only if they explicitly accept, "
+            "retry with confirm_unknown_cost=True."
+        )
 
 
 @mcp.tool()
 def generate_batch(
     items: list[dict],
     dry_run: bool = True,
+    quote_id: str | None = None,
     idempotency_key: str | None = None,
     input_video_seconds: float | None = None,
     confirm_unknown_cost: bool = False,
 ) -> dict:
-    """Varias generaciones de una vez. items: [{model, input, count}] (count = variantes, máx. 8).
-    Llama primero con dry_run=True, muestra el total al usuario y solo luego con dry_run=False,
-    reutilizando la misma idempotency_key si reintentas. Si los ítems parten de un video subido, pasa
-    input_video_seconds (su duración) para que el total sea completo. Sin total completo, dry_run=False
-    se rechaza salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
-    body = {"items": items, "hints": _hints(input_video_seconds)}
+    """Varias generaciones de una vez. items: [{model, input, count, hints}] (count = variantes, máx. 8;
+    hints opcional por ítem, p. ej. {"input_video_seconds": 12} si cada ítem usa un video distinto).
+    input_video_seconds aplica a todos los ítems: úsalo solo si comparten el mismo video.
+    1) dry_run=True devuelve el costo por ítem, el total y quote_id: muéstraselo al usuario.
+    2) Con su OK, dry_run=False con el mismo lote y ese quote_id (y la misma idempotency_key si reintentas).
+    Sin total completo se rechaza salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
+    payload = {"items": items, "hints": _hints(input_video_seconds)}
+    quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True})
     if dry_run:
-        return _call("POST", "/v1/generations/batch", json={**body, "dry_run": True})
-    _require_price(
-        _call("POST", "/v1/generations/batch", json={**body, "dry_run": True})["total"], confirm_unknown_cost
-    )
+        return {**quote, "quote_id": _quote_id(payload, quote["total"])}
+    _require_quote(payload, quote["total"], quote_id, confirm_unknown_cost)
     headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
-    return _call("POST", "/v1/generations/batch", json={**body, "dry_run": False}, headers=headers)
+    return _call("POST", "/v1/generations/batch", json={**payload, "dry_run": False}, headers=headers)
 
 
 @mcp.tool()
@@ -238,21 +270,21 @@ def run_preset(
     slug: str,
     variables: dict,
     dry_run: bool = True,
+    quote_id: str | None = None,
     idempotency_key: str | None = None,
     input_video_seconds: float | None = None,
     confirm_unknown_cost: bool = False,
 ) -> dict:
     """Ejecuta un preset. Variables de medios (image/images/video) llevan URLs públicas (usa upload_media).
-    Con dry_run=True devuelve la entrada final y el costo sin generar: muéstralo antes de confirmar.
-    Si el preset usa un video, pasa input_video_seconds. Sin precio completo, dry_run=False se rechaza
-    salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
-    body = {"variables": variables, "hints": _hints(input_video_seconds)}
+    1) dry_run=True devuelve la entrada final, el costo y quote_id: muéstraselo al usuario.
+    2) Con su OK, dry_run=False con las mismas variables y ese quote_id. Si el preset usa un video, pasa
+    input_video_seconds. Sin precio completo se rechaza salvo confirm_unknown_cost=True."""
+    payload = {"slug": slug, "variables": variables, "hints": _hints(input_video_seconds)}
+    body = {"variables": variables, "hints": payload["hints"]}
+    quote = _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
     if dry_run:
-        return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
-    _require_price(
-        _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})["estimate"],
-        confirm_unknown_cost,
-    )
+        return {**quote, "quote_id": _quote_id(payload, quote["estimate"])}
+    _require_quote(payload, quote["estimate"], quote_id, confirm_unknown_cost)
     headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
     return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": False}, headers=headers)
 
