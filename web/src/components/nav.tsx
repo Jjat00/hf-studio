@@ -13,7 +13,8 @@ const PRIMARY: Item[] = [
   { href: "/", label: "Explore", match: (p) => p === "/" },
   { href: "/image", label: "Image", match: (p) => p.startsWith("/image") },
   { href: "/video", label: "Video", match: (p, t) => p.startsWith("/video") && (!t || t === "create") },
-  { href: "/presets", label: "Presets", badge: "New", match: (p) => p.startsWith("/presets") },
+  { href: "/use-cases", label: "Use cases", badge: "New", match: (p) => p.startsWith("/use-cases") },
+  { href: "/presets", label: "Presets", match: (p) => p.startsWith("/presets") },
   { href: "/mcp", label: "MCP", match: (p) => p.startsWith("/mcp") },
   { href: "/models", label: "Models", match: (p) => p.startsWith("/models") },
 ];

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { CopyBlock } from "@/components/copy-block";
 
 export const metadata = { title: "MCP · HF Studio" };
@@ -53,6 +54,16 @@ export default function McpPage() {
         <CopyBlock title="Claude Code" code={CLAUDE} />
         <CopyBlock title="Codex" code={CODEX} />
       </section>
+      <Link
+        href="/use-cases"
+        className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 rounded-2xl border border-lime/25 bg-lime/5 px-5 py-4 hover:bg-lime/10"
+      >
+        <span>
+          <span className="block font-semibold">Not sure what to ask?</span>
+          <span className="text-[15px] text-fg-3">Step-by-step use cases with the exact request to give your agent.</span>
+        </span>
+        <span className="shrink-0 text-sm font-semibold text-lime">Use cases →</span>
+      </Link>
       <section className="mx-auto w-full max-w-5xl">
         <h2 className="headline text-[32px]">{TOOLS.length} tools</h2>
         <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">

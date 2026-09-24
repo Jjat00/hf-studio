@@ -63,6 +63,19 @@ export default function Explore() {
         </div>
       </section>
 
+      <section className="px-4">
+        <Link
+          href="/use-cases"
+          className="flex flex-col items-start justify-between gap-4 rounded-[22px] border border-line bg-surface-2 p-6 hover:border-line-2 hover:bg-surface-3 md:flex-row md:items-center"
+        >
+          <div>
+            <p className="headline text-[26px]">What can I make?</p>
+            <p className="mt-1 text-[16px] text-fg-3">12 use cases with step-by-step guides and prompts, in the UI or through your agents.</p>
+          </div>
+          <span className="rounded-xl bg-lime px-4 py-2.5 text-sm font-semibold text-ink">Browse use cases</span>
+        </Link>
+      </section>
+
       <Recent />
     </div>
   );

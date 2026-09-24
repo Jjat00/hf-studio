@@ -68,6 +68,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [columns, setColumns] = useState(3);
   const idempotency = useRef<string | null>(null);
   const pendingValues = useRef<Record<string, unknown> | null>(null);
+  // ?prompt=… desde Use cases: se aplica una sola vez, al cargar el primer esquema que tenga prompt.
+  const initialPrompt = useRef(params.get("prompt"));
   const { items, add, loading, remove } = useGenerations();
 
   useEffect(() => {
@@ -93,6 +95,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
         setErrors({});
         setFormError(null);
         const props = d.input_schema.properties ?? {};
+        const urlPrompt = props.prompt ? initialPrompt.current : null;
+        if (urlPrompt) initialPrompt.current = null;
         setValues((prev) => {
           if (pendingValues.current) {
             const v = pendingValues.current;
@@ -106,6 +110,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
             if (s.enum && !s.enum.includes(v as string)) continue;
             next[k] = v;
           }
+          if (urlPrompt) next.prompt = urlPrompt;
           return next;
         });
       })

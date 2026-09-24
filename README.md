@@ -38,7 +38,8 @@ uv run hf-studio serve &              # API en :8787
 cd web && pnpm install && pnpm dev    # UI en :3000
 ```
 
-- **Páginas:** Explore, Video (Create Video: Text, Start & End, References · Edit Video: Edit, Extend, Objects swap · Motion Control), Image, Library, Models y MCP.
+- **Páginas:** Explore, Video (Create Video: Text, Start & End, References · Edit Video: Edit, Extend, Objects swap · Motion Control), Image, Use cases, Presets, Library, Models y MCP.
+- **Use cases** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): 12 casos con mini tutorial por pasos en la UI y con el MCP, la petición exacta para el agente, prompts de ejemplo y costo orientativo en vivo. `?case=<slug>` abre uno; «Use in studio» abre el estudio con `?prompt=` precargado.
 - **Formularios:** se generan desde el `input_schema` de cada modelo, así que cualquiera de los 82 endpoints funciona sin código específico.
 - **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave `hfs_…`. La clave nunca llega al cliente.
 
