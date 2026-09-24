@@ -23,7 +23,7 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
-import { modelLabel, studio, StudioError } from "@/lib/studio";
+import { estimateLabel, modelLabel, studio, StudioError, type Estimate } from "@/lib/studio";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { FieldControl } from "./controls";
 import { EmptyState } from "./empty-state";
@@ -59,7 +59,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [estimated, setEstimated] = useState<{ key: string; credits: string } | null>(null);
+  const [estimated, setEstimated] = useState<{ key: string; value: Estimate } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<"history" | "how">("history");
@@ -133,13 +133,13 @@ export function Studio({ output }: { output: "video" | "image" }) {
 
   // Estimación de créditos con debounce; si la entrada aún no es válida, simplemente no se muestra.
   const estimateKey = detail ? `${detail.id}:${JSON.stringify(cleanInput(values))}` : "";
-  const estimate = estimated?.key === estimateKey ? estimated.credits : null;
+  const estimate = estimated?.key === estimateKey ? estimateLabel(estimated.value, values) : null;
   useEffect(() => {
     if (!detail) return;
     const t = setTimeout(() => {
       studio
         .estimate(detail.id, cleanInput(values))
-        .then((r) => setEstimated({ key: estimateKey, credits: String(parseFloat(r.credits)) }))
+        .then((r) => setEstimated({ key: estimateKey, value: r }))
         .catch(() => undefined);
     }, 700);
     return () => clearTimeout(t);
@@ -441,10 +441,21 @@ function HeroCard({ mode, modelName, docs }: { mode: Mode; modelName: string; do
   );
 }
 
-function GenerateButton({ onClick, busy, disabled, estimate }: { onClick: () => void; busy: boolean; disabled: boolean; estimate: string | null }) {
+function GenerateButton({
+  onClick,
+  busy,
+  disabled,
+  estimate,
+}: {
+  onClick: () => void;
+  busy: boolean;
+  disabled: boolean;
+  estimate: { text: string; hint?: string } | null;
+}) {
   return (
     <button
       type="button"
+      title={estimate?.hint}
       onClick={onClick}
       disabled={disabled || busy}
       className="flex h-16 w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-b from-[#e3ff4d] to-lime text-[21px] font-semibold text-ink shadow-[inset_0_-5px_0_rgba(80,100,0,0.35),0_10px_30px_-10px_rgba(209,254,23,0.45)] transition-[filter,transform] hover:brightness-105 active:translate-y-px disabled:opacity-50"
@@ -453,7 +464,7 @@ function GenerateButton({ onClick, busy, disabled, estimate }: { onClick: () => 
       {!busy && estimate && (
         <span className="flex items-center gap-1 text-[19px]">
           <Sparkles className="size-5 fill-ink" />
-          {estimate}
+          {estimate.text}
         </span>
       )}
     </button>
