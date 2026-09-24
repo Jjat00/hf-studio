@@ -65,7 +65,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [view, setView] = useState<"history" | "how">("history");
+  const [view, setView] = useState<"history" | "how">("how");
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   const [columns, setColumns] = useState(3);
   const idempotency = useRef<string | null>(null);
