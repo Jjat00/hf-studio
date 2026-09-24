@@ -140,6 +140,7 @@ async def test_full_lifecycle_text_to_video(env):
     job = (await http.get(f"/v1/generations/{job_id}")).json()
     assert job["status"] == "completed" and job["terminal"]
     out = job["outputs"][0]
+    assert "file_url" in out  # la copia local existe en cuanto el trabajo es `completed`
     assert out["kind"] == "video" and out["url"] == "https://cdn.test/out.mp4"
     assert (await http.get(out["file_url"])).content == b"MP4DATA"
     assert len(fake.submits) == 1

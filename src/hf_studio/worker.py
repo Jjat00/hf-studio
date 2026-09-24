@@ -215,10 +215,11 @@ class Worker:
             error = result.get("error")
             if status == "nsfw":
                 error = error or "Content moderation rejected the input or output (not charged)"
-            self._finish(job, status, None if status == "completed" else status, error)
+            # Primero la copia local y después el estado final: quien vea `completed` ya tiene
+            # `file_url`. Un fallo de descarga no bloquea (queda la URL remota).
             if status == "completed" and self.settings.download_outputs:
-                await session.commit()
                 await self.store_outputs(job)
+            self._finish(job, status, None if status == "completed" else status, error)
             return
         if status in ("queued", "in_progress"):
             job.status = status
