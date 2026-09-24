@@ -2,8 +2,8 @@
 
 import { BarChart3, Clock, Loader2, Maximize, Plus, Volume2, VolumeX } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
-import { studio } from "@/lib/studio";
+import { useEffect, useRef, useState } from "react";
+import { costShort, studio, type Estimate } from "@/lib/studio";
 
 const MODEL = "bytedance/seedance-2.0/text-to-video";
 const DURATIONS = [5, 8, 10, 15];
@@ -19,10 +19,23 @@ export function HeroPrompt() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = useRef<string | null>(null);
+  const input = { prompt: "cost preview", duration, aspect_ratio: ratio, generate_audio: audio, resolution: "720p" };
+  const inputKey = JSON.stringify(input);
+  const [cost, setCost] = useState<{ key: string; value: Estimate } | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      studio
+        .estimate(MODEL, JSON.parse(inputKey))
+        .then((value) => setCost({ key: inputKey, value }))
+        .catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [inputKey]);
+  const price = cost?.key === inputKey ? costShort(cost.value) : null;
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!prompt.trim() || busy) return;
+    if (!prompt.trim() || busy || !price) return; // sin precio visible no se genera
     setBusy(true);
     setError(null);
     key.current ??= crypto.randomUUID();
@@ -75,10 +88,17 @@ export function HeroPrompt() {
       </div>
       <button
         type="submit"
-        disabled={busy || !prompt.trim()}
+        disabled={busy || !prompt.trim() || !price}
         className="font-display flex h-20 min-w-30 shrink-0 items-center justify-center rounded-xl border border-white/5 bg-gradient-to-b from-[#e3ff4d] to-lime px-6 text-xs font-bold tracking-[-0.04em] text-ink uppercase shadow-[inset_0_-4px_0_rgba(80,100,0,0.3),10px_34px_24px_rgba(0,0,0,0.15)] disabled:opacity-60"
       >
-        {busy ? <Loader2 className="size-5 animate-spin" /> : "Generate"}
+        {busy ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : (
+          <span className="flex flex-col items-center leading-tight">
+            Generate
+            <span className="text-[11px] font-semibold tracking-normal normal-case opacity-70">{price ?? "…"}</span>
+          </span>
+        )}
       </button>
     </form>
   );

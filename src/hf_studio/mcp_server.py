@@ -22,8 +22,10 @@ Flujo: 1) find_models por capacidad (text-to-video, image-to-video, first-last-f
 reference-to-video, image-references, video-edit, video-extend, motion-transfer, text-to-image);
 2) get_model para leer input_schema y notes; 3) upload_media si la entrada es un archivo local;
 4) opcional estimate_cost; 5) generate; 6) get_generation con wait_seconds hasta terminal=true;
-7) download_outputs. La generación es asíncrona y cobra créditos: no repitas generate tras un
-error ambiguo, consulta list_generations primero. Reutiliza idempotency_key al reintentar."""
+7) download_outputs. La generación es asíncrona y cobra créditos: ANTES de cada generate llama a
+estimate_cost y dile al usuario el costo (kind exact = créditos y USD; approx = USD aproximado;
+formula/unavailable = falta subir medios o pasar hints.input_video_seconds). No repitas generate
+tras un error ambiguo, consulta list_generations primero. Reutiliza idempotency_key al reintentar."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
 
@@ -80,9 +82,11 @@ def upload_media(path: str) -> dict:
 
 
 @mcp.tool()
-def estimate_cost(model_id: str, input: dict) -> dict:
-    """Estima créditos y USD de una generación sin ejecutarla."""
-    return _call("POST", "/v1/estimate", json={"model": model_id, "input": input})
+def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None = None) -> dict:
+    """Costo de una generación sin ejecutarla. Funciona aunque falten los medios. Si el modelo cobra
+    por segundos de video de entrada, pasa input_video_seconds (duración del video que subirás)."""
+    hints = {"input_video_seconds": input_video_seconds} if input_video_seconds else {}
+    return _call("POST", "/v1/estimate", json={"model": model_id, "input": input, "hints": hints})
 
 
 @mcp.tool()
