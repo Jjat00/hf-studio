@@ -216,8 +216,8 @@ export const USE_CASES: UseCase[] = [
     ask: "Make my mascot in ./mascot.png do the dance in ./dance.mp4. Keep the original sound. Tell me the cost first.",
     mcp: [
       { title: "Upload both files", body: "Image and video.", tool: "upload_media ×2" },
-      { title: "Quote with the video length", body: "The agent passes input_video_seconds so the price is exact.", tool: "estimate_cost" },
-      { title: "Generate on your OK", body: "Runs the dance-transfer preset with the same video length.", tool: "run_preset (input_video_seconds)" },
+      { title: "Quote with the video length", body: "Runs the dance-transfer preset as a dry run with input_video_seconds, so the price is exact.", tool: "run_preset (dry_run, input_video_seconds)" },
+      { title: "Generate on your OK", body: "Same call with dry_run: false and the quote_id it returned.", tool: "run_preset (quote_id)" },
       { title: "Wait and download", body: "", tool: "get_generation → download_outputs" },
     ],
     prompts: [

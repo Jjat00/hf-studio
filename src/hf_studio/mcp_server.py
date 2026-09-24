@@ -10,6 +10,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,8 @@ reference-to-video, image-references, video-edit, video-extend, motion-transfer,
 7) download_outputs. La generación es asíncrona y cobra créditos: ANTES de generar, cotiza (estimate_cost,
 o dry_run en lotes y presets), dile al usuario el costo y espera su OK (kind exact = créditos y USD;
 approx = USD aproximado; formula/unavailable = falta subir medios o pasar input_video_seconds). Generar
-exige el quote_id de esa cotización; con precio incompleto, además confirm_unknown_cost=True solo si el
+exige el quote_id de esa cotización (un solo uso, 15 min; si reintentas tras un error, reutiliza la
+misma idempotency_key); con precio incompleto, además confirm_unknown_cost=True solo si el
 usuario acepta explícitamente un costo desconocido. No repitas generate
 tras un error ambiguo, consulta list_generations primero. Reutiliza idempotency_key al reintentar."""
 
@@ -95,7 +97,7 @@ def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None 
     Devuelve quote_id: muéstrale el costo al usuario y pásalo a generate con los mismos parámetros."""
     payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
     estimate = _call("POST", "/v1/estimate", json=payload)
-    return {**estimate, "quote_id": _quote_id(payload, estimate)}
+    return {**estimate, "quote_id": _issue_quote(payload, estimate)}
 
 
 @mcp.tool()
@@ -112,8 +114,7 @@ def generate(
     Requiere el quote_id de estimate_cost con los mismos model_id, input e input_video_seconds (el
     usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key."""
     payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
-    _require_quote(payload, _call("POST", "/v1/estimate", json=payload), quote_id, confirm_unknown_cost)
-    headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
     body = {"model": model_id, "input": input, "allow_duplicate": allow_duplicate}
     return _call("POST", "/v1/generations", json=body, headers=headers)
 
@@ -185,28 +186,56 @@ def _complete(estimate: dict) -> bool:
     return estimate.get("usd") is not None and not estimate.get("missing")
 
 
-def _quote_id(payload: dict, estimate: dict) -> str:
-    """Huella de la petición y de su precio: cambia si cambian los parámetros o el importe."""
-    price = {k: estimate.get(k) for k in ("usd", "credits", "complete", "missing")}
-    raw = json.dumps({"payload": payload, "price": price}, sort_keys=True, default=str)
-    return "q_" + hashlib.sha256(raw.encode()).hexdigest()[:16]
+# Cotizaciones vistas por el usuario, de un solo uso: quote_id → petición, precio, vencimiento y clave usada.
+QUOTE_TTL = 15 * 60
+_quotes: dict[str, dict] = {}
 
 
-def _require_quote(payload: dict, estimate: dict, quote_id: str | None, confirm_unknown_cost: bool) -> None:
+def _fingerprint(payload: dict) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _issue_quote(payload: dict, estimate: dict) -> str:
+    now = time.monotonic()
+    for qid in [q for q, v in _quotes.items() if v["expires"] < now]:
+        del _quotes[qid]
+    qid = "q_" + uuid.uuid4().hex[:16]
+    _quotes[qid] = {
+        "request": _fingerprint(payload),
+        "estimate": estimate,
+        "expires": now + QUOTE_TTL,
+        "key": None,
+    }
+    return qid
+
+
+def _redeem_quote(
+    payload: dict, quote_id: str | None, idempotency_key: str | None, confirm_unknown_cost: bool
+) -> str:
     """Regla del dueño: no se gasta sin que el usuario haya visto el precio de esta misma petición.
-    Si el precio está incompleto, además hace falta su aceptación explícita (confirm_unknown_cost)."""
-    if quote_id != _quote_id(payload, estimate):
+    Cada cotización sirve para una sola ejecución; reintentar con la misma clave no vuelve a cobrar.
+    Devuelve la clave de idempotencia que debe usarse."""
+    q = _quotes.get(quote_id or "")
+    if not q or q["expires"] < time.monotonic() or q["request"] != _fingerprint(payload):
         raise ToolError(
-            "Missing or stale quote_id. Quote this exact request first (dry_run / estimate_cost), show the "
-            "cost to the user, and call again with the returned quote_id once they agree."
+            "Missing, expired or mismatched quote_id. Quote this exact request first (dry_run / estimate_cost), "
+            "show the cost to the user, and call again with the returned quote_id once they agree."
         )
-    if not _complete(estimate) and not confirm_unknown_cost:
-        missing = ", ".join(estimate.get("missing") or []) or "price not available"
+    if not _complete(q["estimate"]) and not confirm_unknown_cost:
+        missing = ", ".join(q["estimate"].get("missing") or []) or "price not available"
         raise ToolError(
             f"No complete price for this request ({missing}). Pass input_video_seconds with the real length "
             "of the input video, or tell the user the cost is unknown and, only if they explicitly accept, "
             "retry with confirm_unknown_cost=True."
         )
+    key = idempotency_key or q["key"] or f"quote-{quote_id}"
+    if q["key"] and key != q["key"]:
+        raise ToolError(
+            "This quote_id was already used. To retry the same run, reuse its idempotency_key; "
+            "for a new run, quote again and get the user's OK."
+        )
+    q["key"] = key
+    return key
 
 
 @mcp.tool()
@@ -225,11 +254,10 @@ def generate_batch(
     2) Con su OK, dry_run=False con el mismo lote y ese quote_id (y la misma idempotency_key si reintentas).
     Sin total completo se rechaza salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
     payload = {"items": items, "hints": _hints(input_video_seconds)}
-    quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True})
     if dry_run:
-        return {**quote, "quote_id": _quote_id(payload, quote["total"])}
-    _require_quote(payload, quote["total"], quote_id, confirm_unknown_cost)
-    headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+        quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True})
+        return {**quote, "quote_id": _issue_quote(payload, quote["total"])}
+    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
     return _call("POST", "/v1/generations/batch", json={**payload, "dry_run": False}, headers=headers)
 
 
@@ -281,11 +309,10 @@ def run_preset(
     input_video_seconds. Sin precio completo se rechaza salvo confirm_unknown_cost=True."""
     payload = {"slug": slug, "variables": variables, "hints": _hints(input_video_seconds)}
     body = {"variables": variables, "hints": payload["hints"]}
-    quote = _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
     if dry_run:
-        return {**quote, "quote_id": _quote_id(payload, quote["estimate"])}
-    _require_quote(payload, quote["estimate"], quote_id, confirm_unknown_cost)
-    headers = {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+        quote = _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
+        return {**quote, "quote_id": _issue_quote(payload, quote["estimate"])}
+    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
     return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": False}, headers=headers)
 
 

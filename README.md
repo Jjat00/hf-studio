@@ -64,8 +64,14 @@ env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }
 
 Herramientas (15): `find_models`, `get_model`, `recommend_models`, `upload_media`, `estimate_cost`,
 `generate`, `generate_batch`, `get_generation`, `wait_generations`, `list_generations`,
-`cancel_generation`, `download_outputs`, `list_presets`, `run_preset` y `save_preset`. Las que gastan
-créditos se cotizan primero (`dry_run`), y el servidor MCP pide a los agentes que muestren el costo antes de generar. El MCP no conoce las credenciales
+`cancel_generation`, `download_outputs`, `list_presets`, `run_preset` y `save_preset`.
+
+**Nada se genera sin cotizar antes esa misma petición.** `estimate_cost`, y `generate_batch` o `run_preset`
+con `dry_run=True`, devuelven el costo y un `quote_id`. `generate`, y los lotes y presets con `dry_run=False`,
+exigen ese `quote_id` con los mismos parámetros. Cada cotización vale para una sola ejecución y dura 15 min
+(se guarda en el proceso del MCP); un reintento con la misma `idempotency_key` no vuelve a cobrar. Si el precio
+está incompleto (falta `input_video_seconds`, que en los lotes también puede ir por ítem en `hints`), hace falta
+además `confirm_unknown_cost=True`, solo cuando el usuario acepta explícitamente un costo desconocido. El MCP no conoce las credenciales
 de Higgsfield, solo su propia clave `hfs_…`.
 
 ## API REST
