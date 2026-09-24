@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { humanize, type Field } from "@/lib/schema";
+import { useI18n } from "@/components/i18n-provider";
 
 /** Tarjeta de ajuste al estilo de Higgsfield: etiqueta gris arriba, valor en blanco. */
 export function SettingCard({ label, children, error, className }: { label: string; children: React.ReactNode; error?: string; className?: string }) {
@@ -30,7 +31,8 @@ export function FieldControl({
   onChange: (v: unknown) => void;
   error?: string;
 }) {
-  const label = humanize(field.key) + (field.required ? "" : "");
+  const { t } = useI18n();
+  const label = humanize(field.key, t.controls.fields);
   switch (field.kind) {
     case "enum": {
       const many = field.options.length > 6;
@@ -46,7 +48,7 @@ export function FieldControl({
               }}
               className="w-full rounded-lg bg-surface-4 px-2.5 py-2 text-sm font-semibold outline-none"
             >
-              {!field.required && <option value="">Auto</option>}
+              {!field.required && <option value="">{t.controls.auto}</option>}
               {field.options.map((o) => (
                 <option key={String(o)} value={String(o)}>
                   {formatOption(field.key, o)}
@@ -57,7 +59,7 @@ export function FieldControl({
             <div className="flex flex-wrap gap-1.5">
               {!field.required && field.schema.default === undefined && (
                 <Chip active={value === undefined} onClick={() => onChange(undefined)}>
-                  Auto
+                  {t.controls.auto}
                 </Chip>
               )}
               {field.options.map((o) => (
@@ -101,7 +103,7 @@ export function FieldControl({
         >
           <span>
             <span className="block text-[13px] text-fg-3">{label}</span>
-            <span className="text-[15px] font-semibold">{on ? "On" : "Off"}</span>
+            <span className="text-[15px] font-semibold">{on ? t.controls.on : t.controls.off}</span>
           </span>
           <span className={clsx("relative h-6 w-10 rounded-full transition-colors", on ? "bg-lime" : "bg-surface-5")}>
             <span
@@ -121,7 +123,7 @@ export function FieldControl({
             type="number"
             value={typeof value === "number" ? value : ""}
             onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-            placeholder={field.schema.description ?? "Empty = random"}
+            placeholder={field.schema.description ?? t.controls.emptyRandom}
             className="w-full bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:text-fg-4"
           />
         </SettingCard>

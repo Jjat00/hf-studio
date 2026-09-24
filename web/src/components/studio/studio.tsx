@@ -20,6 +20,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
+import { useI18n } from "@/components/i18n-provider";
 import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
@@ -46,11 +47,12 @@ function loadDetail(id: string) {
 
 /** Recibe solo el tipo de salida: los modos llevan funciones y no pueden cruzar de servidor a cliente. */
 export function Studio({ output }: { output: "video" | "image" }) {
+  const { t, pick } = useI18n();
   const tabs = output === "video" ? VIDEO_TABS : IMAGE_TABS;
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const tab = tabs.find((t) => t.key === params.get("tab")) ?? tabs[0];
+  const tab = tabs.find((tb) => tb.key === params.get("tab")) ?? tabs[0];
   const mode = tab.modes.find((m) => m.key === params.get("mode")) ?? tab.modes[0];
 
   const [models, setModels] = useState<ModelSummary[]>([]);
@@ -180,16 +182,16 @@ export function Studio({ output }: { output: "video" | "image" }) {
   }
 
   function reuse(g: Generation) {
-      for (const t of tabs) {
-        const m = t.modes.find((x) => x.filter(byId.get(g.model) ?? ({ id: g.model, capabilities: [], output: output } as never)));
+      for (const tb of tabs) {
+        const m = tb.modes.find((x) => x.filter(byId.get(g.model) ?? ({ id: g.model, capabilities: [], output: output } as never)));
         if (!m) continue;
         pendingValues.current = g.input;
-        setChosen((c) => ({ ...c, [`${t.key}/${m.key}`]: g.model }));
+        setChosen((c) => ({ ...c, [`${tb.key}/${m.key}`]: g.model }));
         if (g.model === modelId) {
           setValues(g.input);
           pendingValues.current = null;
         }
-        go({ tab: t.key, mode: m.key });
+        go({ tab: tb.key, mode: m.key });
         window.scrollTo({ top: 0 });
         return;
       }
@@ -219,10 +221,10 @@ export function Studio({ output }: { output: "video" | "image" }) {
   // ?model=<id> desde el catálogo: si el modo actual no lo admite, salta al que sí.
   useEffect(() => {
     if (!paramModel || mode.filter(paramModel)) return;
-    for (const t of tabs) {
-      const md = t.modes.find((x) => x.filter(paramModel));
+    for (const tb of tabs) {
+      const md = tb.modes.find((x) => x.filter(paramModel));
       if (!md) continue;
-      const sp = new URLSearchParams({ tab: t.key, mode: md.key, model: paramModel.id });
+      const sp = new URLSearchParams({ tab: tb.key, mode: md.key, model: paramModel.id });
       router.replace(`${pathname}?${sp}`, { scroll: false });
       return;
     }
@@ -249,7 +251,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
         const map: Record<string, string> = {};
         for (const d of e.details) map[d.path.split("/")[0]] = d.message;
         setErrors(map);
-        setFormError(map["(root)"] ?? "Check the highlighted fields");
+        setFormError(map["(root)"] ?? t.studio.checkFields);
       } else {
         setFormError(e instanceof Error ? e.message : String(e));
       }
@@ -270,17 +272,17 @@ export function Studio({ output }: { output: "video" | "image" }) {
       {/* Panel izquierdo */}
       <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[470px]">
         <nav className="hide-scrollbar flex gap-5 overflow-x-auto px-6 pt-5">
-          {tabs.map((t) => (
+          {tabs.map((tb) => (
             <button
-              key={t.key}
+              key={tb.key}
               type="button"
-              onClick={() => go({ tab: t.key, mode: t.modes[0].key })}
+              onClick={() => go({ tab: tb.key, mode: tb.modes[0].key })}
               className={clsx(
                 "border-b-2 pb-3 text-[17px] font-medium whitespace-nowrap transition-colors",
-                t.key === tab.key ? "border-fg text-fg" : "border-transparent text-fg-3 hover:text-fg-2",
+                tb.key === tab.key ? "border-fg text-fg" : "border-transparent text-fg-3 hover:text-fg-2",
               )}
             >
-              {t.label}
+              {pick(tb.label)}
             </button>
           ))}
         </nav>
@@ -303,7 +305,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
                     )}
                   >
                     <Icon className="size-4" />
-                    <span className="truncate">{m.label}</span>
+                    <span className="truncate">{pick(m.label)}</span>
                   </button>
                 );
               })}
@@ -317,11 +319,14 @@ export function Studio({ output }: { output: "video" | "image" }) {
           ) : (
             <>
               <div className={clsx("grid gap-3", twoUp ? "grid-cols-2" : "grid-cols-1")}>
-                {media.map((f) => (
+                {media.map((f) => {
+                  const own = mode.labels?.[f.key];
+                  const [label, hint] = own ? [pick(own[0]), pick(own[1])] : (t.media.labels[f.key] ?? [f.label, f.hint]);
+                  return (
                   <MediaSlot
                     key={`${detail.id}/${f.key}`}
-                    label={mode.labels?.[f.key]?.[0] ?? f.label}
-                    hint={mode.labels?.[f.key]?.[1] ?? f.hint}
+                    label={label}
+                    hint={hint}
                     kind={f.media}
                     multiple={f.multiple}
                     max={f.max}
@@ -331,7 +336,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
                     compact={twoUp}
                     error={errors[f.key]}
                   />
-                ))}
+                  );
+                })}
               </div>
 
               {prompt && (
@@ -341,11 +347,11 @@ export function Studio({ output }: { output: "video" | "image" }) {
                     onChange={(e) => setValue("prompt", e.target.value || undefined)}
                     onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && submit()}
                     rows={4}
-                    placeholder={output === "video" ? "Describe the scene, the camera and the motion…" : "Describe the image: subject, light, lens, style…"}
+                    placeholder={output === "video" ? t.studio.placeholderVideo : t.studio.placeholderImage}
                     className="w-full resize-none bg-transparent text-[16px] leading-relaxed tracking-[-0.01em] outline-none placeholder:text-fg-4"
                   />
                   <div className="flex items-center justify-between text-xs text-fg-3">
-                    <span>{prompt.required ? "Prompt" : "Prompt · optional"}</span>
+                    <span>{prompt.required ? t.studio.prompt : t.studio.promptOptional}</span>
                     <span className="font-mono">{((values.prompt as string) ?? "").length}</span>
                   </div>
                   {errors.prompt && <p className="mt-1 text-xs text-danger">{errors.prompt}</p>}
@@ -361,7 +367,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
               {advanced.length > 0 && (
                 <details className="group rounded-2xl border border-line bg-surface-2">
                   <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-fg-2 marker:hidden">
-                    Advanced <span className="font-normal text-fg-3">({advanced.length})</span>
+                    {t.studio.advanced} <span className="font-normal text-fg-3">({advanced.length})</span>
                   </summary>
                   <div className="flex flex-col gap-2 px-2 pb-2">
                     {advanced.map((f) => (
@@ -396,10 +402,10 @@ export function Studio({ output }: { output: "video" | "image" }) {
       <section className="flex min-h-[70vh] min-w-0 flex-1 flex-col rounded-panel border border-line bg-surface-1">
         <div className="flex items-center gap-2 px-5 pt-4 pb-3">
           <ToolbarTab active={view === "history"} onClick={() => setView("history")} icon={<Folder className="size-4" />}>
-            History
+            {t.studio.history}
           </ToolbarTab>
           <ToolbarTab active={view === "how"} onClick={() => setView("how")} icon={<BookOpen className="size-4" />}>
-            How it works
+            {t.studio.howItWorks}
           </ToolbarTab>
           {view === "history" && history.length > 0 && (
             <div className="ml-auto flex items-center gap-2">
@@ -411,14 +417,14 @@ export function Studio({ output }: { output: "video" | "image" }) {
                   value={7 - columns}
                   onChange={(e) => setColumns(7 - Number(e.target.value))}
                   className="hidden w-28 md:block"
-                  aria-label="Tamaño"
+                  aria-label={t.studio.size}
                 />
               )}
               <ToolbarTab active={layout === "list"} onClick={() => setLayout("list")} icon={<Rows3 className="size-4" />}>
-                List
+                {t.studio.list}
               </ToolbarTab>
               <ToolbarTab active={layout === "grid"} onClick={() => setLayout("grid")} icon={<LayoutGrid className="size-4" />}>
-                Grid
+                {t.studio.grid}
               </ToolbarTab>
             </div>
           )}
@@ -474,6 +480,9 @@ const TONES: Record<Mode["hero"]["tone"], string> = {
 };
 
 function HeroCard({ mode, modelName, docs }: { mode: Mode; modelName: string; docs?: string }) {
+  const { t, pick } = useI18n();
+  const title = pick(mode.hero.title);
+  const subtitle = pick(mode.hero.subtitle);
   return (
     <div className="grain relative h-[196px] shrink-0 overflow-hidden rounded-2xl bg-surface-3">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -486,12 +495,12 @@ function HeroCard({ mode, modelName, docs }: { mode: Mode; modelName: string; do
           rel="noreferrer"
           className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-black/55 px-3 py-1.5 text-[14px] font-medium backdrop-blur-md hover:bg-black/70"
         >
-          <BookOpen className="size-4" /> How it works
+          <BookOpen className="size-4" /> {t.studio.howItWorks}
         </a>
       )}
       <div className="absolute bottom-4 left-4 right-4">
-        <p className="headline text-[28px] text-lime drop-shadow">{modelName ? `${mode.hero.title}` : mode.hero.title}</p>
-        <p className="mt-1 text-[15px] font-medium text-white/85">{modelName ? `${modelName} · ${mode.hero.subtitle}` : mode.hero.subtitle}</p>
+        <p className="headline text-[28px] text-lime drop-shadow">{title}</p>
+        <p className="mt-1 text-[15px] font-medium text-white/85">{modelName ? `${modelName} · ${subtitle}` : subtitle}</p>
       </div>
     </div>
   );
@@ -510,6 +519,7 @@ function GenerateButton({
   estimate: Estimate | null;
   confirming: boolean;
 }) {
+  const { t } = useI18n();
   const short = costShort(estimate);
   return (
     <button
@@ -521,9 +531,9 @@ function GenerateButton({
       {busy ? (
         <Loader2 className="size-6 animate-spin" />
       ) : confirming ? (
-        "Generate anyway"
+        t.studio.generateAnyway
       ) : (
-        "Generate"
+        t.studio.generate
       )}
       {!busy && !confirming && short && (
         <span className="flex items-center gap-1 text-[19px]">

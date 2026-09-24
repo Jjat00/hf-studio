@@ -1,7 +1,10 @@
 import { Suspense } from "react";
+import { getDict } from "@/lib/i18n/server";
 import { UseCaseGallery } from "@/components/use-cases/use-case-gallery";
 
-export const metadata = { title: "Use cases · HF Studio" };
+export async function generateMetadata() {
+  return { title: `${(await getDict()).meta.useCases} · HF Studio` };
+}
 
 export default function UseCasesPage() {
   return (

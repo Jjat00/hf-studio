@@ -3,8 +3,10 @@ import { BannerCard, FeatureCard } from "@/components/explore/feature-card";
 import { HeroPrompt } from "@/components/explore/hero-prompt";
 import { Recent } from "@/components/explore/recent";
 import { FEATURES } from "@/lib/features";
+import { getDict } from "@/lib/i18n/server";
 
-export default function Explore() {
+export default async function Explore() {
+  const t = await getDict();
   const banners = FEATURES.slice(0, 3);
   const grid = FEATURES.slice(3, 9);
   const mcp = FEATURES[9];
@@ -17,16 +19,15 @@ export default function Explore() {
           <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/25 to-black/70" />
           <div className="relative flex w-full flex-col items-center">
             <h1 className="headline max-w-4xl text-[44px] leading-[1.12] md:text-[64px]">
-              Your own AI studio.
+              {t.explore.heroTitle1}
               <br />
-              Every top model.
+              {t.explore.heroTitle2}
             </h1>
             <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-white/85">
-              From prompt to cinematic video in minutes. Every top model, your own API,
-              ready for you and your agents.
+              {t.explore.heroBody}
             </p>
             <Link href="/video" className="mt-6 rounded-xl bg-white px-6 py-3.5 text-[16px] font-semibold text-ink shadow-[inset_0_-3px_0_rgba(0,0,0,0.12)]">
-              Create Video Now
+              {t.explore.heroCta}
             </Link>
             <HeroPrompt />
           </div>
@@ -46,13 +47,13 @@ export default function Explore() {
           <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
           <div className="relative flex h-full flex-col justify-between p-9">
             <div>
-              <p className="headline text-[44px] leading-none md:text-[56px]">Your agents</p>
-              <p className="headline text-[44px] leading-none text-lime md:text-[56px]">create too</p>
+              <p className="headline text-[44px] leading-none md:text-[56px]">{t.explore.agentsTitle1}</p>
+              <p className="headline text-[44px] leading-none text-lime md:text-[56px]">{t.explore.agentsTitle2}</p>
             </div>
             <ul className="space-y-2 text-[17px] text-white/85">
-              <li>✓ Claude Code and Codex over MCP</li>
-              <li>✓ The same API this interface uses</li>
-              <li>✓ Shared history, per-client ownership</li>
+              {t.explore.agentsBullets.map((b) => (
+                <li key={b}>✓ {b}</li>
+              ))}
             </ul>
           </div>
         </Link>
@@ -69,10 +70,10 @@ export default function Explore() {
           className="flex flex-col items-start justify-between gap-4 rounded-[22px] border border-line bg-surface-2 p-6 hover:border-line-2 hover:bg-surface-3 md:flex-row md:items-center"
         >
           <div>
-            <p className="headline text-[26px]">What can I make?</p>
-            <p className="mt-1 text-[16px] text-fg-3">12 use cases with step-by-step guides and prompts, in the UI or through your agents.</p>
+            <p className="headline text-[26px]">{t.explore.useCasesTitle}</p>
+            <p className="mt-1 text-[16px] text-fg-3">{t.explore.useCasesBody}</p>
           </div>
-          <span className="rounded-xl bg-lime px-4 py-2.5 text-sm font-semibold text-ink">Browse use cases</span>
+          <span className="rounded-xl bg-lime px-4 py-2.5 text-sm font-semibold text-ink">{t.explore.useCasesCta}</span>
         </Link>
       </section>
 

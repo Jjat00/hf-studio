@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { CopyBlock } from "@/components/copy-block";
+import { getDict } from "@/lib/i18n/server";
 
 export const metadata = { title: "MCP · HF Studio" };
 
-const CLAUDE = `uv run hf-studio create-key claude-code   # save the hfs_… key
+const claude = (comment: string) => `uv run hf-studio create-key claude-code   ${comment}
 
 claude mcp add hf-studio --scope user \\
   -e HF_STUDIO_URL=http://127.0.0.1:8787 -e HF_STUDIO_TOKEN=hfs_… \\
@@ -16,24 +17,25 @@ args = ["run", "--directory", "/home/jjat00/projects/hf-studio", "hf-studio", "m
 env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }`;
 
 const TOOLS = [
-  ["find_models", "Search by capability: first-last-frame, video-input, reference-to-video…"],
-  ["get_model", "Input schema and usage notes for any model"],
-  ["upload_media", "Upload a local image, video or audio file"],
-  ["estimate_cost", "Credits and USD before you generate, plus the quote_id generate needs"],
-  ["generate", "Queue a generation with the quote_id you approved (one run per quote)"],
-  ["get_generation", "Wait until it finishes (long-poll)"],
-  ["list_generations", "History shared with this interface"],
-  ["cancel_generation", "Cancel anything that has not started yet"],
-  ["download_outputs", "Download results to a local folder"],
-  ["recommend_models", "Describe the task, get the best models with their price"],
-  ["generate_batch", "Several variants at once: dry run for the total and a quote_id, then run"],
-  ["wait_generations", "Wait for many generations in one call"],
-  ["list_presets", "Ready-made recipes and your saved presets"],
-  ["run_preset", "Fill a recipe's fields, preview cost and quote_id, then generate"],
-  ["save_preset", "Turn any generation into a reusable preset"],
+  "find_models",
+  "get_model",
+  "upload_media",
+  "estimate_cost",
+  "generate",
+  "get_generation",
+  "list_generations",
+  "cancel_generation",
+  "download_outputs",
+  "recommend_models",
+  "generate_batch",
+  "wait_generations",
+  "list_presets",
+  "run_preset",
+  "save_preset",
 ];
 
-export default function McpPage() {
+export default async function McpPage() {
+  const t = await getDict();
   return (
     <div className="flex flex-col gap-10 px-4 pb-16">
       <section className="grain relative mt-2 overflow-hidden rounded-[28px] px-6 py-24 text-center">
@@ -41,17 +43,17 @@ export default function McpPage() {
         <img src="/art/mcp.webp" alt="" className="absolute inset-0 size-full object-cover" />
         <div className="absolute inset-0 bg-black/35" />
         <div className="relative">
-          <p className="text-[26px] font-semibold tracking-[-0.02em] text-white/90">Use HF Studio MCP with</p>
+          <p className="text-[26px] font-semibold tracking-[-0.02em] text-white/90">{t.mcp.heroLead}</p>
           <h1 className="headline mt-2 bg-gradient-to-b from-[#ffb58a] to-[#e0663b] bg-clip-text text-[52px] text-transparent md:text-[88px]">
             Claude Code · Codex
           </h1>
           <p className="mx-auto mt-4 max-w-md text-[17px] leading-relaxed text-white/80">
-            Generate images and videos from your coding agents, with the same API and history as this interface.
+            {t.mcp.heroBody}
           </p>
         </div>
       </section>
       <section className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-4 lg:grid-cols-2">
-        <CopyBlock title="Claude Code" code={CLAUDE} />
+        <CopyBlock title="Claude Code" code={claude(t.mcp.saveKey)} />
         <CopyBlock title="Codex" code={CODEX} />
       </section>
       <Link
@@ -59,18 +61,18 @@ export default function McpPage() {
         className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 rounded-2xl border border-lime/25 bg-lime/5 px-5 py-4 hover:bg-lime/10"
       >
         <span>
-          <span className="block font-semibold">Not sure what to ask?</span>
-          <span className="text-[15px] text-fg-3">Step-by-step use cases with the exact request to give your agent.</span>
+          <span className="block font-semibold">{t.mcp.notSure}</span>
+          <span className="text-[15px] text-fg-3">{t.mcp.notSureBody}</span>
         </span>
-        <span className="shrink-0 text-sm font-semibold text-lime">Use cases →</span>
+        <span className="shrink-0 text-sm font-semibold text-lime">{t.mcp.useCasesLink}</span>
       </Link>
       <section className="mx-auto w-full max-w-5xl">
-        <h2 className="headline text-[32px]">{TOOLS.length} tools</h2>
+        <h2 className="headline text-[32px]">{t.mcp.tools(TOOLS.length)}</h2>
         <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
-          {TOOLS.map(([name, body]) => (
+          {TOOLS.map((name) => (
             <div key={name} className="rounded-[22px] border border-line bg-surface-2 p-5">
               <p className="font-mono text-[15px] font-semibold text-lime">{name}</p>
-              <p className="mt-2 text-[15px] leading-snug text-fg-3">{body}</p>
+              <p className="mt-2 text-[15px] leading-snug text-fg-3">{t.mcp.toolDocs[name]}</p>
             </div>
           ))}
         </div>

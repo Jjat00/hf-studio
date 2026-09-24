@@ -5,22 +5,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
+import { useI18n } from "@/components/i18n-provider";
 import { studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
-const FILTERS = [
-  { key: "all", label: "All" },
-  { key: "video", label: "Video" },
-  { key: "image", label: "Image" },
-  { key: "active", label: "In progress" },
-  { key: "failed", label: "Failed" },
-] as const;
+const FILTERS = ["all", "video", "image", "active", "failed"] as const;
 
 export default function HistoryPage() {
+  const { t } = useI18n();
   const router = useRouter();
   const { items, loading, error, remove } = useGenerations();
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
   useEffect(() => {
     studio.models().then((r) => setModels(new Map(r.models.map((m) => [m.id, m])))).catch(() => undefined);
   }, []);
@@ -42,20 +38,20 @@ export default function HistoryPage() {
 
   return (
     <div className="px-4 py-8 md:px-8">
-      <h1 className="headline text-[40px] md:text-[56px]">Library</h1>
-      <p className="mt-2 text-fg-3">Everything you and your agents have generated.</p>
+      <h1 className="headline text-[40px] md:text-[56px]">{t.history.title}</h1>
+      <p className="mt-2 text-fg-3">{t.history.subtitle}</p>
       <div className="mt-6 flex flex-wrap gap-2">
         {FILTERS.map((f) => (
           <button
-            key={f.key}
+            key={f}
             type="button"
-            onClick={() => setFilter(f.key)}
+            onClick={() => setFilter(f)}
             className={clsx(
               "h-10 rounded-xl px-4 text-[15px] font-medium transition-colors",
-              filter === f.key ? "bg-surface-4 text-fg" : "text-fg-3 hover:text-fg-2",
+              filter === f ? "bg-surface-4 text-fg" : "text-fg-3 hover:text-fg-2",
             )}
           >
-            {f.label}
+            {t.history.filters[f]}
           </button>
         ))}
       </div>
@@ -67,7 +63,7 @@ export default function HistoryPage() {
           ))}
         </div>
       ) : shown.length === 0 ? (
-        <p className="mt-16 text-center text-fg-3">Nothing here yet.</p>
+        <p className="mt-16 text-center text-fg-3">{t.history.nothing}</p>
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {shown.map((g) => (

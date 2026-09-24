@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { AudioLines, ImageIcon, Link2, Loader2, Plus, Video, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { useI18n } from "@/components/i18n-provider";
 import { probeDuration } from "@/lib/media";
 import { studio } from "@/lib/studio";
 
@@ -19,6 +20,7 @@ const ICON = { image: ImageIcon, video: Video, audio: AudioLines };
 const previews = new Map<string, string>();
 
 function Thumb({ url, kind, onRemove }: { url: string; kind: Kind; onRemove: () => void }) {
+  const { t } = useI18n();
   const src = previews.get(url) ?? url;
   return (
     <div className="group relative size-full overflow-hidden rounded-xl bg-surface-4">
@@ -35,7 +37,7 @@ function Thumb({ url, kind, onRemove }: { url: string; kind: Kind; onRemove: () 
       <button
         type="button"
         onClick={onRemove}
-        aria-label="Remove"
+        aria-label={t.media.remove}
         className="absolute top-2 right-2 flex size-7 items-center justify-center rounded-lg bg-black/60 text-white opacity-0 backdrop-blur transition-opacity group-hover:opacity-100"
       >
         <X className="size-4" />
@@ -67,6 +69,7 @@ export function MediaSlot({
   compact?: boolean;
   error?: string;
 }) {
+  const { t } = useI18n();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -91,7 +94,7 @@ export function MediaSlot({
         if (kind === "video") probeDuration(previews.get(res.url)!, res.url);
         done.push(res.url);
       } catch (e) {
-        setUploadError(e instanceof Error ? e.message : "Upload failed");
+        setUploadError(e instanceof Error ? e.message : t.media.uploadFailed);
       } finally {
         setBusy((b) => b - 1);
       }
@@ -136,9 +139,9 @@ export function MediaSlot({
       <div>
         <p className="text-[15px] font-semibold">
           {label}
-          {!required && <span className="font-normal text-fg-3"> · optional</span>}
+          {!required && <span className="font-normal text-fg-3"> · {t.media.optional}</span>}
         </p>
-        <p className="mt-1 text-[13px] leading-snug text-fg-3">{busy ? "Uploading…" : hint}</p>
+        <p className="mt-1 text-[13px] leading-snug text-fg-3">{busy ? t.media.uploading : hint}</p>
       </div>
     </div>
   );
@@ -191,7 +194,7 @@ export function MediaSlot({
               placeholder="https://…"
               className="min-w-0 flex-1 rounded-lg bg-surface-4 px-2.5 py-1.5 text-sm outline-none focus:ring-1 focus:ring-lime"
             />
-            <button className="rounded-lg bg-glass px-2.5 text-sm font-medium">Use</button>
+            <button className="rounded-lg bg-glass px-2.5 text-sm font-medium">{t.media.use}</button>
           </form>
         ) : (
           !full && (
@@ -200,7 +203,7 @@ export function MediaSlot({
               onClick={() => setPasting(true)}
               className="flex items-center gap-1 text-xs text-fg-3 hover:text-fg-2"
             >
-              <Link2 className="size-3.5" /> Paste public URL
+              <Link2 className="size-3.5" /> {t.media.pasteUrl}
             </button>
           )
         )}

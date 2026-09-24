@@ -40,6 +40,7 @@ cd web && pnpm install && pnpm dev    # UI en :3000
 
 - **Páginas:** Explore, Video (Create Video: Text, Start & End, References · Edit Video: Edit, Extend, Objects swap · Motion Control), Image, Use cases, Presets, Library, Models y MCP.
 - **Use cases** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): 12 casos con mini tutorial por pasos en la UI y con el MCP, la petición exacta para el agente, prompts de ejemplo y costo orientativo en vivo. `?case=<slug>` abre uno; «Use in studio» abre el estudio con `?prompt=` precargado.
+- **Idiomas:** español por defecto e inglés con el botón del globo en la barra. La elección se guarda en la cookie `hfs-lang`, así que las URLs no cambian. Los textos viven en `web/src/lib/i18n/dictionaries.ts` y los datos bilingües (modos, portada, casos de uso) usan `l("es", "en")`. La API y el MCP siguen en inglés: la UI traduce en el cliente los presets de serie (`i18n/presets.ts`), las frases de costo (`i18n/cost.ts`) y los nombres de flujo del catálogo (`i18n/workflow.ts`). Los prompts de ejemplo y las opciones de los presets que entran al prompt se envían en inglés; en la UI las opciones se muestran traducidas.
 - **Formularios:** se generan desde el `input_schema` de cada modelo, así que cualquiera de los 82 endpoints funciona sin código específico.
 - **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave `hfs_…`. La clave nunca llega al cliente.
 

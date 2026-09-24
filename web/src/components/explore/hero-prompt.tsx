@@ -3,6 +3,7 @@
 import { BarChart3, Clock, Loader2, Maximize, Plus, Volume2, VolumeX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/components/i18n-provider";
 import { costShort, studio, type Estimate } from "@/lib/studio";
 
 const MODEL = "bytedance/seedance-2.0/text-to-video";
@@ -11,6 +12,7 @@ const RATIOS = ["16:9", "9:16", "1:1", "21:9"];
 
 /** Barra de prompt de la portada: genera un texto a video con Seedance 2.0 y lleva al estudio. */
 export function HeroPrompt() {
+  const { t } = useI18n();
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [duration, setDuration] = useState(8);
@@ -56,7 +58,7 @@ export function HeroPrompt() {
     <form onSubmit={submit} className="pointer-events-auto mt-8 flex w-full max-w-[702px] items-end gap-3 p-3">
       <div className="min-w-0 flex-1 rounded-2xl bg-surface-3/95 p-4 backdrop-blur-md">
         <div className="flex items-start gap-3">
-          <button type="button" onClick={() => router.push("/video?tab=create&mode=frames")} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-glass" aria-label="Añadir imagen">
+          <button type="button" onClick={() => router.push("/video?tab=create&mode=frames")} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-glass" aria-label={t.heroPrompt.addImage}>
             <Plus className="size-4" />
           </button>
           <textarea
@@ -66,7 +68,7 @@ export function HeroPrompt() {
               key.current = null;
             }}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && submit()}
-            placeholder="Describe any visual idea. We will generate a video."
+            placeholder={t.heroPrompt.placeholder}
             className="hide-scrollbar h-12 min-w-0 flex-1 resize-none bg-transparent text-[16px] tracking-[-0.01em] outline-none placeholder:text-fg-3"
           />
         </div>
@@ -81,7 +83,7 @@ export function HeroPrompt() {
             <Maximize className="size-3.5" /> {ratio}
           </button>
           <button type="button" className={chip} onClick={() => setAudio(!audio)}>
-            {audio ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />} {audio ? "On" : "Off"}
+            {audio ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />} {audio ? t.heroPrompt.on : t.heroPrompt.off}
           </button>
         </div>
         {error && <p className="mt-2 text-xs text-danger">{error}</p>}
@@ -95,7 +97,7 @@ export function HeroPrompt() {
           <Loader2 className="size-5 animate-spin" />
         ) : (
           <span className="flex flex-col items-center leading-tight">
-            Generate
+            {t.heroPrompt.generate}
             <span className="text-[11px] font-semibold tracking-normal normal-case opacity-70">{price ?? "…"}</span>
           </span>
         )}

@@ -4,25 +4,23 @@ import clsx from "clsx";
 import { Bot, ImageIcon, MonitorPlay, Video } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { CATEGORIES, USE_CASES, type Channel } from "@/lib/use-cases";
+import { useI18n } from "@/components/i18n-provider";
+import { CATEGORIES, USE_CASES, type Category, type Channel } from "@/lib/use-cases";
 import { UseCasePanel } from "./use-case-panel";
 
-const CHANNELS: { key: "all" | Channel; label: string }[] = [
-  { key: "all", label: "UI + MCP" },
-  { key: "ui", label: "In the UI" },
-  { key: "mcp", label: "With agents" },
-];
+const CHANNELS = ["all", "ui", "mcp"] as const;
 
 /** Galería de casos de uso; `?case=<slug>` abre el mini tutorial (enlace compartible). */
 export function UseCaseGallery() {
+  const { t, pick } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState<Category | null>(null);
   const [channel, setChannel] = useState<"all" | Channel>("all");
   const open = USE_CASES.find((u) => u.slug === params.get("case")) ?? null;
   const shown = USE_CASES.filter(
-    (u) => (category === "All" || u.category === category) && (channel === "all" || u.channels.includes(channel)),
+    (u) => (category === null || u.category === category) && (channel === "all" || u.channels.includes(channel)),
   );
   const select = (slug: string | null) => router.replace(slug ? `${pathname}?case=${slug}` : pathname, { scroll: false });
 
@@ -31,31 +29,28 @@ export function UseCaseGallery() {
 
   return (
     <div className="px-4 py-8 md:px-8">
-      <h1 className="headline text-[40px] md:text-[56px]">Use cases</h1>
-      <p className="mt-2 max-w-2xl text-fg-3">
-        What you can make with HF Studio, from this interface or by asking Claude Code and Codex over MCP. Open any card for a
-        step-by-step guide and prompts that work.
-      </p>
+      <h1 className="headline text-[40px] md:text-[56px]">{t.useCases.title}</h1>
+      <p className="mt-2 max-w-2xl text-fg-3">{t.useCases.body}</p>
       <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="hide-scrollbar flex gap-1.5 overflow-x-auto">
-          {CATEGORIES.map((c) => (
-            <button key={c} type="button" onClick={() => setCategory(c)} className={chip(category === c)}>
-              {c}
+          {[null, ...CATEGORIES].map((c) => (
+            <button key={c ?? "all"} type="button" onClick={() => setCategory(c)} className={chip(category === c)}>
+              {t.categories[c ?? "All"]}
             </button>
           ))}
         </div>
         <div className="flex shrink-0 gap-1 rounded-xl bg-surface-2 p-1">
           {CHANNELS.map((c) => (
             <button
-              key={c.key}
+              key={c}
               type="button"
-              onClick={() => setChannel(c.key)}
+              onClick={() => setChannel(c)}
               className={clsx(
                 "h-8 rounded-lg px-3 text-sm font-medium transition-colors",
-                channel === c.key ? "bg-surface-5 text-fg" : "text-fg-3 hover:text-fg",
+                channel === c ? "bg-surface-5 text-fg" : "text-fg-3 hover:text-fg",
               )}
             >
-              {c.label}
+              {t.useCases.channels[c]}
             </button>
           ))}
         </div>
@@ -75,7 +70,7 @@ export function UseCaseGallery() {
                   className="size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
                 />
                 <span className="absolute top-3 left-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2 py-1 text-xs font-medium backdrop-blur">
-                  <Kind className="size-3.5" /> {u.category}
+                  <Kind className="size-3.5" /> {t.categories[u.category]}
                 </span>
                 <span className="absolute top-3 right-3 flex gap-1">
                   {u.channels.includes("ui") && (
@@ -90,8 +85,8 @@ export function UseCaseGallery() {
                   )}
                 </span>
               </div>
-              <p className="headline mt-4 text-[20px] tracking-[-0.03em]">{u.title}</p>
-              <p className="mt-1 text-[15px] leading-snug text-fg-3">{u.tagline}</p>
+              <p className="headline mt-4 text-[20px] tracking-[-0.03em]">{pick(u.title)}</p>
+              <p className="mt-1 text-[15px] leading-snug text-fg-3">{pick(u.tagline)}</p>
             </button>
           );
         })}

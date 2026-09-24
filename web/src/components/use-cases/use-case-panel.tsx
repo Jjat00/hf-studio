@@ -4,10 +4,13 @@ import clsx from "clsx";
 import { ArrowRight, Bot, Check, Copy, Lightbulb, MonitorPlay, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useI18n } from "@/components/i18n-provider";
+import { costMissing } from "@/lib/i18n/cost";
 import { formatUsd, studio, type Estimate } from "@/lib/studio";
 import type { Channel, Step, UseCase } from "@/lib/use-cases";
 
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+function CopyButton({ text }: { text: string }) {
+  const { t } = useI18n();
   const [done, setDone] = useState(false);
   return (
     <button
@@ -20,13 +23,15 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
       className="flex h-7 items-center gap-1.5 rounded-lg bg-glass px-2.5 text-xs font-medium text-fg-2 hover:text-fg"
     >
       {done ? <Check className="size-3.5 text-lime" /> : <Copy className="size-3.5" />}
-      {done ? "Copied" : label}
+      {done ? t.copy.copied : t.copy.copy}
     </button>
   );
 }
 
 /** Costo orientativo del ejemplo: el definitivo se muestra en el estudio o lo cotiza el agente antes de generar. */
 function CostHint({ useCase }: { useCase: UseCase }) {
+  const { t, pick, locale } = useI18n();
+  const c = t.useCases;
   const [state, setState] = useState<{ value: Estimate | null; failed: boolean }>({ value: null, failed: false });
   useEffect(() => {
     let alive = true;
@@ -39,21 +44,20 @@ function CostHint({ useCase }: { useCase: UseCase }) {
     };
   }, [useCase]);
   const e = state.value;
-  let text = "Checking price…";
-  let note = useCase.costNote;
-  if (state.failed) text = "Price not available here";
-  else if (e?.kind === "exact" && e.credits !== null) text = `${+e.credits.toFixed(3)} credits${e.usd !== null ? ` · ${formatUsd(e.usd)}` : ""}`;
+  let text = c.checkingPrice;
+  let note = useCase.costNote && pick(useCase.costNote);
+  if (state.failed) text = c.priceNA;
+  else if (e?.kind === "exact" && e.credits !== null) text = `${+e.credits.toFixed(3)} ${c.credits}${e.usd !== null ? ` · ${formatUsd(e.usd)}` : ""}`;
   else if (e?.kind === "approx" && e.usd !== null && e.missing.length === 0) text = `~${formatUsd(e.usd)}`;
   else if (e?.usd != null) {
     // Subtotal: aún falta un dato facturable (p. ej. la duración del video de entrada).
-    text = `From ~${formatUsd(e.usd)}`;
-    note = `Plus the ${e.missing.join(", ")}. The studio tries to complete the price once your media is added; if it can't, it asks you to confirm an unknown cost.`;
-  } else if (e) text = "Priced once your media is added";
-  if (state.failed || (e && e.usd == null))
-    note ??= "The studio shows the price before generating; if it can't, it asks you to confirm an unknown cost.";
+    text = c.from(formatUsd(e.usd));
+    note = c.plusMissing(costMissing(e.missing, locale));
+  } else if (e) text = c.pricedAfterMedia;
+  if (state.failed || (e && e.usd == null)) note ??= c.studioShows;
   return (
     <div className="rounded-2xl border border-line bg-surface-2 px-4 py-3">
-      <p className="text-[13px] text-fg-3">Example cost</p>
+      <p className="text-[13px] text-fg-3">{c.exampleCost}</p>
       <p className="mt-0.5 text-[15px] font-semibold">{text}</p>
       {note && <p className="mt-1 text-[12px] leading-snug text-fg-3">{note}</p>}
       <p className="mt-0.5 truncate font-mono text-[11px] text-fg-4" title={useCase.model}>
@@ -64,6 +68,7 @@ function CostHint({ useCase }: { useCase: UseCase }) {
 }
 
 function Steps({ steps }: { steps: Step[] }) {
+  const { t, pick } = useI18n();
   return (
     <ol className="relative flex flex-col gap-5">
       {steps.map((s, i) => (
@@ -73,9 +78,9 @@ function Steps({ steps }: { steps: Step[] }) {
             {i < steps.length - 1 && <span className="mt-1 w-px flex-1 bg-line-2" />}
           </div>
           <div className="min-w-0 pb-1">
-            <p className="text-[12px] font-semibold tracking-wider text-fg-3 uppercase">Step {i + 1}</p>
-            <p className="mt-0.5 text-[16px] font-semibold">{s.title}</p>
-            {s.body && <p className="mt-1 text-[15px] leading-snug text-fg-2">{s.body}</p>}
+            <p className="text-[12px] font-semibold tracking-wider text-fg-3 uppercase">{t.useCases.step(i + 1)}</p>
+            <p className="mt-0.5 text-[16px] font-semibold">{pick(s.title)}</p>
+            {s.body && <p className="mt-1 text-[15px] leading-snug text-fg-2">{pick(s.body)}</p>}
             {s.tool && (
               <p className="mt-2 inline-block rounded-lg bg-lime/10 px-2 py-1 font-mono text-[12px] text-lime">{s.tool}</p>
             )}
@@ -88,6 +93,10 @@ function Steps({ steps }: { steps: Step[] }) {
 
 /** Mini tutorial de un caso de uso: pasos en la UI o con el MCP, prompts de ejemplo y consejos. */
 export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClose: () => void }) {
+  const { t, pick } = useI18n();
+  const c = t.useCases;
+  const title = pick(u.title);
+  const ask = pick(u.ask);
   const [channel, setChannel] = useState<Channel>(u.channels[0]);
   const close = useEffectEvent(onClose);
   const panel = useRef<HTMLElement>(null);
@@ -121,7 +130,7 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
   const tryHref = (prompt?: string) => (u.uiHref ? `${u.uiHref}${prompt ? `&${new URLSearchParams({ prompt })}` : ""}` : undefined);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={u.title}>
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={title}>
       <button type="button" tabIndex={-1} aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <aside ref={panel} className="thin-scrollbar relative flex h-full w-full max-w-[720px] flex-col overflow-y-auto bg-surface-1 shadow-2xl">
         <div className="grain relative aspect-[16/8] shrink-0 overflow-hidden">
@@ -131,20 +140,20 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={c.close}
             data-autofocus
             className="absolute top-4 right-4 flex size-9 items-center justify-center rounded-xl bg-black/60 text-fg backdrop-blur hover:bg-black/80"
           >
             <X className="size-4" />
           </button>
           <div className="absolute inset-x-0 bottom-0 px-6 pb-4 md:px-8">
-            <p className="text-[13px] font-semibold tracking-wider text-lime uppercase">{u.category}</p>
-            <h2 className="headline mt-1 text-[30px] md:text-[40px]">{u.title}</h2>
+            <p className="text-[13px] font-semibold tracking-wider text-lime uppercase">{t.categories[u.category]}</p>
+            <h2 className="headline mt-1 text-[30px] md:text-[40px]">{title}</h2>
           </div>
         </div>
 
         <div className="flex flex-col gap-8 px-6 pt-2 pb-10 md:px-8">
-          <p className="text-[16px] leading-relaxed text-fg-2">{u.tagline}</p>
+          <p className="text-[16px] leading-relaxed text-fg-2">{pick(u.tagline)}</p>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
             <CostHint useCase={u} />
@@ -154,7 +163,7 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
                   href={tryHref(u.prompts.find((p) => p.text)?.text)!}
                   className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-lime px-4 text-sm font-semibold text-ink"
                 >
-                  Try it in the studio <ArrowRight className="size-4" />
+                  {c.tryStudio} <ArrowRight className="size-4" />
                 </Link>
               )}
               {u.preset && (
@@ -162,7 +171,7 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
                   href={`/presets/${u.preset}`}
                   className="flex h-11 flex-1 items-center justify-center rounded-xl bg-surface-4 px-4 text-sm font-medium text-fg-2 hover:text-fg"
                 >
-                  Open preset /{u.preset}
+                  {c.openPreset(u.preset)}
                 </Link>
               )}
             </div>
@@ -171,24 +180,24 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
           <section>
             {u.channels.length > 1 ? (
               <div className="flex gap-1 rounded-xl bg-surface-2 p-1">
-                {u.channels.map((c) => (
+                {u.channels.map((ch) => (
                   <button
-                    key={c}
+                    key={ch}
                     type="button"
-                    onClick={() => setChannel(c)}
+                    onClick={() => setChannel(ch)}
                     className={clsx(
                       "flex h-9 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors",
-                      channel === c ? "bg-surface-5 text-fg" : "text-fg-3 hover:text-fg",
+                      channel === ch ? "bg-surface-5 text-fg" : "text-fg-3 hover:text-fg",
                     )}
                   >
-                    {c === "ui" ? <MonitorPlay className="size-4" /> : <Bot className="size-4" />}
-                    {c === "ui" ? "In the UI" : "With Claude Code / Codex"}
+                    {ch === "ui" ? <MonitorPlay className="size-4" /> : <Bot className="size-4" />}
+                    {ch === "ui" ? c.inUI : c.withAgents}
                   </button>
                 ))}
               </div>
             ) : (
               <p className="flex items-center gap-2 text-sm font-medium text-fg-2">
-                <Bot className="size-4 text-lime" /> Agents only: ask Claude Code or Codex through the HF Studio MCP
+                <Bot className="size-4 text-lime" /> {c.agentsOnly}
               </p>
             )}
 
@@ -199,17 +208,16 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
                 <div className="flex flex-col gap-6">
                   <div className="rounded-2xl border border-lime/25 bg-lime/5 p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-[13px] font-semibold text-lime">Ask your agent</p>
-                      <CopyButton text={u.ask} />
+                      <p className="text-[13px] font-semibold text-lime">{c.askAgent}</p>
+                      <CopyButton text={ask} />
                     </div>
-                    <p className="mt-2 text-[15px] leading-relaxed text-fg">“{u.ask}”</p>
+                    <p className="mt-2 text-[15px] leading-relaxed text-fg">“{ask}”</p>
                   </div>
                   <Steps steps={u.mcp} />
                   <p className="text-[13px] leading-snug text-fg-3">
-                    The agent quotes first and waits for your OK: HF Studio only generates with the quote_id of that exact quote,
-                    and without a complete price it also needs you to explicitly accept an unknown cost. Setup on the{" "}
+                    {c.quoteNote}
                     <Link href="/mcp" className="text-lime hover:underline">
-                      MCP page
+                      {c.mcpPage}
                     </Link>
                     .
                   </p>
@@ -219,12 +227,13 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
           </section>
 
           <section>
-            <h3 className="headline text-[22px]">Example prompts</h3>
+            <h3 className="headline text-[22px]">{c.examplePrompts}</h3>
+            {c.promptsNote && <p className="mt-1 text-[13px] text-fg-3">{c.promptsNote}</p>}
             <div className="mt-4 flex flex-col gap-3">
               {u.prompts.map((p) => (
-                <div key={p.label} className="rounded-2xl border border-line bg-surface-2 p-4">
+                <div key={p.label.en} className="rounded-2xl border border-line bg-surface-2 p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold">{p.label}</p>
+                    <p className="text-sm font-semibold">{pick(p.label)}</p>
                     <div className="flex gap-1.5">
                       {p.text && <CopyButton text={p.text} />}
                       {p.text && u.uiHref && (
@@ -232,13 +241,13 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
                           href={tryHref(p.text)!}
                           className="flex h-7 items-center gap-1 rounded-lg bg-lime/10 px-2.5 text-xs font-medium text-lime hover:bg-lime/20"
                         >
-                          Use in studio <ArrowRight className="size-3.5" />
+                          {c.useInStudio} <ArrowRight className="size-3.5" />
                         </Link>
                       )}
                     </div>
                   </div>
                   <p className="mt-2 font-mono text-[13px] leading-relaxed text-fg-2">
-                    {p.text || "Leave the prompt empty: the character image and the motion clip are enough."}
+                    {p.text || c.emptyPrompt}
                   </p>
                 </div>
               ))}
@@ -247,11 +256,11 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
 
           <section className="rounded-2xl bg-surface-2 p-5">
             <p className="flex items-center gap-2 text-sm font-semibold">
-              <Lightbulb className="size-4 text-warning" /> Tips
+              <Lightbulb className="size-4 text-warning" /> {c.tips}
             </p>
             <ul className="mt-3 flex flex-col gap-2 text-[15px] leading-snug text-fg-2">
-              {u.tips.map((t) => (
-                <li key={t}>· {t}</li>
+              {u.tips.map((tip) => (
+                <li key={tip.en}>· {pick(tip)}</li>
               ))}
             </ul>
           </section>

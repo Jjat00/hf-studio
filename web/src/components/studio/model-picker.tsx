@@ -3,22 +3,14 @@
 import clsx from "clsx";
 import { Check, ChevronRight, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/components/i18n-provider";
+import { workflowLabel } from "@/lib/i18n/workflow";
 import { modelLabel } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
-const CAP_LABEL: Record<string, string> = {
-  "first-last-frame": "Start + end",
-  "video-input": "Video in",
-  "image-references": "Image refs",
-  "audio-input": "Audio in",
-  "reference-to-video": "References",
-  "text-to-video": "Text",
-  "image-to-video": "Image",
-  "text-to-image": "Text",
-};
-
 export function ModelRow({ model, onClick }: { model?: ModelSummary; onClick: () => void }) {
-  const { name, workflow } = model ? modelLabel(model.title) : { name: "Choose a model", workflow: "" };
+  const { t, locale } = useI18n();
+  const { name, workflow } = model ? modelLabel(model.title) : { name: t.picker.chooseModel, workflow: "" };
   return (
     <button
       type="button"
@@ -26,10 +18,10 @@ export function ModelRow({ model, onClick }: { model?: ModelSummary; onClick: ()
       className="flex w-full items-center justify-between rounded-2xl border border-line bg-surface-3 px-4 py-3 text-left transition-colors hover:bg-surface-4"
     >
       <span className="min-w-0">
-        <span className="block text-[13px] text-fg-3">Model</span>
+        <span className="block text-[13px] text-fg-3">{t.picker.model}</span>
         <span className="flex items-center gap-2 truncate text-[16px] font-semibold">
           {name}
-          {workflow && <span className="truncate text-sm font-normal text-fg-3">{workflow}</span>}
+          {workflow && <span className="truncate text-sm font-normal text-fg-3">{workflowLabel(workflow, locale)}</span>}
         </span>
       </span>
       <ChevronRight className="size-5 shrink-0 text-fg-3" />
@@ -50,6 +42,8 @@ export function ModelPicker({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
+  const { t, locale } = useI18n();
+  const CAP_LABEL = t.picker.caps;
   const [q, setQ] = useState("");
   useEffect(() => {
     if (!open) return;
@@ -82,15 +76,15 @@ export function ModelPicker({
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search models…"
+            placeholder={t.picker.search}
             className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-fg-3"
           />
-          <button type="button" onClick={onClose} aria-label="Close" className="text-fg-3 hover:text-fg">
+          <button type="button" onClick={onClose} aria-label={t.picker.close} className="text-fg-3 hover:text-fg">
             <X className="size-5" />
           </button>
         </div>
         <div className="thin-scrollbar overflow-y-auto p-2">
-          {groups.length === 0 && <p className="p-6 text-center text-sm text-fg-3">No results</p>}
+          {groups.length === 0 && <p className="p-6 text-center text-sm text-fg-3">{t.picker.noResults}</p>}
           {groups.map(([family, list]) => (
             <div key={family} className="mb-1">
               <p className="px-3 pt-3 pb-1 text-xs font-semibold tracking-wide text-fg-3 uppercase">{family}</p>
@@ -111,7 +105,7 @@ export function ModelPicker({
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[15px] font-semibold">
-                        {modelLabel(m.title).workflow || m.workflow}
+                        {workflowLabel(modelLabel(m.title).workflow || m.workflow, locale)}
                       </span>
                       <span className="block truncate font-mono text-[11px] text-fg-3">{m.id}</span>
                     </span>

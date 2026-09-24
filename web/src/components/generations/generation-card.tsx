@@ -3,7 +3,10 @@
 import clsx from "clsx";
 import { AlertTriangle, Ban, Bookmark, Check, Copy, Download, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { outputSrc, studio } from "@/lib/studio";
+import { useI18n } from "@/components/i18n-provider";
+import type { Locale } from "@/lib/i18n";
+import { workflowLabel } from "@/lib/i18n/workflow";
+import { modelLabel, outputSrc, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const RATIO: Record<string, string> = {
@@ -15,18 +18,6 @@ const RATIO: Record<string, string> = {
   "21:9": "21 / 9",
   "3:2": "3 / 2",
   "2:3": "2 / 3",
-};
-
-const STAGE: Record<string, string> = {
-  pending: "Waiting for a free slot",
-  submitting: "Submitting",
-  queued: "Queued",
-  in_progress: "Generating",
-  completed: "Ready",
-  failed: "Failed",
-  nsfw: "Blocked by moderation · not charged",
-  canceled: "Canceled",
-  timed_out: "Timed out",
 };
 
 function useElapsed(g: Generation) {
@@ -41,9 +32,11 @@ function useElapsed(g: Generation) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
-function modelName(id: string, models?: Map<string, ModelSummary>) {
+function modelName(id: string, locale: Locale, models?: Map<string, ModelSummary>) {
   const m = models?.get(id);
-  return m ? m.title.replace(/ API$/, "").replace(" — ", " · ") : id;
+  if (!m) return id;
+  const { name, workflow } = modelLabel(m.title);
+  return workflow ? `${name} · ${workflowLabel(workflow, locale)}` : name;
 }
 
 export function GenerationCard({
@@ -59,12 +52,14 @@ export function GenerationCard({
   onReuse?: (g: Generation) => void;
   onDelete?: (id: string) => void;
 }) {
+  const { t, locale } = useI18n();
+  const STAGE = t.generation.stage;
   const elapsed = useElapsed(g);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
   async function saveAsPreset() {
-    const title = window.prompt("Preset name", prompt.slice(0, 40) || "My preset");
+    const title = window.prompt(t.generation.presetName, prompt.slice(0, 40) || t.generation.myPreset);
     if (!title) return;
     const slug = title.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "preset";
     try {
@@ -121,33 +116,33 @@ export function GenerationCard({
   const actions = (
     <div className="flex items-center gap-1">
       {g.status === "completed" && main && (
-        <IconButton label="Download" href={outputSrc(main)}>
+        <IconButton label={t.generation.download} href={outputSrc(main)}>
           <Download className="size-4" />
         </IconButton>
       )}
       {onReuse && (
-        <IconButton label="Reuse settings" onClick={() => onReuse(g)}>
+        <IconButton label={t.generation.reuse} onClick={() => onReuse(g)}>
           <RotateCcw className="size-4" />
         </IconButton>
       )}
       {prompt && (
-        <IconButton label="Copy prompt" onClick={() => navigator.clipboard.writeText(prompt)}>
+        <IconButton label={t.generation.copyPrompt} onClick={() => navigator.clipboard.writeText(prompt)}>
           <Copy className="size-4" />
         </IconButton>
       )}
       {g.status === "completed" && (
-        <IconButton label={saved ? `Saved as /${saved}` : "Save as preset"} onClick={saveAsPreset}>
+        <IconButton label={saved ? t.generation.savedAs(saved) : t.generation.saveAsPreset} onClick={saveAsPreset}>
           {saved ? <Check className="size-4 text-lime" /> : <Bookmark className="size-4" />}
         </IconButton>
       )}
       {onDelete && g.terminal && (
-        <IconButton label="Delete" onClick={() => onDelete(g.id)}>
+        <IconButton label={t.generation.delete} onClick={() => onDelete(g.id)}>
           <Trash2 className="size-4" />
         </IconButton>
       )}
       {(g.status === "pending" || g.status === "queued") && (
         <IconButton
-          label="Cancel"
+          label={t.generation.cancel}
           disabled={busy}
           onClick={async () => {
             setBusy(true);
@@ -163,7 +158,7 @@ export function GenerationCard({
 
   const meta = (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-fg-3">
-      <span className="rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, models)}</span>
+      <span className="rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, locale, models)}</span>
       {["resolution", "duration", "aspect_ratio"].map((k) =>
         g.input[k] !== undefined ? (
           <span key={k} className="rounded-md bg-glass px-1.5 py-0.5">
@@ -185,7 +180,7 @@ export function GenerationCard({
             {actions}
           </div>
           <p className={clsx("text-[15px] leading-relaxed", prompt ? "text-fg" : "text-fg-3 italic")}>
-            {prompt || "No prompt"}
+            {prompt || t.generation.noPrompt}
           </p>
           <div className="mt-auto">{meta}</div>
         </div>
@@ -196,7 +191,7 @@ export function GenerationCard({
     <article className="group flex flex-col gap-2">
       {media}
       <div className="flex items-start justify-between gap-2 px-1">
-        <p className="line-clamp-2 min-w-0 text-sm text-fg-2">{prompt || modelName(g.model, models)}</p>
+        <p className="line-clamp-2 min-w-0 text-sm text-fg-2">{prompt || modelName(g.model, locale, models)}</p>
         <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
       </div>
     </article>
@@ -204,6 +199,7 @@ export function GenerationCard({
 }
 
 function StatusPill({ g }: { g: Generation }) {
+  const STAGE = useI18n().t.generation.stage;
   const tone =
     g.status === "completed"
       ? "bg-success/15 text-success"

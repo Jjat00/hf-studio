@@ -11,21 +11,6 @@ export type Field =
   | { kind: "text"; key: string; schema: JSONSchema; required: boolean; multiline: boolean }
   | { kind: "json"; key: string; schema: JSONSchema; required: boolean };
 
-const MEDIA_LABELS: Record<string, [string, string]> = {
-  image_url: ["Start frame", "The image the video starts from"],
-  first_frame_url: ["Start frame", "The image the video starts from"],
-  end_image_url: ["End frame", "The image the video ends on"],
-  last_frame_url: ["End frame", "The image the video ends on"],
-  last_image_url: ["End frame", "The image the video ends on"],
-  image_reference_url: ["Reference image", "Style or subject to follow"],
-  image_urls: ["Reference images", "Characters, objects or style"],
-  input_images: ["Input images", "Photos of the character or product"],
-  video_url: ["Reference video", "Motion or clip to transform"],
-  video_urls: ["Reference videos", "Camera, motion or style to follow"],
-  audio_url: ["Audio", "Voice or music to sync"],
-  audio_urls: ["Reference audio", "Voice or music to sync"],
-};
-
 /** Orden en que aparecen los ajustes, imitando a Higgsfield: calidad, duración, formato, audio. */
 const ORDER = ["mode", "resolution", "quality", "duration", "aspect_ratio", "generate_audio", "sound", "seed"];
 
@@ -57,7 +42,8 @@ export function fieldsFor(schema: JSONSchema): Field[] {
       fields.push({ kind: "prompt", key, schema: s, required });
     } else if (media) {
       const multiple = type === "array";
-      const [label, hint] = MEDIA_LABELS[key] ?? [s.title ?? key, ""];
+      // Etiqueta genérica; la UI la sustituye por la traducida si conoce el campo.
+      const [label, hint] = [s.title ?? key, ""];
       fields.push({ kind: "media", key, schema: s, required, media, multiple, max: multiple ? (s.maxItems ?? 4) : 1, label, hint });
     } else if (s.enum) {
       fields.push({ kind: "enum", key, schema: s, required, options: s.enum });
@@ -100,23 +86,7 @@ export function cleanInput(values: Record<string, unknown>): Record<string, unkn
   return out;
 }
 
-export function humanize(key: string) {
-  const map: Record<string, string> = {
-    resolution: "Quality",
-    quality: "Quality",
-    duration: "Duration",
-    aspect_ratio: "Aspect ratio",
-    generate_audio: "Audio",
-    sound: "Sound",
-    seed: "Seed",
-    mode: "Mode",
-    negative_prompt: "Negative prompt",
-    multi_shots: "Multi-shot",
-    multi_prompt: "Shot prompts",
-    num_images: "Images",
-    batch_size: "Images",
-    style: "Style",
-    enhance_prompt: "Enhance prompt",
-  };
-  return map[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+/** Nombre legible de un campo: el traducido si existe, si no la clave en formato de frase. */
+export function humanize(key: string, names: Record<string, string>) {
+  return names[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 }
