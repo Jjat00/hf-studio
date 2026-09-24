@@ -44,7 +44,9 @@ export function VoiceStudio() {
   const [originalVolume, setOriginalVolume] = useState(0);
   const [isolate, setIsolate] = useState(true);
   // Cotización junto a la petición que la produjo: solo vale si coincide con la actual.
-  const [quoted, setQuoted] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
+  const [quoted, setQuoted] = useState<{ key: string; value: (Estimate & { voice_quote?: string }) | null; error?: string } | null>(null);
+  // Sube para pedir una cotización nueva de la misma petición (la anterior caducó o ya se usó).
+  const [quoteNonce, setQuoteNonce] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   // La clave de idempotencia vale solo para la petición exacta con la que se creó.
@@ -130,7 +132,7 @@ export function VoiceStudio() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [bodyKey, status?.configured]);
+  }, [bodyKey, status?.configured, quoteNonce]);
   const current = quoted?.key === bodyKey ? quoted : null;
   const estimate = current?.value ?? null;
   const estimating = !!bodyKey && !!status?.configured && !current;
@@ -144,18 +146,23 @@ export function VoiceStudio() {
   }
 
   async function submit() {
-    const seconds = (estimate as { seconds?: number } | null)?.seconds;
-    if (!body || seconds === undefined) return;
+    const voiceQuote = current?.value?.voice_quote;
+    if (!body || !voiceQuote) return;
     setSubmitting(true);
     setFormError(null);
     if (idempotency.current?.body !== bodyKey) idempotency.current = { key: crypto.randomUUID(), body: bodyKey };
     try {
-      const g = await studio.changeVoice({ ...body, expected_seconds: seconds }, idempotency.current.key);
+      const g = await studio.changeVoice({ ...body, voice_quote: voiceQuote }, idempotency.current.key);
       idempotency.current = null;
       router.push(`/history/${g.id}`);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
       if (e instanceof StudioError && e.status < 500) idempotency.current = null;
+      // Cotización caducada, usada o con otro costo: se pide una nueva y se muestra antes de reintentar.
+      if (e instanceof StudioError && e.status === 409) {
+        setQuoted(null);
+        setQuoteNonce((n) => n + 1);
+      }
     } finally {
       setSubmitting(false);
     }

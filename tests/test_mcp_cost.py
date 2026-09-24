@@ -138,7 +138,7 @@ def test_change_voice_quotes_then_runs_with_one_upload(monkeypatch, tmp_path):
         if path == "/v1/uploads":
             return {"url": f"https://cdn.test/{len(calls)}.mp4"}
         if path == "/v1/voice/estimate":
-            return {"kind": "approx", "usd": 0.01, "complete": True, "seconds": 5}
+            return {"kind": "approx", "usd": 0.01, "complete": True, "seconds": 5, "voice_quote": "vq_1"}
         return {"id": "job", "json": kw["json"]}
 
     monkeypatch.setattr(mcp_server, "_call", call)
@@ -149,5 +149,6 @@ def test_change_voice_quotes_then_runs_with_one_upload(monkeypatch, tmp_path):
     assert q["usd"] == 0.01
     job = mcp_server.change_voice(**args, quote_id=q["quote_id"])
     assert calls.count("/v1/uploads") == 1 and job["json"]["source_url"] == q["source_url"]
+    assert job["json"]["voice_quote"] == "vq_1"  # la API recibe su propia cotización
     with pytest.raises(ToolError):  # la cotización es de un solo uso
         mcp_server.change_voice(**{**args, "end": 7}, quote_id=q["quote_id"])

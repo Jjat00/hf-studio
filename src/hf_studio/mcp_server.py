@@ -215,10 +215,10 @@ def change_voice(
         estimate = _call("POST", "/v1/voice/estimate", json=body)
         return {**estimate, "quote_id": _issue_quote(payload, estimate), "source_url": source_url}
     headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, False)}
-    # La API rechaza el cambio (sin cobrar) si el tramo real ya no dura lo que se cotizó.
+    # La API solo gasta con su propia cotización (voice_quote), que viaja dentro de la del MCP.
     with _quotes_lock:
-        expected = _quotes[quote_id]["estimate"]["seconds"]
-    return _call("POST", "/v1/voice/changes", json={**body, "expected_seconds": expected}, headers=headers)
+        voice_quote = _quotes[quote_id]["estimate"].get("voice_quote")
+    return _call("POST", "/v1/voice/changes", json={**body, "voice_quote": voice_quote}, headers=headers)
 
 
 @mcp.tool()

@@ -68,10 +68,10 @@ class VoiceChangeIn(BaseModel):
         0, ge=0, le=1, description="Volumen del audio original dentro del tramo (0 = solo la voz nueva)"
     )
     remove_background_noise: bool = Field(True, description="Aísla la voz antes de convertirla")
-    expected_seconds: float | None = Field(
+    voice_quote: str | None = Field(
         None,
-        description="Segundos del tramo que se cotizaron (estimate.seconds). Obligatorio al lanzar: si el tramo "
-        "real no coincide, no se cobra y hay que volver a cotizar",
+        description="voice_quote devuelto por /v1/voice/estimate para esta misma petición. Obligatorio al lanzar "
+        "(un solo uso, 15 min); si el tramo real ya no dura lo cotizado, no se cobra y hay que volver a cotizar",
     )
 
     @model_validator(mode="after")
@@ -209,11 +209,37 @@ async def _run(*args: str, timeout: float = 300) -> tuple[int, str]:
         proc.kill()
         await proc.wait()
         return 1, "timeout"
+    except asyncio.CancelledError:  # plazo global vencido: que ffmpeg no siga vivo
+        proc.kill()
+        await proc.wait()
+        raise
     return proc.returncode or 0, (out or err).decode(errors="replace").strip()
 
 
 async def probe_duration(source: str) -> float | None:
     return await duration(source)
+
+
+async def image_duration(source: str) -> float | None:
+    """Lo que dura la imagen (la pista de video), que puede diferir de la del audio."""
+    code, out = await _run(
+        "ffprobe", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-select_streams", "v:0",
+        "-show_entries", "stream=duration", "-of", "csv=p=0", source, timeout=60,
+    )  # fmt: skip
+    try:
+        return float(out.splitlines()[0]) if code == 0 and out else await duration(source)
+    except ValueError:
+        return await duration(source)
+
+
+VOICE_QUOTE_TTL = 15 * 60
+
+
+def voice_digest(body: VoiceChangeIn) -> str:
+    """Huella de la petición (sin la cotización): liga el voice_quote y la idempotencia a lo pedido."""
+    from .service import input_hash
+
+    return input_hash(VOICE_MODEL, body.model_dump(exclude_none=True, exclude={"voice_quote"}))
 
 
 def segment_bounds(body: VoiceChangeIn, duration: float) -> tuple[float, float]:
@@ -254,6 +280,7 @@ def mix_command(
     end: float,
     body: VoiceChangeIn,
     voiced: float | None = None,
+    total: float | None = None,
 ) -> list[str]:
     """Mezcla la voz convertida en [start, end]. `voiced` es lo que dura de verdad la voz devuelta: si es más
     corta que el tramo, el original solo se atenúa mientras suena la voz nueva."""
@@ -268,14 +295,16 @@ def mix_command(
     # El original baja a original_volume solo mientras suena la voz nueva (con fundidos) y encima entra ella.
     cut = 1 - body.original_volume
     graph = (
-        f"[0:a]aresample=48000,volume=eval=frame:"
+        f"[0:a]aresample=48000,apad,volume=eval=frame:"
         f"volume='1-{cut}*clip((t-{start})/{FADE},0,1)*clip(({stop}-t)/{FADE},0,1)'[dry];"
         f"{wet}[wet];[dry][wet]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[a]"
     )
     return [
         "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-i", source, "-i", str(voice),
         "-filter_complex", graph, "-map", "0:v:0", "-map", "[a]",
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(out),
+        # La duración la fija la imagen: el audio original se completa con silencio (apad) si es más corto.
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", *(["-t", f"{total:.3f}"] if total else ["-shortest"]),
+        "-movflags", "+faststart", str(out),
     ]  # fmt: skip
 
 
@@ -303,8 +332,13 @@ async def change_voice(
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp_out = out.with_name(f"{out.stem}.tmp{out.suffix}")
         voiced = await duration(str(converted))
-        code, err = await _run(*mix_command(source, converted, tmp_out, start, end, body, voiced))
-        if code != 0:
+        total = await image_duration(source)
+        code, err = await _run(*mix_command(source, converted, tmp_out, start, end, body, voiced, total))
+        result = await image_duration(str(tmp_out)) if code == 0 else None
+        # Nunca se publica un video recortado: la imagen debe durar lo mismo que la del original.
+        if code != 0 or result is None or (total is not None and abs(result - total) > 0.1):
             tmp_out.unlink(missing_ok=True)
-            raise VoiceError(500, "mix_failed", f"Could not mix the new voice: {err[-300:]}")
+            raise VoiceError(
+                500, "mix_failed", f"Could not mix the new voice ({total} → {result}s): {err[-300:]}"
+            )
         tmp_out.replace(out)

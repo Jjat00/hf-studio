@@ -3,6 +3,8 @@ import hmac
 import logging
 import mimetypes
 import shutil
+import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -38,15 +40,17 @@ from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
 from .recommend import recommend
-from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
+from .service import ServiceError, check_input, create_generation, get_owned_job, trusted_media
 from .voice import (
     VOICE_MODEL,
+    VOICE_QUOTE_TTL,
     ElevenLabsClient,
     VoiceChangeIn,
     VoiceError,
     change_voice,
     probe_duration,
     segment_bounds,
+    voice_digest,
 )
 from .voice import (
     estimate as voice_estimate,
@@ -147,6 +151,7 @@ def create_app(
         app.state.tasks = set()
         app.state.eleven = ElevenLabsClient(settings, transport)
         app.state.voice_slots = asyncio.Semaphore(2)
+        app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
         async with app.state.sessions() as s:
             await s.execute(
@@ -752,10 +757,19 @@ def create_app(
         return {"voices": await request.app.state.eleven.voices(search, library, limit)}
 
     @app.post("/v1/voice/estimate", tags=["voz"])
-    async def voice_estimate_route(body: VoiceChangeIn, session: Session, owner: Owner) -> dict:
-        """Costo de un cambio de voz antes de lanzarlo (según la duración del tramo)."""
+    async def voice_estimate_route(
+        body: VoiceChangeIn, request: Request, session: Session, owner: Owner
+    ) -> dict:
+        """Costo de un cambio de voz antes de lanzarlo, con un voice_quote de un solo uso para lanzarlo."""
         _, start, end = await voice_plan(session, owner, body)
-        return {**voice_estimate(end - start, settings), "start": start, "end": end}
+        quotes: dict = request.app.state.voice_quotes
+        now = time.monotonic()
+        for qid in [q for q, v in quotes.items() if v["expires"] < now]:
+            del quotes[qid]
+        qid = "vq_" + uuid.uuid4().hex
+        quotes[qid] = {"owner": owner.id, "digest": voice_digest(body), "seconds": end - start,
+                       "expires": now + VOICE_QUOTE_TTL, "used": False}  # fmt: skip
+        return {**voice_estimate(end - start, settings), "start": start, "end": end, "voice_quote": qid}
 
     @app.post("/v1/voice/changes", tags=["voz"], status_code=202)
     async def voice_change(
@@ -770,14 +784,12 @@ def create_app(
             raise VoiceError(
                 503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env to change voices"
             )
-        if body.expected_seconds is None:
+        if not body.voice_quote:
             raise ServiceError(
-                422,
-                "quote_required",
-                "Quote first (POST /v1/voice/estimate) and send its seconds as expected_seconds",
+                422, "quote_required", "Quote first (POST /v1/voice/estimate) and send its voice_quote"
             )
-        request_args = body.model_dump(exclude_none=True, exclude={"expected_seconds"})
-        digest = input_hash(VOICE_MODEL, request_args)
+        request_args = body.model_dump(exclude_none=True, exclude={"voice_quote"})
+        digest = voice_digest(body)
         if idempotency_key:
             existing = await session.scalar(
                 select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
@@ -790,12 +802,27 @@ def create_app(
                         "This Idempotency-Key was already used for a different request",
                     )
                 return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
+        # Regla del dueño: solo se gasta con una cotización de esta API, de este cliente, de esta misma
+        # petición, vigente y sin usar; y si el tramo real cambió desde entonces, no se cobra.
+        quote = request.app.state.voice_quotes.get(body.voice_quote)
+        if (
+            not quote
+            or quote["owner"] != owner.id
+            or quote["digest"] != digest
+            or quote["used"]
+            or quote["expires"] < time.monotonic()
+        ):
+            raise ServiceError(
+                409,
+                "quote_invalid",
+                "Missing, expired, used or mismatched voice_quote. Quote this exact request again",
+            )
         source, start, end = await voice_plan(session, owner, body)
-        if abs((end - start) - body.expected_seconds) > 0.05:
+        if abs((end - start) - quote["seconds"]) > 0.05:
             raise ServiceError(
                 409,
                 "cost_changed",
-                f"The segment now lasts {end - start:.2f}s, not the quoted {body.expected_seconds:.2f}s. "
+                f"The segment now lasts {end - start:.2f}s, not the quoted {quote['seconds']:.2f}s. "
                 "Quote again and show the new cost",
             )
         active = await session.scalar(
@@ -831,6 +858,7 @@ def create_app(
             raise ServiceError(
                 409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"
             ) from None
+        quote["used"] = True
         task = asyncio.create_task(run_voice_change(request.app, job.id, body, source, start, end))
         request.app.state.tasks.add(task)
         task.add_done_callback(request.app.state.tasks.discard)
@@ -842,19 +870,21 @@ def create_app(
         name = "0-video.mp4"
         out = Path(settings.storage_dir) / "outputs" / job_id / name
         error: tuple[str, str] | None = None
-        async with app.state.voice_slots:
-            try:
-                await asyncio.wait_for(
-                    change_voice(app.state.eleven, body, source, start, end, out),
-                    settings.job_timeout_seconds,
-                )
-            except TimeoutError:
-                error = ("timed_out", f"Exceeded {settings.job_timeout_seconds}s")
-            except VoiceError as exc:
-                error = (exc.code, exc.message)
-            except Exception as exc:  # no dejar el trabajo colgado en in_progress
-                log.exception("Cambio de voz %s falló", job_id)
-                error = ("internal", str(exc))
+
+        async def convert() -> None:
+            async with app.state.voice_slots:
+                await change_voice(app.state.eleven, body, source, start, end, out)
+
+        # El plazo cuenta desde la creación, también mientras espera un hueco (el semáforo).
+        try:
+            await asyncio.wait_for(convert(), settings.job_timeout_seconds)
+        except TimeoutError:
+            error = ("timed_out", f"Exceeded {settings.job_timeout_seconds}s")
+        except VoiceError as exc:
+            error = (exc.code, exc.message)
+        except Exception as exc:  # no dejar el trabajo colgado en in_progress
+            log.exception("Cambio de voz %s falló", job_id)
+            error = ("internal", str(exc))
         async with app.state.sessions() as s:
             job = await s.get(Job, job_id)
             if not job:

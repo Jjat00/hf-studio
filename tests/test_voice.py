@@ -108,7 +108,8 @@ async def test_estimate_uses_segment_length(voice_env):
 async def test_voice_change_end_to_end_with_library_voice(voice_env):
     app, http, fake, src = voice_env
     body = {"source_generation_id": src, "start": 1, "end": 3.5, "voice_id": "lib1",
-            "public_owner_id": "owner1", "effect": "monster", "expected_seconds": 2.5}  # fmt: skip
+            "public_owner_id": "owner1", "effect": "monster"}  # fmt: skip
+    body["voice_quote"] = (await http.post("/v1/voice/estimate", json=body)).json()["voice_quote"]
     job = await http.post("/v1/voice/changes", json=body, headers={"Idempotency-Key": "k1"})
     assert job.status_code == 202 and job.json()["model"] == VOICE_MODEL
     await asyncio.gather(*app.state.tasks)
@@ -152,26 +153,51 @@ def test_effects_are_valid_ffmpeg_graphs(tmp_path, effect):
     assert (tmp_path / "out.wav").stat().st_size > 0
 
 
-async def test_run_requires_the_quoted_segment(voice_env):
-    _, http, fake, src = voice_env
-    body = {"source_generation_id": src, "start": 1, "end": 60, "voice_id": "v_demon"}
+async def test_run_requires_a_server_quote_for_this_request(voice_env):
+    app, http, fake, src = voice_env
+    body = {"source_generation_id": src, "start": 1, "end": 3, "voice_id": "v_demon"}
     unquoted = await http.post("/v1/voice/changes", json=body)
     assert unquoted.json()["error"]["code"] == "quote_required"
-    # Se cotizó un tramo de 59 s, pero el video solo da 5 s: no se cobra y hay que volver a cotizar.
-    changed = await http.post("/v1/voice/changes", json={**body, "expected_seconds": 59})
+    forged = await http.post("/v1/voice/changes", json={**body, "voice_quote": "vq_inventada"})
+    assert forged.json()["error"]["code"] == "quote_invalid"
+    quote = (await http.post("/v1/voice/estimate", json=body)).json()["voice_quote"]
+    # La cotización es de esta petición: otro tramo no puede usarla.
+    other = await http.post("/v1/voice/changes", json={**body, "end": 5, "voice_quote": quote})
+    assert other.json()["error"]["code"] == "quote_invalid"
+    assert not [c for c in fake.calls if "speech-to-speech" in c.url.path]
+    # Y es de un solo uso: con otra clave de idempotencia no se vuelve a cobrar.
+    first = await http.post(
+        "/v1/voice/changes", json={**body, "voice_quote": quote}, headers={"Idempotency-Key": "a"}
+    )
+    assert first.status_code == 202
+    again = await http.post(
+        "/v1/voice/changes", json={**body, "voice_quote": quote}, headers={"Idempotency-Key": "b"}
+    )
+    assert again.json()["error"]["code"] == "quote_invalid"
+    await asyncio.gather(*app.state.tasks)
+
+
+async def test_changed_duration_is_not_charged(voice_env):
+    app, http, fake, src = voice_env
+    body = {"source_generation_id": src, "start": 1, "end": 3, "voice_id": "v_demon"}
+    quote = (await http.post("/v1/voice/estimate", json=body)).json()["voice_quote"]
+    app.state.voice_quotes[quote]["seconds"] = 1.0  # el medio cambió desde que se cotizó
+    changed = await http.post("/v1/voice/changes", json={**body, "voice_quote": quote})
     assert changed.status_code == 409 and changed.json()["error"]["code"] == "cost_changed"
     assert not [c for c in fake.calls if "speech-to-speech" in c.url.path]
 
 
 async def test_same_key_for_another_request_is_a_conflict(voice_env):
     app, http, _, src = voice_env
-    body = {"source_generation_id": src, "start": 1, "end": 2, "voice_id": "v_demon", "expected_seconds": 1}
-    assert (
-        await http.post("/v1/voice/changes", json=body, headers={"Idempotency-Key": "k"})
-    ).status_code == 202
-    other = await http.post(
-        "/v1/voice/changes", json={**body, "effect": "ghost"}, headers={"Idempotency-Key": "k"}
+    body = {"source_generation_id": src, "start": 1, "end": 2, "voice_id": "v_demon"}
+    quote = (await http.post("/v1/voice/estimate", json=body)).json()["voice_quote"]
+    first = await http.post(
+        "/v1/voice/changes", json={**body, "voice_quote": quote}, headers={"Idempotency-Key": "k"}
     )
+    assert first.status_code == 202
+    ghost = {**body, "effect": "ghost"}
+    ghost["voice_quote"] = (await http.post("/v1/voice/estimate", json=ghost)).json()["voice_quote"]
+    other = await http.post("/v1/voice/changes", json=ghost, headers={"Idempotency-Key": "k"})
     assert other.status_code == 409 and other.json()["error"]["code"] == "idempotency_conflict"
     await asyncio.gather(*app.state.tasks)
 
@@ -204,3 +230,32 @@ def test_shorter_converted_voice_only_ducks_while_it_sounds(tmp_path):
     # Voz nueva de 1 s (2 → 3 s) con el original apagado; después vuelve el original, no un hueco mudo.
     assert abs(hz(2.3) - 220) < 30
     assert abs(hz(3.5) - 880) < 60
+
+
+def test_mix_never_cuts_the_image_when_source_audio_is_shorter(tmp_path):
+    ffmpeg("-f", "lavfi", "-i", "testsrc=size=160x120:rate=24:duration=4", "-f", "lavfi",
+           "-i", "sine=frequency=880:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+           str(tmp_path / "src.mp4"))  # fmt: skip
+    ffmpeg("-f", "lavfi", "-i", "sine=frequency=220:duration=1", str(tmp_path / "voice.wav"))
+    from hf_studio.voice import VoiceChangeIn, mix_command
+
+    body = VoiceChangeIn(source_url="https://x/v.mp4", voice_id="v", start=0.5, end=1.5)
+    subprocess.run(mix_command(str(tmp_path / "src.mp4"), tmp_path / "voice.wav", tmp_path / "out.mp4",
+                               0.5, 1.5, body, voiced=1.0, total=4.0), check=True)  # fmt: skip
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration",
+                          "-of", "csv=p=0", str(tmp_path / "out.mp4")], capture_output=True, text=True, check=True)  # fmt: skip
+    assert abs(float(out.stdout) - 4) < 0.1
+
+
+async def test_cancelling_kills_ffmpeg():
+    from hf_studio import voice
+
+    task = asyncio.create_task(voice._run("sleep", "30"))
+    await asyncio.sleep(0.3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    pgrep = await asyncio.create_subprocess_exec(
+        "pgrep", "-f", "^sleep 30$", stdout=asyncio.subprocess.DEVNULL
+    )
+    assert await pgrep.wait() == 1  # ningún proceso vivo

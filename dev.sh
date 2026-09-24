@@ -12,5 +12,5 @@ uv run hf-studio check-credentials
 trap 'kill 0' EXIT
 uv run hf-studio serve --port 8787 &
 # Solo en local: la clave de la UI puede ver todo (see-all) y el proxy no autentica al visitante.
-(cd web && pnpm dev --port 3000 --hostname 127.0.0.1) &
+(cd web && pnpm dev --port 3000) &  # el script dev ya liga a 127.0.0.1
 wait

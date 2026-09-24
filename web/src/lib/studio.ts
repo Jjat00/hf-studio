@@ -61,7 +61,7 @@ export const studio = {
       `/v1/voice/voices?library=${library}&limit=40${search ? `&search=${encodeURIComponent(search)}` : ""}`,
     ),
   voiceEstimate: (body: VoiceChangeBody) =>
-    call<Estimate & { seconds: number; start: number; end: number }>("/v1/voice/estimate", {
+    call<Estimate & { seconds: number; start: number; end: number; voice_quote: string }>("/v1/voice/estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

@@ -56,6 +56,10 @@ async def _run(*args: str) -> tuple[int, str]:
         proc.kill()
         await proc.wait()
         return 1, "timeout"
+    except asyncio.CancelledError:  # plazo global vencido: que ffmpeg no siga vivo
+        proc.kill()
+        await proc.wait()
+        raise
     return proc.returncode or 0, (out or err).decode(errors="replace").strip()
 
 
