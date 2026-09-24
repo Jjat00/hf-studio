@@ -1,65 +1,69 @@
-import Image from "next/image";
+import Link from "next/link";
+import { BannerCard, FeatureCard } from "@/components/explore/feature-card";
+import { HeroPrompt } from "@/components/explore/hero-prompt";
+import { Recent } from "@/components/explore/recent";
+import { FEATURES } from "@/lib/features";
 
-export default function Home() {
+export default function Explore() {
+  const banners = FEATURES.slice(0, 3);
+  const grid = FEATURES.slice(3, 9);
+  const mcp = FEATURES[9];
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex flex-col gap-14 pb-4">
+      <section className="px-4 pt-2">
+        <div className="grain relative flex min-h-[640px] flex-col items-center justify-center overflow-hidden rounded-[28px] px-6 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/art/explore-hero.webp" alt="" className="absolute inset-0 size-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/25 to-black/70" />
+          <div className="relative flex w-full flex-col items-center">
+            <h1 className="headline max-w-4xl text-[44px] leading-[1.12] md:text-[64px]">
+              Your own AI studio.
+              <br />
+              Every top model.
+            </h1>
+            <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-white/85">
+              From prompt to cinematic video in minutes. Every top model, your own API,
+              ready for you and your agents.
+            </p>
+            <Link href="/video" className="mt-6 rounded-xl bg-white px-6 py-3.5 text-[16px] font-semibold text-ink shadow-[inset_0_-3px_0_rgba(0,0,0,0.12)]">
+              Create Video Now
+            </Link>
+            <HeroPrompt />
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      <section className="grid grid-cols-1 gap-8 px-4 md:grid-cols-3">
+        {banners.map((f) => (
+          <BannerCard key={f.href} f={f} />
+        ))}
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 px-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <Link href={mcp.href} className="grain group relative min-h-[400px] overflow-hidden rounded-[28px] bg-surface-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={mcp.art} alt="" className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.02]" />
+          <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-transparent" />
+          <div className="relative flex h-full flex-col justify-between p-9">
+            <div>
+              <p className="headline text-[44px] leading-none md:text-[56px]">Your agents</p>
+              <p className="headline text-[44px] leading-none text-lime md:text-[56px]">create too</p>
+            </div>
+            <ul className="space-y-2 text-[17px] text-white/85">
+              <li>✓ Claude Code and Codex over MCP</li>
+              <li>✓ The same API this interface uses</li>
+              <li>✓ Shared history, per-client ownership</li>
+            </ul>
+          </div>
+        </Link>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {grid.map((f) => (
+            <FeatureCard key={f.href} f={f} />
+          ))}
         </div>
-      </main>
+      </section>
+
+      <Recent />
     </div>
   );
 }
