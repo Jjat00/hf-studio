@@ -32,6 +32,8 @@ const TOOLS = [
   "list_presets",
   "run_preset",
   "save_preset",
+  "list_voices",
+  "change_voice",
 ];
 
 export default async function McpPage() {

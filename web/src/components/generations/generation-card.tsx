@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { Locale } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
-import { modelLabel, outputSrc, studio } from "@/lib/studio";
+import { modelLabel, outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const RATIO: Record<string, string> = {
@@ -50,6 +50,7 @@ export function sourceLabel(source: string | undefined, ui: string) {
 }
 
 export function modelName(id: string, locale: Locale, models?: Map<string, ModelSummary>) {
+  if (id === VOICE_MODEL) return locale === "es" ? "ElevenLabs · Cambio de voz" : "ElevenLabs · Voice change";
   const m = models?.get(id);
   if (!m) return id;
   const { name, workflow } = modelLabel(m.title);

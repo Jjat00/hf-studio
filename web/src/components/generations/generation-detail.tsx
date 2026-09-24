@@ -1,13 +1,13 @@
 "use client";
 
-import { ArrowLeft, Check, Copy, Download, Loader2, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, Loader2, Mic, RotateCcw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
 import { IconButton, StatusPill, modelName, sourceLabel } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
-import { outputSrc, studio } from "@/lib/studio";
+import { outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 // Mismo criterio que la API (pricing._media_kind): claves que llevan archivos de entrada.
@@ -112,9 +112,18 @@ export function GenerationDetail({ id }: { id: string }) {
                   <Download className="size-4" />
                 </IconButton>
               )}
+              {g.status === "completed" && g.outputs.some((o) => o.kind === "video") && (
+                <IconButton label={t.voice.open} onClick={() => router.push(`/voice?from=${g.id}`)}>
+                  <Mic className="size-4" />
+                </IconButton>
+              )}
               <IconButton
                 label={t.generation.reuse}
-                onClick={() => router.push(`/${output === "image" ? "image" : "video"}?reuse=${g.id}`)}
+                onClick={() =>
+                  router.push(
+                    g.model === VOICE_MODEL ? `/voice?reuse=${g.id}` : `/${output === "image" ? "image" : "video"}?reuse=${g.id}`,
+                  )
+                }
               >
                 <RotateCcw className="size-4" />
               </IconButton>

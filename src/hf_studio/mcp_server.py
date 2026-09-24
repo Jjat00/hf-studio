@@ -36,7 +36,11 @@ approx = USD aproximado; formula/unavailable = falta subir medios o pasar input_
 exige el quote_id de esa cotización (un solo uso, 15 min; si reintentas tras un error, reutiliza la
 misma idempotency_key); con precio incompleto, además confirm_unknown_cost=True solo si el
 usuario acepta explícitamente un costo desconocido. No repitas generate
-tras un error ambiguo, consulta list_generations primero. Reutiliza idempotency_key al reintentar."""
+tras un error ambiguo, consulta list_generations primero. Reutiliza idempotency_key al reintentar.
+Cambio de voz (ElevenLabs): list_voices busca voces (library=True para la biblioteca pública, p. ej.
+"demon", "monster"); change_voice cambia la voz de un tramo [start, end] de un video conservando lo que
+dice y su ritmo, con efecto opcional (deep, monster, ghost). Primero sin quote_id para ver el costo,
+luego con el quote_id tras el OK del usuario; el resultado es una generación más (get_generation)."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
 
@@ -139,6 +143,79 @@ def generate(
         "keep_source_audio": keep_source_audio,
     }
     return _call("POST", "/v1/generations", json=body, headers=headers)
+
+
+@mcp.tool()
+def list_voices(search: str | None = None, library: bool = False, limit: int = 20) -> dict:
+    """Voces de ElevenLabs para change_voice. Sin library: las de la cuenta (incluye predefinidas).
+    Con library=True busca en la biblioteca pública (p. ej. search="demon", "monster", "horror",
+    "villain"); esas voces traen public_owner_id, que hay que pasar a change_voice. preview_url
+    permite escucharlas."""
+    params = {"library": library, "limit": limit, **({"search": search} if search else {})}
+    return _call("GET", "/v1/voice/voices", params=params)
+
+
+_upload_cache: dict[tuple[str, int, float], str] = {}
+
+
+def _uploaded_url(path: str) -> str:
+    """Sube un archivo local una sola vez por versión (cotizar y ejecutar usan la misma URL)."""
+    file = _local_path(path)
+    if not file.is_file():
+        raise ToolError(f"No existe el archivo {file}")
+    stat = file.stat()
+    key = (str(file.resolve()), stat.st_size, stat.st_mtime)
+    if key not in _upload_cache:
+        _upload_cache[key] = upload_media(path)["url"]
+    return _upload_cache[key]
+
+
+@mcp.tool()
+def change_voice(
+    voice_id: str,
+    source_generation_id: str | None = None,
+    source_path: str | None = None,
+    source_url: str | None = None,
+    start: float = 0,
+    end: float | None = None,
+    public_owner_id: str | None = None,
+    voice_name: str | None = None,
+    effect: str = "none",
+    original_volume: float = 0,
+    remove_background_noise: bool = True,
+    quote_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Cambia la voz de un tramo de un video con ElevenLabs Voice Changer: conserva lo que se dice,
+    el ritmo y la emoción, y solo toca el tramo [start, end] (en segundos; end vacío = hasta el final).
+    Origen: source_generation_id (un video de la biblioteca), source_path (archivo local; se sube) o
+    source_url. effect añade una capa: deep (grave), monster (monstruo), ghost (fantasma) o none.
+    original_volume (0-1) deja el audio original de fondo dentro del tramo; 0 lo sustituye del todo.
+    Sin quote_id devuelve el costo y un quote_id: muéstraselo al usuario y, con su OK, vuelve a llamar
+    con los mismos argumentos y ese quote_id. Devuelve la generación (asíncrona: usa get_generation)."""
+    quoted_source = {"source_path": source_path} if source_path else {}
+    if source_path:
+        source_url = _uploaded_url(source_path)
+    body = {
+        "voice_id": voice_id,
+        "source_generation_id": source_generation_id,
+        "source_url": source_url,
+        "start": start,
+        "end": end,
+        "public_owner_id": public_owner_id,
+        "voice_name": voice_name,
+        "effect": effect,
+        "original_volume": original_volume,
+        "remove_background_noise": remove_background_noise,
+    }
+    body = {k: v for k, v in body.items() if v is not None}
+    # Se cotiza sobre la ruta local, no sobre la URL de la subida.
+    payload = {"voice_change": {**body, **quoted_source, **({"source_url": None} if source_path else {})}}
+    if not quote_id:
+        estimate = _call("POST", "/v1/voice/estimate", json=body)
+        return {**estimate, "quote_id": _issue_quote(payload, estimate), "source_url": source_url}
+    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, False)}
+    return _call("POST", "/v1/voice/changes", json=body, headers=headers)
 
 
 @mcp.tool()

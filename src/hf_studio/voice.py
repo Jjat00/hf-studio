@@ -237,9 +237,13 @@ def estimate(seconds: float, settings: Settings) -> dict:
         "kind": "approx",
         "usd": usd,
         "credits": None,
+        "discount_pct": None,
         "seconds": round(seconds, 2),
         "complete": True,
-        "basis": f"{seconds:.1f}s × ${rate}/min (ElevenLabs API pay-as-you-go; with a plan it uses its included minutes)",
+        "missing": [],
+        "description": None,
+        # Con un plan de ElevenLabs se descuenta de sus minutos incluidos en vez de cobrarse aparte.
+        "basis": f"{seconds:.1f}s × ${rate}/min · ElevenLabs Voice Changer",
     }
 
 

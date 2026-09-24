@@ -7,7 +7,7 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { Masonry } from "@/components/masonry";
 import { useI18n } from "@/components/i18n-provider";
-import { studio } from "@/lib/studio";
+import { studio, VOICE_MODEL } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const FILTERS = ["all", "video", "image", "active", "failed"] as const;
@@ -35,7 +35,11 @@ export default function HistoryPage() {
   );
 
   const reuse = (g: Generation) =>
-    router.push(`/${models.get(g.model)?.output === "image" ? "image" : "video"}?reuse=${g.id}`);
+    router.push(
+      g.model === VOICE_MODEL
+        ? `/voice?reuse=${g.id}`
+        : `/${models.get(g.model)?.output === "image" ? "image" : "video"}?reuse=${g.id}`,
+    );
 
   return (
     <div className="px-4 py-8 md:px-8">

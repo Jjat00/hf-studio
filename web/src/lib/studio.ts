@@ -1,4 +1,7 @@
-import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset } from "./types";
+import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+
+/** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
+export const VOICE_MODEL = "elevenlabs/voice-changer";
 
 /** Cliente del navegador: todo pasa por el proxy /api/studio, que añade la clave en el servidor. */
 const BASE = "/api/studio";
@@ -46,6 +49,23 @@ export const studio = {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify({ model, input, keep_source_audio: keepSourceAudio }),
+    }),
+  voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
+  voices: (search: string, library: boolean) =>
+    call<{ voices: Voice[] }>(
+      `/v1/voice/voices?library=${library}&limit=40${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+    ),
+  voiceEstimate: (body: VoiceChangeBody) =>
+    call<Estimate & { seconds: number; start: number; end: number }>("/v1/voice/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  changeVoice: (body: VoiceChangeBody, idempotencyKey: string) =>
+    call<Generation>("/v1/voice/changes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(body),
     }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
   get: (id: string, wait = 0) => call<Generation>(`/v1/generations/${id}${wait ? `?wait=${wait}` : ""}`),

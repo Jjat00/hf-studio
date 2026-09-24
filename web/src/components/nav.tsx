@@ -25,6 +25,7 @@ const SECONDARY: Item[] = [
   { href: "/video?tab=genjutsu", label: "genjutsu", match: (p, t) => p.startsWith("/video") && t === "genjutsu" },
   { href: "/video?tab=edit", label: "editVideo", match: (p, t) => p.startsWith("/video") && t === "edit" },
   { href: "/video?tab=motion", label: "motionControl", match: (p, t) => p.startsWith("/video") && t === "motion" },
+  { href: "/voice", label: "voice", match: (p) => p.startsWith("/voice") },
   { href: "/history", label: "history", match: (p) => p.startsWith("/history") },
 ];
 

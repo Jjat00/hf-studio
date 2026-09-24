@@ -25,7 +25,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
-import { costShort, modelLabel, studio, StudioError, type Estimate } from "@/lib/studio";
+import { costShort, modelLabel, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { Masonry } from "@/components/masonry";
@@ -186,6 +186,10 @@ export function Studio({ output }: { output: "video" | "image" }) {
   }
 
   function reuse(g: Generation) {
+      if (g.model === VOICE_MODEL) {
+        router.push(`/voice?reuse=${g.id}`);
+        return;
+      }
       for (const tb of tabs) {
         const m = tb.modes.find((x) => x.filter(byId.get(g.model) ?? ({ id: g.model, capabilities: [], output: output } as never)));
         if (!m) continue;
@@ -267,7 +271,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     }
   }
 
-  const history = items.filter((g) => (byId.get(g.model)?.output ?? output) === output);
+  const history = items.filter((g) => (byId.get(g.model)?.output ?? (g.model === VOICE_MODEL ? "video" : output)) === output);
   const hero = mode.hero;
   const { name } = detail ? modelLabel(detail.title) : { name: "" };
   const twoUp = media.length === 2 && media.every((m) => !m.multiple);

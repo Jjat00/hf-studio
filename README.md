@@ -50,6 +50,8 @@ cd web && pnpm install && cd ..
 ```
 
 Otros comandos: `hf-studio create-key NOMBRE`, `list-keys`, `revoke-key NOMBRE`, `see-all NOMBRE [--off]`, `keep-source-audio ID` (pone a una edición ya hecha el audio de su video de origen), `sync-catalog` y `serve`.
+
+**Cambio de voz (ElevenLabs).** Con `ELEVENLABS_API_KEY` en `.env`, la página *Cambiar voz* (`/voice`) y las herramientas MCP `list_voices` y `change_voice` convierten la voz de un tramo de un video a otra voz (de tu cuenta o de la biblioteca pública de ElevenLabs), con efecto opcional (grave, monstruo, fantasma). El resultado es una generación más de la biblioteca. Cuesta unos 0,12 USD por minuto de tramo por API (con plan de ElevenLabs, sale de sus minutos incluidos).
 Por defecto cada cliente solo ve sus generaciones; con `see-all` uno (pensado para la UI) ve y gestiona las de todos, con su origen.
 Cada cliente (la UI, Claude Code, Codex…) tiene su propia clave `hfs_…`. Las credenciales de Higgsfield solo las
 conoce la API.

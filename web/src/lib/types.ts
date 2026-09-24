@@ -102,3 +102,35 @@ export type Preset = {
   cover: string | null;
   builtin: boolean;
 };
+
+export type Voice = {
+  voice_id: string;
+  name: string;
+  public_owner_id: string | null;
+  preview_url: string | null;
+  description: string | null;
+  labels: Record<string, string>;
+  library: boolean;
+};
+
+export type VoiceStatus = {
+  configured: boolean;
+  tier?: string | null;
+  credits_left?: number | null;
+  credits_limit?: number | null;
+};
+
+export type VoiceEffect = "none" | "deep" | "monster" | "ghost";
+
+export type VoiceChangeBody = {
+  source_generation_id?: string;
+  source_url?: string;
+  start: number;
+  end?: number;
+  voice_id: string;
+  voice_name?: string;
+  public_owner_id?: string;
+  effect: VoiceEffect;
+  original_volume: number;
+  remove_background_noise: boolean;
+};
