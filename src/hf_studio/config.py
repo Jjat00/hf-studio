@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     hf_api_key_secret: SecretStr = SecretStr("")
     hf_base_url: str = "https://api.higgsfield.ai"
 
+    # ElevenLabs (cambio de voz). Opcional: sin clave, las rutas /v1/voice responden 503.
+    elevenlabs_api_key: SecretStr = SecretStr("")
+    elevenlabs_base_url: str = "https://api.elevenlabs.io"
+    elevenlabs_sts_model: str = "eleven_multilingual_sts_v2"
+    # Tarifa de pago por uso del Voice Changer por API (a 2026-09-24); con plan se descuenta de sus minutos.
+    elevenlabs_usd_per_minute: float = 0.12
+
     database_url: str = "sqlite+aiosqlite:///./data/hf_studio.db"
     storage_dir: Path = Path("./data/files")
 

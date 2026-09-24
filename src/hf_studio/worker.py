@@ -19,6 +19,7 @@ from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
 from .db import Job, utcnow
 from .higgsfield import TERMINAL_STATUSES, HiggsfieldClient, HiggsfieldError, extract_outputs
+from .voice import VOICE_MODEL  # trabajo local: no ocupa concurrencia de Higgsfield
 
 log = logging.getLogger("hf_studio.worker")
 
@@ -86,7 +87,7 @@ class Worker:
             in_flight = await session.scalar(
                 select(func.count())
                 .select_from(Job)
-                .where(Job.status.in_(("submitting", "queued", "in_progress")))
+                .where(Job.status.in_(("submitting", "queued", "in_progress")), Job.model != VOICE_MODEL)
             )
             slots = self.settings.hf_max_concurrency - (in_flight or 0)
             if slots <= 0:

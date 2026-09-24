@@ -37,7 +37,19 @@ from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
 from .recommend import recommend
-from .service import ServiceError, check_input, create_generation, get_owned_job
+from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash
+from .voice import (
+    VOICE_MODEL,
+    ElevenLabsClient,
+    VoiceChangeIn,
+    VoiceError,
+    change_voice,
+    probe_duration,
+    segment_bounds,
+)
+from .voice import (
+    estimate as voice_estimate,
+)
 from .worker import Worker
 
 log = logging.getLogger("hf_studio.api")
@@ -132,6 +144,17 @@ def create_app(
         app.state.hf = HiggsfieldClient(settings, transport)
         app.state.worker = Worker(app.state.sessions, app.state.hf, settings)
         app.state.tasks = set()
+        app.state.eleven = ElevenLabsClient(settings, transport)
+        app.state.voice_slots = asyncio.Semaphore(2)
+        # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
+        async with app.state.sessions() as s:
+            await s.execute(
+                update(Job)
+                .where(Job.model == VOICE_MODEL, Job.status.in_(ACTIVE))
+                .values(status="failed", error_kind="interrupted", error="Interrupted by a server restart",
+                        finished_at=utcnow())
+            )  # fmt: skip
+            await s.commit()
         if not settings.hf_configured:
             log.warning("Falta HF_API_KEY (o HF_API_KEY_ID + HF_API_KEY_SECRET): los envíos fallarán")
         if settings.worker_enabled:
@@ -139,6 +162,7 @@ def create_app(
         yield
         await app.state.worker.stop()
         await app.state.hf.aclose()
+        await app.state.eleven.aclose()
         await engine.dispose()
 
     app = FastAPI(
@@ -159,6 +183,10 @@ def create_app(
         if exc.details is not None:
             body["details"] = exc.details
         return JSONResponse({"error": body}, status_code=exc.status)
+
+    @app.exception_handler(VoiceError)
+    async def _voice_error(_: Request, exc: VoiceError) -> JSONResponse:
+        return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
 
     @app.exception_handler(HiggsfieldError)
     async def _hf_error(_: Request, exc: HiggsfieldError) -> JSONResponse:
@@ -670,6 +698,123 @@ def create_app(
         if created:
             request.app.state.worker.wake()
         return JSONResponse(job_out(job, deduplicated=not created), status_code=202 if created else 200)
+
+    # --- Cambio de voz (ElevenLabs) --------------------------------------------------------------
+
+    async def voice_source(session: AsyncSession, owner: ApiClient, body: VoiceChangeIn) -> str:
+        """Ruta local o URL del video de origen."""
+        if body.source_url:
+            if not body.source_url.startswith(("https://", "http://")):
+                raise ServiceError(422, "invalid_source", "source_url must be an http(s) URL")
+            return body.source_url
+        job = await get_owned_job(session, owner, body.source_generation_id or "")
+        videos = [o for o in job.outputs or [] if o.get("kind") == "video"]
+        if job.status != "completed" or not videos:
+            raise ServiceError(422, "invalid_source", "The source generation is not a completed video")
+        for f in job.files or []:
+            path = Path(settings.storage_dir) / "outputs" / job.id / f["name"]
+            if f.get("kind") == "video" and path.exists():
+                return str(path.resolve())
+        return videos[0]["url"]
+
+    async def voice_plan(
+        session: AsyncSession, owner: ApiClient, body: VoiceChangeIn
+    ) -> tuple[str, float, float]:
+        source = await voice_source(session, owner, body)
+        duration = await probe_duration(source)
+        if duration is None:
+            raise ServiceError(422, "invalid_source", "Could not read the source video")
+        start, end = segment_bounds(body, duration)
+        return source, start, end
+
+    @app.get("/v1/voice/status", tags=["voz"])
+    async def voice_status(request: Request, _: Owner) -> dict:
+        """Si ElevenLabs está configurado y, si lo está, el plan y los créditos que quedan."""
+        eleven = request.app.state.eleven
+        if not eleven.configured:
+            return {"configured": False}
+        return {"configured": True, **(await eleven.subscription())}
+
+    @app.get("/v1/voice/voices", tags=["voz"])
+    async def voice_list(
+        request: Request,
+        _: Owner,
+        search: str | None = Query(None, max_length=100),
+        library: bool = Query(False, description="Buscar en la biblioteca pública de ElevenLabs"),
+        limit: int = Query(30, ge=1, le=100),
+    ) -> dict:
+        return {"voices": await request.app.state.eleven.voices(search, library, limit)}
+
+    @app.post("/v1/voice/estimate", tags=["voz"])
+    async def voice_estimate_route(body: VoiceChangeIn, session: Session, owner: Owner) -> dict:
+        """Costo de un cambio de voz antes de lanzarlo (según la duración del tramo)."""
+        _, start, end = await voice_plan(session, owner, body)
+        return {**voice_estimate(end - start, settings), "start": start, "end": end}
+
+    @app.post("/v1/voice/changes", tags=["voz"], status_code=202)
+    async def voice_change(
+        body: VoiceChangeIn,
+        request: Request,
+        session: Session,
+        owner: Owner,
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> JSONResponse:
+        """Lanza un cambio de voz. Es asíncrono: sigue el trabajo con GET /v1/generations/{id}."""
+        if not request.app.state.eleven.configured:
+            raise VoiceError(
+                503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env to change voices"
+            )
+        if idempotency_key:
+            existing = await session.scalar(
+                select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
+            )
+            if existing:
+                return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
+        source, start, end = await voice_plan(session, owner, body)
+        args = {**body.model_dump(exclude_none=True), "start": start, "end": end}
+        job = Job(
+            owner_id=owner.id,
+            model=VOICE_MODEL,
+            input=args,
+            input_hash=input_hash(VOICE_MODEL, args),
+            idempotency_key=idempotency_key,
+            status="in_progress",
+            submitted_at=utcnow(),
+        )
+        session.add(job)
+        await session.commit()
+        task = asyncio.create_task(run_voice_change(request.app, job.id, body, source, start, end))
+        request.app.state.tasks.add(task)
+        task.add_done_callback(request.app.state.tasks.discard)
+        return JSONResponse(job_out(job, deduplicated=False), status_code=202)
+
+    async def run_voice_change(
+        app: FastAPI, job_id: str, body: VoiceChangeIn, source: str, start: float, end: float
+    ) -> None:
+        name = "0-video.mp4"
+        out = Path(settings.storage_dir) / "outputs" / job_id / name
+        error: tuple[str, str] | None = None
+        async with app.state.voice_slots:
+            try:
+                await change_voice(app.state.eleven, body, source, start, end, out)
+            except VoiceError as exc:
+                error = (exc.code, exc.message)
+            except Exception as exc:  # no dejar el trabajo colgado en in_progress
+                log.exception("Cambio de voz %s falló", job_id)
+                error = ("internal", str(exc))
+        async with app.state.sessions() as s:
+            job = await s.get(Job, job_id)
+            if not job:
+                return
+            job.finished_at = utcnow()
+            if error:
+                job.status, job.error_kind, job.error = "failed", error[0], error[1]
+            else:
+                job.status = "completed"
+                job.outputs = [{"kind": "video", "url": f"/v1/generations/{job_id}/files/{name}"}]
+                job.files = [{"name": name, "kind": "video", "size": out.stat().st_size,
+                              "content_type": "video/mp4", "index": 0}]  # fmt: skip
+            await s.commit()
 
     @app.post("/v1/webhooks/higgsfield/{job_id}", tags=["sistema"], include_in_schema=False)
     async def webhook(job_id: str, request: Request, session: Session, token: str = "") -> dict:
