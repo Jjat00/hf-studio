@@ -41,6 +41,10 @@ class FakeHiggsfield:
             return httpx.Response(200, json=self.remote[path.split("/")[2]])
         if path.startswith("/requests/") and path.endswith("/cancel"):
             return httpx.Response(202)
+        if path.startswith("/estimate/"):
+            return httpx.Response(
+                200, json={"type": "estimate", "credits": "1.000", "usd": "0.060", "discount": None}
+            )
         if request.method == "POST":
             self.submits.append(request)
             if self.submit_mode == "concurrency":
@@ -333,3 +337,65 @@ async def test_delete_generation(env):
     assert (await http.delete(f"/v1/generations/{job_id}", headers=other)).status_code == 404
     assert (await http.delete(f"/v1/generations/{job_id}")).status_code == 204
     assert (await http.get(f"/v1/generations/{job_id}")).status_code == 404
+
+
+async def test_batch_dry_run_quotes_without_submitting(env):
+    _, http, fake = env
+    body = {
+        "items": [{"model": T2V, "input": VIDEO, "count": 2}, {"model": I2V, "input": {"duration": 5}}],
+        "dry_run": True,
+    }
+    r = (await http.post("/v1/generations/batch", json=body)).json()
+    assert r["total"] == {"usd": 0.18, "credits": 3.0, "complete": True}
+    assert fake.submits == []
+
+
+async def test_batch_creates_variants_and_waits_for_all(env):
+    app, http, fake = env
+    body = {"items": [{"model": T2V, "input": VIDEO, "count": 2}]}
+    r = await http.post("/v1/generations/batch", json=body, headers={"Idempotency-Key": "b1"})
+    ids = [g["id"] for g in r.json()["generations"]]
+    assert r.status_code == 202 and len(set(ids)) == 2
+    again = await http.post("/v1/generations/batch", json=body, headers={"Idempotency-Key": "b1"})
+    assert [g["id"] for g in again.json()["generations"]] == ids  # reintento seguro
+    await app.state.worker.tick()
+    for rid in list(fake.remote):
+        fake.remote[rid] = {
+            "status": "completed",
+            "request_id": rid,
+            "video": {"url": "https://cdn.test/o.mp4"},
+        }
+    await make_due(app)
+    await app.state.worker.tick()
+    r = (await http.get("/v1/generations", params={"ids": ",".join(ids), "wait": 5})).json()
+    assert r["all_terminal"] and {g["status"] for g in r["generations"]} == {"completed"}
+    too_many = {"items": [{"model": T2V, "input": {**VIDEO, "prompt": "x"}, "count": 8}]}
+    assert (await http.post("/v1/generations/batch", json=too_many)).status_code == 429
+
+
+async def test_builtin_preset_renders_and_prices(env):
+    _, http, fake = env
+    names = {p["slug"] for p in (await http.get("/v1/presets")).json()["presets"]}
+    assert {"hero-shot", "morph", "dance-transfer"} <= names
+    dry = {"variables": {"product": "red sneakers"}, "dry_run": True}
+    r = (await http.post("/v1/presets/hero-shot/run", json=dry)).json()
+    assert "red sneakers" in r["input"]["prompt"] and r["input"]["aspect_ratio"] == "4:3"
+    assert r["estimate"]["kind"] == "exact" and fake.submits == []
+    missing = await http.post("/v1/presets/hero-shot/run", json={"variables": {}})
+    assert missing.status_code == 422 and missing.json()["error"]["details"][0]["path"] == "product"
+    frames = {"start": "https://cdn.test/a.png", "end": "https://cdn.test/b.png"}
+    run = await http.post("/v1/presets/morph/run", json={"variables": frames})
+    assert run.status_code == 202 and run.json()["input"]["end_image_url"] == "https://cdn.test/b.png"
+
+
+async def test_preset_from_generation_is_private(env):
+    _, http, _ = env
+    job_id = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO})).json()["id"]
+    r = await http.post(f"/v1/presets/from-generation/{job_id}", json={"slug": "my-road", "title": "My road"})
+    assert r.status_code == 201 and r.json()["template"]["prompt"] == "{{prompt}}"
+    dry = {"variables": {"prompt": "a desert road"}, "dry_run": True}
+    run = (await http.post("/v1/presets/my-road/run", json=dry)).json()
+    assert run["input"]["prompt"] == "a desert road" and run["input"]["duration"] == 5
+    other = {"Authorization": "Bearer hfs_b"}
+    assert (await http.get("/v1/presets/my-road", headers=other)).status_code == 404
+    assert (await http.delete("/v1/presets/hero-shot")).status_code == 404  # los de serie no se borran

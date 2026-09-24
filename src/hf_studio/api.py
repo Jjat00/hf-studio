@@ -14,14 +14,28 @@ from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
-from .db import TERMINAL, ApiClient, Job, Upload, hash_token, init_db, make_engine, make_sessionmaker, utcnow
+from .db import (
+    ACTIVE,
+    TERMINAL,
+    ApiClient,
+    Job,
+    Preset,
+    Upload,
+    hash_token,
+    init_db,
+    make_engine,
+    make_sessionmaker,
+    utcnow,
+)
 from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
-from .pricing import fill_placeholders, normalize
+from .presets import BUILTIN, render, resolve_values, variables_in
+from .pricing import fill_placeholders, normalize, quote, total
+from .recommend import recommend
 from .service import ServiceError, check_input, create_generation, get_owned_job
 from .worker import Worker
 
@@ -48,6 +62,41 @@ class GenerationIn(BaseModel):
     model: str = Field(description="ID del endpoint, p. ej. bytedance/seedance-2.0/text-to-video")
     input: dict[str, Any] = Field(description="Argumentos según el input_schema del modelo")
     allow_duplicate: bool = Field(False, description="Permite repetir una petición idéntica aún activa")
+
+
+class BatchItem(BaseModel):
+    model: str
+    input: dict[str, Any]
+    count: int = Field(1, ge=1, le=8, description="Copias de esta entrada (variantes)")
+
+
+class BatchIn(BaseModel):
+    items: list[BatchItem] = Field(min_length=1, max_length=20)
+    dry_run: bool = Field(False, description="Solo cotiza: devuelve costo por ítem y total, sin generar")
+    hints: dict[str, float] = Field(default_factory=dict)
+
+
+class PresetIn(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,78}$")
+    title: str = Field(min_length=1, max_length=120)
+    description: str = ""
+    category: str = "Mine"
+    model: str
+    template: dict[str, Any]
+    variables: list[dict[str, Any]] = Field(default_factory=list)
+    cover: str | None = None
+
+
+class PresetFromGeneration(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,78}$")
+    title: str = Field(min_length=1, max_length=120)
+    description: str = ""
+
+
+class PresetRun(BaseModel):
+    variables: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+    hints: dict[str, float] = Field(default_factory=dict)
 
 
 class EstimateIn(BaseModel):
@@ -235,6 +284,18 @@ def create_app(
                     "basis": reason, "missing": placeholders, "description": None}  # fmt: skip
         return normalize(raw, filled, body.hints, placeholders)
 
+    @app.get("/v1/recommend", tags=["modelos"])
+    async def recommend_models(
+        request: Request,
+        _: Owner,
+        catalog: CatalogDep,
+        task: str = Query(min_length=3, max_length=500, description="Qué quieres crear, en lenguaje natural"),
+        limit: int = Query(5, ge=1, le=10),
+        output: str | None = Query(None, pattern="^(video|image)$"),
+    ) -> dict:
+        """Sugiere modelos para una tarea, con el costo de una configuración estándar."""
+        return await recommend(request.app.state.hf, catalog, task, limit, output)
+
     @app.post("/v1/uploads", status_code=201, tags=["archivos"])
     async def upload(
         request: Request, session: Session, owner: Owner, file: Annotated[UploadFile, File()]
@@ -307,12 +368,93 @@ def create_app(
         status: str | None = None,
         limit: int = Query(20, ge=1, le=100),
         offset: int = Query(0, ge=0),
+        ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
+        wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
     ) -> dict:
         query = select(Job).where(Job.owner_id == owner.id)
+        if ids:
+            wanted = [i for i in ids.split(",") if i][:50]
+            query = query.where(Job.id.in_(wanted))
         if status:
             query = query.where(Job.status == status)
-        jobs = await session.scalars(query.order_by(Job.created_at.desc()).offset(offset).limit(limit))
-        return {"generations": [job_out(j) for j in jobs]}
+        query = query.order_by(Job.created_at.desc()).offset(offset).limit(limit)
+        jobs = list(await session.scalars(query))
+        deadline = asyncio.get_running_loop().time() + (wait if ids else 0)
+        while any(j.status not in TERMINAL for j in jobs) and asyncio.get_running_loop().time() < deadline:
+            await session.commit()
+            await asyncio.sleep(1)
+            for j in jobs:
+                await session.refresh(j)
+        return {
+            "generations": [job_out(j) for j in jobs],
+            "all_terminal": all(j.status in TERMINAL for j in jobs),
+        }
+
+    @app.post("/v1/generations/batch", tags=["generaciones"])
+    async def create_batch(
+        body: BatchIn,
+        request: Request,
+        session: Session,
+        owner: Owner,
+        catalog: CatalogDep,
+        idempotency_key: Annotated[str | None, Header(max_length=180)] = None,
+    ) -> JSONResponse:
+        """Varias generaciones de una vez. Con dry_run solo cotiza (costo por ítem y total)."""
+        for item in body.items:
+            if not catalog.get(item.model):
+                raise ServiceError(404, "unknown_model", f"Unknown model: {item.model}")
+        if body.dry_run:
+            quotes = await asyncio.gather(
+                *(
+                    quote(request.app.state.hf, catalog, catalog.get(i.model), i.input, body.hints)
+                    for i in body.items
+                )
+            )
+            counts = [i.count for i in body.items]
+            items = [
+                {"model": i.model, "count": i.count, "estimate": q}
+                for i, q in zip(body.items, quotes, strict=True)
+            ]
+            return JSONResponse({"items": items, "total": total(quotes, counts)})
+        for item in body.items:
+            check_input(catalog, item.model, item.input)
+        wanted = sum(i.count for i in body.items)
+        if idempotency_key:
+            # Reintento del mismo lote: devolver lo ya creado antes de mirar cupos.
+            keys = [f"{idempotency_key}:{n}" for n in range(wanted)]
+            found = {
+                j.idempotency_key: j
+                for j in await session.scalars(
+                    select(Job).where(Job.owner_id == owner.id, Job.idempotency_key.in_(keys))
+                )
+            }
+            if len(found) == wanted:
+                return JSONResponse({"generations": [job_out(found[k]) for k in keys]}, status_code=200)
+        active = await session.scalar(
+            select(func.count()).select_from(Job).where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
+        )
+        if active + wanted > settings.max_active_jobs_per_client:
+            raise ServiceError(
+                429,
+                "too_many_active",
+                f"This batch needs {wanted} slots; you have {active} active of {settings.max_active_jobs_per_client}",
+            )
+        jobs, created_any = [], False
+        n = 0
+        for item in body.items:
+            for _ in range(item.count):
+                key = f"{idempotency_key}:{n}" if idempotency_key else None
+                job, created = await create_generation(
+                    session, settings, catalog, owner, item.model, item.input, key, allow_duplicate=True
+                )
+                jobs.append(job)
+                created_any |= created
+                n += 1
+        if created_any:
+            request.app.state.worker.wake()
+        return JSONResponse(
+            {"generations": [job_out(j) for j in jobs]}, status_code=202 if created_any else 200
+        )
 
     @app.get("/v1/generations/{job_id}", tags=["generaciones"])
     async def get_generation(
@@ -372,6 +514,120 @@ def create_app(
         if not entry or not path.is_file():
             raise ServiceError(404, "not_found", "Archivo no encontrado")
         return FileResponse(path, media_type=entry.get("content_type"), filename=name)
+
+    async def find_preset(session: AsyncSession, owner: ApiClient, slug: str) -> dict:
+        for p in BUILTIN:
+            if p["slug"] == slug:
+                return {**p, "builtin": True}
+        own = await session.scalar(select(Preset).where(Preset.owner_id == owner.id, Preset.slug == slug))
+        if not own:
+            raise ServiceError(404, "not_found", f"Unknown preset: {slug}")
+        return own.as_dict()
+
+    def check_preset(catalog: Catalog, body: PresetIn) -> dict:
+        model = catalog.get(body.model)
+        if not model:
+            raise ServiceError(404, "unknown_model", f"Unknown model: {body.model}")
+        declared = {v.get("key") for v in body.variables}
+        undeclared = variables_in(body.template) - declared
+        if undeclared:
+            raise ServiceError(
+                422, "invalid_preset", f"Undeclared variables in template: {sorted(undeclared)}"
+            )
+        return model
+
+    @app.get("/v1/presets", tags=["presets"])
+    async def list_presets(session: Session, owner: Owner) -> dict:
+        own = await session.scalars(
+            select(Preset).where(Preset.owner_id == owner.id).order_by(Preset.created_at.desc())
+        )
+        return {"presets": [p.as_dict() for p in own] + [{**p, "builtin": True} for p in BUILTIN]}
+
+    @app.get("/v1/presets/{slug}", tags=["presets"])
+    async def get_preset(slug: str, session: Session, owner: Owner) -> dict:
+        return await find_preset(session, owner, slug)
+
+    @app.post("/v1/presets", tags=["presets"], status_code=201)
+    async def create_preset(body: PresetIn, session: Session, owner: Owner, catalog: CatalogDep) -> dict:
+        model = check_preset(catalog, body)
+        if any(p["slug"] == body.slug for p in BUILTIN):
+            raise ServiceError(409, "slug_taken", "A built-in preset already uses this slug")
+        if await session.scalar(select(Preset).where(Preset.owner_id == owner.id, Preset.slug == body.slug)):
+            raise ServiceError(409, "slug_taken", "You already have a preset with this slug")
+        preset = Preset(owner_id=owner.id, output=model["output"], **body.model_dump())
+        session.add(preset)
+        await session.commit()
+        return preset.as_dict()
+
+    @app.post("/v1/presets/from-generation/{job_id}", tags=["presets"], status_code=201)
+    async def preset_from_generation(
+        job_id: str, body: PresetFromGeneration, session: Session, owner: Owner, catalog: CatalogDep
+    ) -> dict:
+        """Convierte una generación en preset: mismos ajustes y medios; el prompt queda como variable."""
+        job = await get_owned_job(session, owner, job_id)
+        template = dict(job.input)
+        variables = []
+        if isinstance(template.get("prompt"), str):
+            variables.append(
+                {"key": "prompt", "label": "Prompt", "type": "textarea", "default": template["prompt"]}
+            )
+            template["prompt"] = "{{prompt}}"
+        return await create_preset(
+            PresetIn(
+                slug=body.slug,
+                title=body.title,
+                description=body.description,
+                model=job.model,
+                template=template,
+                variables=variables,
+            ),
+            session,
+            owner,
+            catalog,
+        )
+
+    @app.delete("/v1/presets/{slug}", tags=["presets"], status_code=204)
+    async def delete_preset(slug: str, session: Session, owner: Owner) -> None:
+        own = await session.scalar(select(Preset).where(Preset.owner_id == owner.id, Preset.slug == slug))
+        if not own:
+            raise ServiceError(404, "not_found", "Only your own presets can be deleted")
+        await session.delete(own)
+        await session.commit()
+
+    @app.post("/v1/presets/{slug}/run", tags=["presets"])
+    async def run_preset(
+        slug: str,
+        body: PresetRun,
+        request: Request,
+        session: Session,
+        owner: Owner,
+        catalog: CatalogDep,
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> JSONResponse:
+        """Rellena la plantilla del preset. Con dry_run devuelve la entrada resultante y su costo."""
+        preset = await find_preset(session, owner, slug)
+        values, missing = resolve_values(preset, body.variables)
+        model_input = render(preset["template"], values)
+        if body.dry_run:
+            q = await quote(
+                request.app.state.hf, catalog, catalog.get(preset["model"]), model_input, body.hints
+            )
+            return JSONResponse(
+                {"model": preset["model"], "input": model_input, "missing_variables": missing, "estimate": q}
+            )
+        if missing:
+            raise ServiceError(
+                422,
+                "missing_variables",
+                "Fill the required fields",
+                [{"path": k, "message": "required"} for k in missing],
+            )
+        job, created = await create_generation(
+            session, settings, catalog, owner, preset["model"], model_input, idempotency_key
+        )
+        if created:
+            request.app.state.worker.wake()
+        return JSONResponse(job_out(job, deduplicated=not created), status_code=202 if created else 200)
 
     @app.post("/v1/webhooks/higgsfield/{job_id}", tags=["sistema"], include_in_schema=False)
     async def webhook(job_id: str, request: Request, session: Session, token: str = "") -> dict:

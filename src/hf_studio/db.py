@@ -109,3 +109,30 @@ async def init_db(engine: AsyncEngine) -> None:
 
 def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+class Preset(Base):
+    """Preset propio de un cliente (los de serie viven en presets.BUILTIN)."""
+
+    __tablename__ = "presets"
+    __table_args__ = (UniqueConstraint("owner_id", "slug"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    slug: Mapped[str] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(40), default="Mine")
+    output: Mapped[str] = mapped_column(String(10))
+    model: Mapped[str] = mapped_column(String(200))
+    template: Mapped[dict] = mapped_column(JSON)
+    variables: Mapped[list] = mapped_column(JSON, default=list)
+    cover: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def as_dict(self) -> dict:
+        return {
+            "slug": self.slug, "title": self.title, "description": self.description, "category": self.category,
+            "output": self.output, "model": self.model, "template": self.template, "variables": self.variables,
+            "cover": self.cover, "builtin": False,
+        }  # fmt: skip

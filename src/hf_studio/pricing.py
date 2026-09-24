@@ -195,3 +195,41 @@ def normalize(raw: dict[str, Any], args: dict, hints: dict, placeholders: list[s
         "missing": approx["missing"],
         "description": desc,
     }
+
+
+async def quote(hf, catalog, model: dict, args: dict, hints: dict) -> dict:
+    """Cotiza una entrada (con medios de ejemplo si faltan). Lanza HiggsfieldError solo si es de credenciales."""
+    from .higgsfield import HiggsfieldError
+
+    filled, placeholders = fill_placeholders(model["input_schema"], args)
+    errors = catalog.validate(model["id"], filled)
+    if errors:
+        return {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
+                "basis": "Invalid input: " + "; ".join(f"{e['path']}: {e['message']}" for e in errors[:3]),
+                "missing": [], "description": None, "errors": errors}  # fmt: skip
+    try:
+        raw = await hf.estimate(model["id"], filled)
+    except HiggsfieldError as exc:
+        if exc.kind == "auth":
+            raise
+        reason = (
+            "Higgsfield needs the real media to price this model; upload it first"
+            if placeholders
+            else f"Higgsfield could not price this request ({exc.message})"
+        )
+        return {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
+                "basis": reason, "missing": placeholders, "description": None}  # fmt: skip
+    return normalize(raw, filled, hints, placeholders)
+
+
+def total(quotes: list[dict], counts: list[int]) -> dict:
+    """Suma de USD y créditos; `complete` es False si algún ítem no tiene precio."""
+    usd = credits = 0.0
+    complete = True
+    for q, n in zip(quotes, counts, strict=True):
+        if q.get("usd") is None or q.get("missing"):
+            complete = False
+            continue
+        usd += q["usd"] * n
+        credits += (q.get("credits") or 0) * n
+    return {"usd": round(usd, 4), "credits": round(credits, 3) or None, "complete": complete}
