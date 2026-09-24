@@ -20,7 +20,7 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel, Field, model_validator
 
-from .audio import has_audio
+from .audio import PROTOCOLS, duration, has_audio
 from .config import Settings
 
 log = logging.getLogger(__name__)
@@ -68,6 +68,11 @@ class VoiceChangeIn(BaseModel):
         0, ge=0, le=1, description="Volumen del audio original dentro del tramo (0 = solo la voz nueva)"
     )
     remove_background_noise: bool = Field(True, description="Aísla la voz antes de convertirla")
+    expected_seconds: float | None = Field(
+        None,
+        description="Segundos del tramo que se cotizaron (estimate.seconds). Obligatorio al lanzar: si el tramo "
+        "real no coincide, no se cobra y hay que volver a cotizar",
+    )
 
     @model_validator(mode="after")
     def _one_source(self) -> VoiceChangeIn:
@@ -208,13 +213,7 @@ async def _run(*args: str, timeout: float = 300) -> tuple[int, str]:
 
 
 async def probe_duration(source: str) -> float | None:
-    code, out = await _run(
-        "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", source, timeout=60
-    )
-    try:
-        return float(out) if code == 0 else None
-    except ValueError:
-        return None
+    return await duration(source)
 
 
 def segment_bounds(body: VoiceChangeIn, duration: float) -> tuple[float, float]:
@@ -248,24 +247,33 @@ def estimate(seconds: float, settings: Settings) -> dict:
 
 
 def mix_command(
-    source: str, voice: Path, out: Path, start: float, end: float, body: VoiceChangeIn
+    source: str,
+    voice: Path,
+    out: Path,
+    start: float,
+    end: float,
+    body: VoiceChangeIn,
+    voiced: float | None = None,
 ) -> list[str]:
-    seconds = end - start
+    """Mezcla la voz convertida en [start, end]. `voiced` es lo que dura de verdad la voz devuelta: si es más
+    corta que el tramo, el original solo se atenúa mientras suena la voz nueva."""
+    seconds = min(end - start, voiced) if voiced else end - start
+    stop = start + seconds
     fade_out = max(0.0, seconds - FADE)
     wet = (
         effect_graph(body.effect, "1:a", "fx") + ";"
         f"[fx]aresample=48000,atrim=0:{seconds},afade=t=in:d={FADE},afade=t=out:st={fade_out}:d={FADE},"
         f"adelay=delays={int(start * 1000)}:all=1"
     )
-    # El original baja a original_volume solo dentro del tramo (con fundidos) y encima entra la voz nueva.
+    # El original baja a original_volume solo mientras suena la voz nueva (con fundidos) y encima entra ella.
     cut = 1 - body.original_volume
     graph = (
         f"[0:a]aresample=48000,volume=eval=frame:"
-        f"volume='1-{cut}*clip((t-{start})/{FADE},0,1)*clip(({end}-t)/{FADE},0,1)'[dry];"
+        f"volume='1-{cut}*clip((t-{start})/{FADE},0,1)*clip(({stop}-t)/{FADE},0,1)'[dry];"
         f"{wet}[wet];[dry][wet]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[a]"
     )
     return [
-        "ffmpeg", "-y", "-v", "error", "-i", source, "-i", str(voice),
+        "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-i", source, "-i", str(voice),
         "-filter_complex", graph, "-map", "0:v:0", "-map", "[a]",
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(out),
     ]  # fmt: skip
@@ -281,7 +289,8 @@ async def change_voice(
     with tempfile.TemporaryDirectory(prefix="hfs-voice-") as tmp:
         segment, converted = Path(tmp) / "segment.wav", Path(tmp) / "voice.mp3"
         code, err = await _run(
-            "ffmpeg", "-y", "-v", "error", "-ss", str(start), "-t", str(end - start), "-i", source,
+            "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS,
+            "-ss", str(start), "-t", str(end - start), "-i", source,
             "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", str(segment),
         )  # fmt: skip
         if code != 0:
@@ -293,7 +302,8 @@ async def change_voice(
         )
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp_out = out.with_name(f"{out.stem}.tmp{out.suffix}")
-        code, err = await _run(*mix_command(source, converted, tmp_out, start, end, body))
+        voiced = await duration(str(converted))
+        code, err = await _run(*mix_command(source, converted, tmp_out, start, end, body, voiced))
         if code != 0:
             tmp_out.unlink(missing_ok=True)
             raise VoiceError(500, "mix_failed", f"Could not mix the new voice: {err[-300:]}")

@@ -3,6 +3,11 @@ import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset, Voice
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
 
+/** Tipo de salida de una generación: del catálogo de Higgsfield, o video para el cambio de voz. */
+export function outputOf(model: string, models: Map<string, ModelSummary>): string | undefined {
+  return model === VOICE_MODEL ? "video" : models.get(model)?.output;
+}
+
 /** Cliente del navegador: todo pasa por el proxy /api/studio, que añade la clave en el servidor. */
 const BASE = "/api/studio";
 

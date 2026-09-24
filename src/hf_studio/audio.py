@@ -59,39 +59,50 @@ async def _run(*args: str) -> tuple[int, str]:
     return proc.returncode or 0, (out or err).decode(errors="replace").strip()
 
 
+# ffmpeg solo abre archivos locales y HTTPS (nada de concat:, data:, subfile: ni http plano).
+PROTOCOLS = "file,https,tls,tcp,crypto"
+
+
 async def has_audio(source: str, ffprobe: str = "ffprobe") -> bool:
     code, out = await _run(
-        ffprobe,
-        "-v",
-        "error",
-        "-select_streams",
-        "a",
-        "-show_entries",
-        "stream=index",
-        "-of",
-        "csv=p=0",
-        source,
-    )
+        ffprobe, "-v", "error", "-protocol_whitelist", PROTOCOLS, "-select_streams", "a",
+        "-show_entries", "stream=index", "-of", "csv=p=0", source,
+    )  # fmt: skip
     return code == 0 and bool(out)
 
 
-async def mux_source_audio(video: Path, source: str, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe") -> str:
-    """Sustituye el audio de `video` por el de `source` (recortado a la duración del video).
+async def duration(source: str, ffprobe: str = "ffprobe") -> float | None:
+    code, out = await _run(
+        ffprobe, "-v", "error", "-protocol_whitelist", PROTOCOLS, "-show_entries", "format=duration",
+        "-of", "csv=p=0", source,
+    )  # fmt: skip
+    try:
+        return float(out) if code == 0 else None
+    except ValueError:
+        return None
 
-    El resultado generado se conserva como `<nombre>.generated<ext>`. Devuelve MUXED, NO_SOURCE_AUDIO o FAILED.
+
+async def mux_source_audio(video: Path, source: str, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe") -> str:
+    """Sustituye el audio de `video` por el de `source`, sin tocar la imagen ni su duración.
+
+    El audio se recorta o se completa con silencio (apad) para durar lo mismo que el video. El resultado
+    generado se conserva como `<nombre>.generated<ext>`. Devuelve MUXED, NO_SOURCE_AUDIO o FAILED.
     """
     try:
         if not await has_audio(source, ffprobe):
             return NO_SOURCE_AUDIO
+        before = await duration(str(video), ffprobe)
         tmp = video.with_name(f"{video.stem}.mux{video.suffix}")
         code, out = await _run(
-            ffmpeg, "-y", "-v", "error", "-i", str(video), "-i", source,
-            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            ffmpeg, "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-i", str(video), "-i", source,
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", "apad", "-c:a", "aac", "-b:a", "192k",
             "-shortest", "-movflags", "+faststart", str(tmp),
         )  # fmt: skip
-        if code != 0:
+        after = await duration(str(tmp), ffprobe) if code == 0 else None
+        if code != 0 or before is None or after is None or abs(after - before) > 0.1:
             tmp.unlink(missing_ok=True)
-            log.warning("ffmpeg no pudo mezclar el audio de %s: %s", source, out[-300:])
+            log.warning("No se pudo mezclar el audio de %s sin cambiar la duración (%s → %s): %s",
+                        source, before, after, out[-300:])  # fmt: skip
             return FAILED
         video.replace(video.with_name(f"{video.stem}.generated{video.suffix}"))
         tmp.replace(video)

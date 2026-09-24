@@ -47,7 +47,8 @@ export function VoiceStudio() {
   const [quoted, setQuoted] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const idempotency = useRef<string | null>(null);
+  // La clave de idempotencia vale solo para la petición exacta con la que se creó.
+  const idempotency = useRef<{ key: string; body: string } | null>(null);
 
   const videos = useMemo(() => items.map((g) => [g, sourceOf(g)] as const).filter(([, s]) => s), [items]);
 
@@ -143,12 +144,13 @@ export function VoiceStudio() {
   }
 
   async function submit() {
-    if (!body || !estimate) return;
+    const seconds = (estimate as { seconds?: number } | null)?.seconds;
+    if (!body || seconds === undefined) return;
     setSubmitting(true);
     setFormError(null);
-    idempotency.current ??= crypto.randomUUID();
+    if (idempotency.current?.body !== bodyKey) idempotency.current = { key: crypto.randomUUID(), body: bodyKey };
     try {
-      const g = await studio.changeVoice(body, idempotency.current);
+      const g = await studio.changeVoice({ ...body, expected_seconds: seconds }, idempotency.current.key);
       idempotency.current = null;
       router.push(`/history/${g.id}`);
     } catch (e) {

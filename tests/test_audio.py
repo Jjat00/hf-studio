@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from hf_studio.audio import MUXED, NO_SOURCE_AUDIO, apply_to_files
+from hf_studio.audio import MUXED, NO_SOURCE_AUDIO, apply_to_files, duration
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="requiere ffmpeg")
 
@@ -54,3 +54,13 @@ async def test_source_without_audio_leaves_result_untouched(tmp_path):
     )
     assert f["audio"] == NO_SOURCE_AUDIO
     assert streams(tmp_path / "0-video.mp4") == ["audio", "video"]
+
+
+async def test_shorter_source_audio_never_cuts_the_video(tmp_path):
+    make(tmp_path / "0-video.mp4", 4, audio=False)
+    make(tmp_path / "src.mp4", 2, audio=True)
+    [f] = await apply_to_files(
+        [{"name": "0-video.mp4", "kind": "video"}], tmp_path, str(tmp_path / "src.mp4")
+    )
+    assert f["audio"] == MUXED
+    assert abs(await duration(str(tmp_path / "0-video.mp4")) - 4) < 0.1

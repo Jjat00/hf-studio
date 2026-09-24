@@ -133,4 +133,6 @@ export type VoiceChangeBody = {
   effect: VoiceEffect;
   original_volume: number;
   remove_background_noise: boolean;
+  /** Segundos del tramo que se cotizaron: la API no cobra si ya no coinciden. */
+  expected_seconds?: number;
 };

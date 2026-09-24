@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .audio import supports_source_audio
 from .catalog import Catalog
 from .config import Settings
-from .db import ACTIVE, ApiClient, Job, utcnow
+from .db import ACTIVE, ApiClient, Job, Upload, utcnow
 
 
 class ServiceError(Exception):
@@ -42,6 +42,22 @@ async def get_owned_job(session: AsyncSession, owner: ApiClient, job_id: str) ->
     return job
 
 
+async def trusted_media(session: AsyncSession, owner: ApiClient, url: str) -> bool:
+    """URL que HF Studio puede abrir con ffmpeg sin riesgo de SSRF: una subida propia o una salida de
+    una generación propia (con sees_all, de cualquier cliente). Nunca una URL arbitraria."""
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return False
+    uploads = select(Upload.id).where(Upload.url == url)
+    if not owner.sees_all:
+        uploads = uploads.where(Upload.owner_id == owner.id)
+    if await session.scalar(uploads.limit(1)):
+        return True
+    jobs = select(Job.outputs).where(Job.status == "completed")
+    if not owner.sees_all:
+        jobs = jobs.where(Job.owner_id == owner.id)
+    return any(o.get("url") == url for outputs in await session.scalars(jobs) for o in outputs or [])
+
+
 async def create_generation(
     session: AsyncSession,
     settings: Settings,
@@ -58,6 +74,12 @@ async def create_generation(
     if keep_source_audio and not supports_source_audio(model):
         raise ServiceError(
             422, "source_audio_unsupported", "keep_source_audio needs a video model with a video_url input"
+        )
+    if keep_source_audio and not await trusted_media(session, owner, arguments.get("video_url")):
+        raise ServiceError(
+            422,
+            "untrusted_source",
+            "keep_source_audio needs a video_url from /v1/uploads (upload_media) or from one of your generations",
         )
     # La opción cambia el resultado, así que forma parte de la huella (deduplicado e idempotencia).
     digest = input_hash(

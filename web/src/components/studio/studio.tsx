@@ -25,7 +25,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
-import { costShort, modelLabel, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
+import { costShort, modelLabel, outputOf, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { Masonry } from "@/components/masonry";
@@ -271,7 +271,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     }
   }
 
-  const history = items.filter((g) => (byId.get(g.model)?.output ?? (g.model === VOICE_MODEL ? "video" : output)) === output);
+  const history = items.filter((g) => (outputOf(g.model, byId) ?? output) === output);
   const hero = mode.hero;
   const { name } = detail ? modelLabel(detail.title) : { name: "" };
   const twoUp = media.length === 2 && media.every((m) => !m.multiple);

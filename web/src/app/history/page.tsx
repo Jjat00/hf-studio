@@ -7,7 +7,7 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { Masonry } from "@/components/masonry";
 import { useI18n } from "@/components/i18n-provider";
-import { studio, VOICE_MODEL } from "@/lib/studio";
+import { outputOf, studio, VOICE_MODEL } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const FILTERS = ["all", "video", "image", "active", "failed"] as const;
@@ -25,7 +25,7 @@ export default function HistoryPage() {
   const shown = useMemo(
     () =>
       items.filter((g) => {
-        const out = models.get(g.model)?.output;
+        const out = outputOf(g.model, models);
         if (filter === "video" || filter === "image") return out === filter;
         if (filter === "active") return !g.terminal;
         if (filter === "failed") return g.terminal && g.status !== "completed";

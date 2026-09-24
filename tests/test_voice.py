@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+from itertools import pairwise
 
 import httpx
 import pytest
@@ -107,7 +108,7 @@ async def test_estimate_uses_segment_length(voice_env):
 async def test_voice_change_end_to_end_with_library_voice(voice_env):
     app, http, fake, src = voice_env
     body = {"source_generation_id": src, "start": 1, "end": 3.5, "voice_id": "lib1",
-            "public_owner_id": "owner1", "effect": "monster"}  # fmt: skip
+            "public_owner_id": "owner1", "effect": "monster", "expected_seconds": 2.5}  # fmt: skip
     job = await http.post("/v1/voice/changes", json=body, headers={"Idempotency-Key": "k1"})
     assert job.status_code == 202 and job.json()["model"] == VOICE_MODEL
     await asyncio.gather(*app.state.tasks)
@@ -149,3 +150,57 @@ def test_effects_are_valid_ffmpeg_graphs(tmp_path, effect):
         "-i", str(tmp_path / "in.wav"), "-filter_complex", graph, "-map", "[fx]", str(tmp_path / "out.wav")
     )
     assert (tmp_path / "out.wav").stat().st_size > 0
+
+
+async def test_run_requires_the_quoted_segment(voice_env):
+    _, http, fake, src = voice_env
+    body = {"source_generation_id": src, "start": 1, "end": 60, "voice_id": "v_demon"}
+    unquoted = await http.post("/v1/voice/changes", json=body)
+    assert unquoted.json()["error"]["code"] == "quote_required"
+    # Se cotizó un tramo de 59 s, pero el video solo da 5 s: no se cobra y hay que volver a cotizar.
+    changed = await http.post("/v1/voice/changes", json={**body, "expected_seconds": 59})
+    assert changed.status_code == 409 and changed.json()["error"]["code"] == "cost_changed"
+    assert not [c for c in fake.calls if "speech-to-speech" in c.url.path]
+
+
+async def test_same_key_for_another_request_is_a_conflict(voice_env):
+    app, http, _, src = voice_env
+    body = {"source_generation_id": src, "start": 1, "end": 2, "voice_id": "v_demon", "expected_seconds": 1}
+    assert (
+        await http.post("/v1/voice/changes", json=body, headers={"Idempotency-Key": "k"})
+    ).status_code == 202
+    other = await http.post(
+        "/v1/voice/changes", json={**body, "effect": "ghost"}, headers={"Idempotency-Key": "k"}
+    )
+    assert other.status_code == 409 and other.json()["error"]["code"] == "idempotency_conflict"
+    await asyncio.gather(*app.state.tasks)
+
+
+async def test_arbitrary_urls_are_not_opened(voice_env):
+    _, http, _, _ = voice_env
+    body = {"source_url": "https://169.254.169.254/latest/meta-data", "voice_id": "v_demon"}
+    r = await http.post("/v1/voice/estimate", json=body)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "untrusted_source"
+
+
+def test_shorter_converted_voice_only_ducks_while_it_sounds(tmp_path):
+    ffmpeg("-f", "lavfi", "-i", "testsrc=size=160x120:rate=24:duration=6", "-f", "lavfi",
+           "-i", "sine=frequency=880:duration=6", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+           "-shortest", str(tmp_path / "src.mp4"))  # fmt: skip
+    ffmpeg("-f", "lavfi", "-i", "sine=frequency=220:duration=1", str(tmp_path / "voice.wav"))
+    from hf_studio.voice import VoiceChangeIn, mix_command
+
+    body = VoiceChangeIn(source_url="https://x/v.mp4", voice_id="v", start=2, end=5)
+    subprocess.run(mix_command(str(tmp_path / "src.mp4"), tmp_path / "voice.wav", tmp_path / "out.mp4",
+                               2, 5, body, voiced=1.0), check=True)  # fmt: skip
+
+    def hz(start: float) -> float:
+        """Frecuencia dominante por cruces por cero: 220 Hz es la voz nueva, 880 Hz el original."""
+        pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", str(tmp_path / "out.mp4"), "-ss", str(start), "-t", "0.5",
+                              "-f", "s16le", "-ac", "1", "-ar", "8000", "-"], capture_output=True, check=True).stdout  # fmt: skip
+        x = memoryview(pcm).cast("h")
+        return sum((a < 0) != (b < 0) for a, b in pairwise(x)) / 2 / 0.5
+
+    # Voz nueva de 1 s (2 → 3 s) con el original apagado; después vuelve el original, no un hueco mudo.
+    assert abs(hz(2.3) - 220) < 30
+    assert abs(hz(3.5) - 880) < 60

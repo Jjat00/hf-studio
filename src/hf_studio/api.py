@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .audio import studio_notes
@@ -37,7 +38,7 @@ from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
 from .recommend import recommend
-from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash
+from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
 from .voice import (
     VOICE_MODEL,
     ElevenLabsClient,
@@ -704,8 +705,13 @@ def create_app(
     async def voice_source(session: AsyncSession, owner: ApiClient, body: VoiceChangeIn) -> str:
         """Ruta local o URL del video de origen."""
         if body.source_url:
-            if not body.source_url.startswith(("https://", "http://")):
-                raise ServiceError(422, "invalid_source", "source_url must be an http(s) URL")
+            # Solo medios propios: ffmpeg no debe abrir URLs arbitrarias (SSRF).
+            if not await trusted_media(session, owner, body.source_url):
+                raise ServiceError(
+                    422,
+                    "untrusted_source",
+                    "source_url must come from /v1/uploads (upload_media) or be one of your generations",
+                )
             return body.source_url
         job = await get_owned_job(session, owner, body.source_generation_id or "")
         videos = [o for o in job.outputs or [] if o.get("kind") == "video"]
@@ -764,25 +770,67 @@ def create_app(
             raise VoiceError(
                 503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env to change voices"
             )
+        if body.expected_seconds is None:
+            raise ServiceError(
+                422,
+                "quote_required",
+                "Quote first (POST /v1/voice/estimate) and send its seconds as expected_seconds",
+            )
+        request_args = body.model_dump(exclude_none=True, exclude={"expected_seconds"})
+        digest = input_hash(VOICE_MODEL, request_args)
         if idempotency_key:
             existing = await session.scalar(
                 select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
             )
             if existing:
+                if existing.input_hash != digest:
+                    raise ServiceError(
+                        409,
+                        "idempotency_conflict",
+                        "This Idempotency-Key was already used for a different request",
+                    )
                 return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
         source, start, end = await voice_plan(session, owner, body)
-        args = {**body.model_dump(exclude_none=True), "start": start, "end": end}
+        if abs((end - start) - body.expected_seconds) > 0.05:
+            raise ServiceError(
+                409,
+                "cost_changed",
+                f"The segment now lasts {end - start:.2f}s, not the quoted {body.expected_seconds:.2f}s. "
+                "Quote again and show the new cost",
+            )
+        active = await session.scalar(
+            select(func.count()).select_from(Job).where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
+        )
+        if active >= settings.max_active_jobs_per_client:
+            raise ServiceError(
+                429,
+                "too_many_active",
+                f"You have {active} active jobs (maximum {settings.max_active_jobs_per_client})",
+            )
+        args = {**request_args, "start": start, "end": end}
         job = Job(
             owner_id=owner.id,
             model=VOICE_MODEL,
             input=args,
-            input_hash=input_hash(VOICE_MODEL, args),
+            input_hash=digest,
             idempotency_key=idempotency_key,
             status="in_progress",
             submitted_at=utcnow(),
         )
         session.add(job)
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Dos envíos simultáneos con la misma Idempotency-Key: gana el primero.
+            await session.rollback()
+            existing = await session.scalar(
+                select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
+            )
+            if existing and existing.input_hash == digest:
+                return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
+            raise ServiceError(
+                409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"
+            ) from None
         task = asyncio.create_task(run_voice_change(request.app, job.id, body, source, start, end))
         request.app.state.tasks.add(task)
         task.add_done_callback(request.app.state.tasks.discard)
@@ -796,7 +844,12 @@ def create_app(
         error: tuple[str, str] | None = None
         async with app.state.voice_slots:
             try:
-                await change_voice(app.state.eleven, body, source, start, end, out)
+                await asyncio.wait_for(
+                    change_voice(app.state.eleven, body, source, start, end, out),
+                    settings.job_timeout_seconds,
+                )
+            except TimeoutError:
+                error = ("timed_out", f"Exceeded {settings.job_timeout_seconds}s")
             except VoiceError as exc:
                 error = (exc.code, exc.message)
             except Exception as exc:  # no dejar el trabajo colgado en in_progress
@@ -808,7 +861,8 @@ def create_app(
                 return
             job.finished_at = utcnow()
             if error:
-                job.status, job.error_kind, job.error = "failed", error[0], error[1]
+                job.status = "timed_out" if error[0] == "timed_out" else "failed"
+                job.error_kind, job.error = error[0], error[1]
             else:
                 job.status = "completed"
                 job.outputs = [{"kind": "video", "url": f"/v1/generations/{job_id}/files/{name}"}]

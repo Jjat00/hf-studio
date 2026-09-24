@@ -8,11 +8,11 @@ from datetime import timedelta
 
 import httpx
 import pytest
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from hf_studio.api import create_app
 from hf_studio.config import Settings
-from hf_studio.db import ApiClient, Job, hash_token, utcnow
+from hf_studio.db import ApiClient, Job, Upload, hash_token, utcnow
 
 T2V = "bytedance/seedance-2.0/text-to-video"
 I2V = "bytedance/seedance-2.0/image-to-video"
@@ -447,11 +447,24 @@ EDIT = "bytedance/seedance-2.5/video-edit"
 
 
 async def test_keep_source_audio_only_for_video_inputs(env):
-    _, http, _ = env
+    app, http, _ = env
     bad = await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "keep_source_audio": True})
     assert bad.status_code == 422
     assert bad.json()["error"]["code"] == "source_audio_unsupported"
     body = {"prompt": "swap the jacket", "video_url": "https://cdn.test/src.mp4", "generate_audio": False}
+    # Una URL que no es una subida propia no se abre con ffmpeg (SSRF).
+    untrusted = await http.post(
+        "/v1/generations", json={"model": EDIT, "input": body, "keep_source_audio": True}
+    )
+    assert untrusted.json()["error"]["code"] == "untrusted_source"
+    async with app.state.sessions() as s:
+        owner = await s.scalar(select(ApiClient).where(ApiClient.name == "agente"))
+        s.add(
+            Upload(
+                owner_id=owner.id, filename="src.mp4", content_type="video/mp4", size=1, url=body["video_url"]
+            )
+        )
+        await s.commit()
     plain = (await http.post("/v1/generations", json={"model": EDIT, "input": body})).json()
     kept = await http.post("/v1/generations", json={"model": EDIT, "input": body, "keep_source_audio": True})
     # La opción cambia el resultado: no se deduplica contra la misma entrada sin ella.
