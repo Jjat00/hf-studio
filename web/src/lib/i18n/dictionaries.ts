@@ -90,6 +90,7 @@ const es = {
     on: "Sí",
     off: "No",
     emptyRandom: "Vacío = aleatorio",
+    externalHint: (text: string) => `Higgsfield, en inglés: ${text}`,
     fields: {
       resolution: "Calidad",
       quality: "Calidad",
@@ -106,6 +107,7 @@ const es = {
       batch_size: "Imágenes",
       style: "Estilo",
       enhance_prompt: "Mejorar prompt",
+      file_url: "Archivo de referencia",
       aigc_watermark: "Marca de agua IA",
       background_color: "Color de fondo",
       bitrate_mode: "Modo de bitrate",
@@ -411,6 +413,7 @@ const en: Dict = {
     on: "On",
     off: "Off",
     emptyRandom: "Empty = random",
+    externalHint: (text) => text,
     fields: {
       resolution: "Quality",
       quality: "Quality",

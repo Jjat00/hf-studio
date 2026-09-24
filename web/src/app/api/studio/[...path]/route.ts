@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { LOCALE_COOKIE, toLocale } from "@/lib/i18n";
 
 /**
  * Proxy hacia la API de HF Studio. La clave `hfs_…` vive solo aquí (HF_STUDIO_TOKEN),
@@ -6,17 +7,29 @@ import type { NextRequest } from "next/server";
  */
 const API = process.env.HF_STUDIO_URL ?? "http://127.0.0.1:8787";
 const FORWARD_REQ = ["content-type", "idempotency-key", "range", "accept"];
+/** Mensajes propios del proxy en el idioma de la UI (cookie hfs-lang; español por defecto). */
+const MESSAGES = {
+  es: {
+    misconfigured: "Falta HF_STUDIO_TOKEN en web/.env.local",
+    apiDown: (url: string) => `La API de HF Studio no responde en ${url}. ¿Está corriendo \`hf-studio serve\`?`,
+  },
+  en: {
+    misconfigured: "HF_STUDIO_TOKEN is missing in web/.env.local",
+    apiDown: (url: string) => `HF Studio API is not reachable at ${url}. Is \`hf-studio serve\` running?`,
+  },
+};
 const FORWARD_RES = ["content-type", "content-length", "content-range", "accept-ranges", "content-disposition", "etag", "last-modified"];
 
 async function proxy(req: NextRequest, ctx: RouteContext<"/api/studio/[...path]">) {
   const { path } = await ctx.params;
+  const msg = MESSAGES[toLocale(req.cookies.get(LOCALE_COOKIE)?.value)];
   if (path[0] !== "v1" && path[0] !== "health") {
     return Response.json({ error: { code: "not_found", message: "Route not allowed" } }, { status: 404 });
   }
   const token = process.env.HF_STUDIO_TOKEN;
   if (!token) {
     return Response.json(
-      { error: { code: "misconfigured", message: "HF_STUDIO_TOKEN is missing in web/.env.local" } },
+      { error: { code: "misconfigured", message: msg.misconfigured } },
       { status: 500 },
     );
   }
@@ -39,7 +52,7 @@ async function proxy(req: NextRequest, ctx: RouteContext<"/api/studio/[...path]"
     } as RequestInit);
   } catch {
     return Response.json(
-      { error: { code: "api_down", message: `HF Studio API is not reachable at ${API}. Is \`hf-studio serve\` running?` } },
+      { error: { code: "api_down", message: msg.apiDown(API) } },
       { status: 502 },
     );
   }

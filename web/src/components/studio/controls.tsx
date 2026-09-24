@@ -33,6 +33,8 @@ export function FieldControl({
 }) {
   const { t } = useI18n();
   const label = humanize(field.key, t.controls.fields);
+  // La descripción viene del catálogo de Higgsfield (inglés); en español se marca su origen.
+  const hint = field.schema.description && t.controls.externalHint(field.schema.description);
   switch (field.kind) {
     case "enum": {
       const many = field.options.length > 6;
@@ -123,7 +125,7 @@ export function FieldControl({
             type="number"
             value={typeof value === "number" ? value : ""}
             onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-            placeholder={field.schema.description ?? t.controls.emptyRandom}
+            placeholder={hint || t.controls.emptyRandom}
             className="w-full bg-transparent text-[15px] font-semibold outline-none placeholder:font-normal placeholder:text-fg-4"
           />
         </SettingCard>
@@ -137,14 +139,14 @@ export function FieldControl({
               onChange={(e) => onChange(e.target.value || undefined)}
               rows={2}
               className="w-full resize-none bg-transparent text-[15px] outline-none placeholder:text-fg-4"
-              placeholder={field.schema.description}
+              placeholder={hint}
             />
           ) : (
             <input
               value={typeof value === "string" ? value : ""}
               onChange={(e) => onChange(e.target.value || undefined)}
               className="w-full bg-transparent text-[15px] outline-none placeholder:text-fg-4"
-              placeholder={field.schema.description}
+              placeholder={hint}
             />
           )}
         </SettingCard>
