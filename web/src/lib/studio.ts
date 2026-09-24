@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Generation, ModelDetail, ModelSummary } from "./types";
+import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset } from "./types";
 
 /** Cliente del navegador: todo pasa por el proxy /api/studio, que añade la clave en el servidor. */
 const BASE = "/api/studio";
@@ -49,6 +49,26 @@ export const studio = {
     }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
   get: (id: string) => call<Generation>(`/v1/generations/${id}`),
+  presets: () => call<{ presets: Preset[] }>("/v1/presets"),
+  preset: (slug: string) => call<Preset>(`/v1/presets/${slug}`),
+  previewPreset: (slug: string, variables: Record<string, unknown>, hints: Record<string, number> = {}) =>
+    call<{ model: string; input: Record<string, unknown>; missing_variables: string[]; estimate: Estimate }>(
+      `/v1/presets/${slug}/run`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ variables, dry_run: true, hints }) },
+    ),
+  runPreset: (slug: string, variables: Record<string, unknown>, idempotencyKey: string) =>
+    call<Generation>(`/v1/presets/${slug}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ variables }),
+    }),
+  savePreset: (generationId: string, slug: string, title: string) =>
+    call<Preset>(`/v1/presets/from-generation/${generationId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slug, title }),
+    }),
+  deletePreset: (slug: string) => call<void>(`/v1/presets/${slug}`, { method: "DELETE" }),
   remove: (id: string) => call<void>(`/v1/generations/${id}`, { method: "DELETE" }),
   cancel: (id: string) => call<Generation>(`/v1/generations/${id}/cancel`, { method: "POST" }),
   upload: async (file: File) => {

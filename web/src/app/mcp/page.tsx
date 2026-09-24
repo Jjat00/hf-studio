@@ -24,6 +24,12 @@ const TOOLS = [
   ["list_generations", "History shared with this interface"],
   ["cancel_generation", "Cancel anything that has not started yet"],
   ["download_outputs", "Download results to a local folder"],
+  ["recommend_models", "Describe the task, get the best models with their price"],
+  ["generate_batch", "Several variants at once, total cost first (dry run)"],
+  ["wait_generations", "Wait for many generations in one call"],
+  ["list_presets", "Ready-made recipes and your saved presets"],
+  ["run_preset", "Fill a recipe's fields, preview cost, then generate"],
+  ["save_preset", "Turn any generation into a reusable preset"],
 ];
 
 export default function McpPage() {
@@ -48,7 +54,7 @@ export default function McpPage() {
         <CopyBlock title="Codex" code={CODEX} />
       </section>
       <section className="mx-auto w-full max-w-5xl">
-        <h2 className="headline text-[32px]">9 tools</h2>
+        <h2 className="headline text-[32px]">{TOOLS.length} tools</h2>
         <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
           {TOOLS.map(([name, body]) => (
             <div key={name} className="rounded-[22px] border border-line bg-surface-2 p-5">

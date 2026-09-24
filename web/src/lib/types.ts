@@ -74,3 +74,26 @@ export type Generation = {
 export type ApiErrorBody = {
   error?: { code: string; message: string; details?: { path: string; message: string }[] };
 };
+
+export type PresetVariable = {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "select" | "image" | "images" | "video" | "number";
+  required?: boolean;
+  default?: unknown;
+  options?: string[];
+  placeholder?: string;
+};
+
+export type Preset = {
+  slug: string;
+  title: string;
+  description: string;
+  category: string;
+  output: "video" | "image";
+  model: string;
+  template: Record<string, unknown>;
+  variables: PresetVariable[];
+  cover: string | null;
+  builtin: boolean;
+};

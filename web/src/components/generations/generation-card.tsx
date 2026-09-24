@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, Ban, Copy, Download, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, Ban, Bookmark, Check, Copy, Download, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { outputSrc, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
@@ -61,6 +61,19 @@ export function GenerationCard({
 }) {
   const elapsed = useElapsed(g);
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  async function saveAsPreset() {
+    const title = window.prompt("Preset name", prompt.slice(0, 40) || "My preset");
+    if (!title) return;
+    const slug = title.toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "preset";
+    try {
+      const p = await studio.savePreset(g.id, slug, title);
+      setSaved(p.slug);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  }
   const prompt = typeof g.input.prompt === "string" ? g.input.prompt : "";
   const ratio = RATIO[String(g.input.aspect_ratio ?? "")] ?? "16 / 9";
   const main = g.outputs[0];
@@ -120,6 +133,11 @@ export function GenerationCard({
       {prompt && (
         <IconButton label="Copy prompt" onClick={() => navigator.clipboard.writeText(prompt)}>
           <Copy className="size-4" />
+        </IconButton>
+      )}
+      {g.status === "completed" && (
+        <IconButton label={saved ? `Saved as /${saved}` : "Save as preset"} onClick={saveAsPreset}>
+          {saved ? <Check className="size-4 text-lime" /> : <Bookmark className="size-4" />}
         </IconButton>
       )}
       {onDelete && g.terminal && (
