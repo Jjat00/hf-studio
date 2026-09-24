@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
@@ -80,3 +82,38 @@ def test_expired_quote_is_refused(monkeypatch):
     mcp_server._quotes[q]["expires"] = 0
     with pytest.raises(ToolError, match="expired"):
         mcp_server.generate("m", {"prompt": "x"}, quote_id=q)
+
+
+def test_concurrent_redeems_accept_a_single_key(monkeypatch):
+    import threading
+
+    call, _ = _fake({"usd": 1.2, "complete": True, "missing": []})
+    monkeypatch.setattr(mcp_server, "_call", call)
+    payload = {"model": "m", "input": {"prompt": "x"}, "hints": {}}
+    q = mcp_server.estimate_cost("m", {"prompt": "x"})["quote_id"]
+    start, accepted = threading.Barrier(8), []
+
+    # Simula que el hilo pierde la CPU justo después de leer la clave usada: sin lock,
+    # varios hilos verían «sin usar» y la cotización pagaría varias ejecuciones.
+    class SlowQuote(dict):
+        def __getitem__(self, name):
+            value = super().__getitem__(name)
+            if name == "key":
+                time.sleep(0.05)
+            return value
+
+    mcp_server._quotes[q] = SlowQuote(mcp_server._quotes[q])
+
+    def redeem(n):
+        start.wait()
+        try:
+            accepted.append(mcp_server._redeem_quote(payload, q, f"k{n}", False))
+        except ToolError:
+            pass
+
+    threads = [threading.Thread(target=redeem, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(accepted) == 1

@@ -10,6 +10,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -189,6 +190,8 @@ def _complete(estimate: dict) -> bool:
 # Cotizaciones vistas por el usuario, de un solo uso: quote_id → petición, precio, vencimiento y clave usada.
 QUOTE_TTL = 15 * 60
 _quotes: dict[str, dict] = {}
+# Las herramientas síncronas corren en hilos: emitir y canjear cotizaciones debe ser atómico.
+_quotes_lock = threading.Lock()
 
 
 def _fingerprint(payload: dict) -> str:
@@ -196,17 +199,18 @@ def _fingerprint(payload: dict) -> str:
 
 
 def _issue_quote(payload: dict, estimate: dict) -> str:
-    now = time.monotonic()
-    for qid in [q for q, v in _quotes.items() if v["expires"] < now]:
-        del _quotes[qid]
-    qid = "q_" + uuid.uuid4().hex[:16]
-    _quotes[qid] = {
-        "request": _fingerprint(payload),
-        "estimate": estimate,
-        "expires": now + QUOTE_TTL,
-        "key": None,
-    }
-    return qid
+    with _quotes_lock:
+        now = time.monotonic()
+        for qid in [q for q, v in _quotes.items() if v["expires"] < now]:
+            del _quotes[qid]
+        qid = "q_" + uuid.uuid4().hex[:16]
+        _quotes[qid] = {
+            "request": _fingerprint(payload),
+            "estimate": estimate,
+            "expires": now + QUOTE_TTL,
+            "key": None,
+        }
+        return qid
 
 
 def _redeem_quote(
@@ -215,27 +219,28 @@ def _redeem_quote(
     """Regla del dueño: no se gasta sin que el usuario haya visto el precio de esta misma petición.
     Cada cotización sirve para una sola ejecución; reintentar con la misma clave no vuelve a cobrar.
     Devuelve la clave de idempotencia que debe usarse."""
-    q = _quotes.get(quote_id or "")
-    if not q or q["expires"] < time.monotonic() or q["request"] != _fingerprint(payload):
-        raise ToolError(
-            "Missing, expired or mismatched quote_id. Quote this exact request first (dry_run / estimate_cost), "
-            "show the cost to the user, and call again with the returned quote_id once they agree."
-        )
-    if not _complete(q["estimate"]) and not confirm_unknown_cost:
-        missing = ", ".join(q["estimate"].get("missing") or []) or "price not available"
-        raise ToolError(
-            f"No complete price for this request ({missing}). Pass input_video_seconds with the real length "
-            "of the input video, or tell the user the cost is unknown and, only if they explicitly accept, "
-            "retry with confirm_unknown_cost=True."
-        )
-    key = idempotency_key or q["key"] or f"quote-{quote_id}"
-    if q["key"] and key != q["key"]:
-        raise ToolError(
-            "This quote_id was already used. To retry the same run, reuse its idempotency_key; "
-            "for a new run, quote again and get the user's OK."
-        )
-    q["key"] = key
-    return key
+    with _quotes_lock:
+        q = _quotes.get(quote_id or "")
+        if not q or q["expires"] < time.monotonic() or q["request"] != _fingerprint(payload):
+            raise ToolError(
+                "Missing, expired or mismatched quote_id. Quote this exact request first (dry_run / estimate_cost), "
+                "show the cost to the user, and call again with the returned quote_id once they agree."
+            )
+        if not _complete(q["estimate"]) and not confirm_unknown_cost:
+            missing = ", ".join(q["estimate"].get("missing") or []) or "price not available"
+            raise ToolError(
+                f"No complete price for this request ({missing}). Pass input_video_seconds with the real length "
+                "of the input video, or tell the user the cost is unknown and, only if they explicitly accept, "
+                "retry with confirm_unknown_cost=True."
+            )
+        key = idempotency_key or q["key"] or f"quote-{quote_id}"
+        if q["key"] and key != q["key"]:
+            raise ToolError(
+                "This quote_id was already used. To retry the same run, reuse its idempotency_key; "
+                "for a new run, quote again and get the user's OK."
+            )
+        q["key"] = key
+        return key
 
 
 @mcp.tool()
