@@ -21,7 +21,7 @@ def _is_public_url(value: object) -> bool:
         return True
     parsed = urlparse(value)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("debe ser una URL http(s) pública; sube archivos locales con POST /v1/uploads")
+        raise ValueError("must be a public http(s) URL; upload local files with POST /v1/uploads")
     return True
 
 
@@ -56,7 +56,7 @@ class Catalog:
         )
         return [
             {
-                "path": "/".join(str(p) for p in e.absolute_path) or "(raíz)",
+                "path": "/".join(str(p) for p in e.absolute_path) or "(root)",
                 "message": f"{e.message}: {e.cause}" if e.cause else e.message,
             }
             for e in errors

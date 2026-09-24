@@ -96,10 +96,10 @@ class HiggsfieldClient:
         try:
             response = await self._api.post(f"/{model}", json=arguments, params=params)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-            raise HiggsfieldError("network", f"No se pudo conectar con Higgsfield: {exc}") from exc
+            raise HiggsfieldError("network", f"Could not connect to Higgsfield: {exc}") from exc
         except httpx.TransportError as exc:
             # La petición pudo llegar: reintentarla podría duplicar la generación y el cobro.
-            raise HiggsfieldError("ambiguous", f"Envío sin respuesta ({type(exc).__name__})") from exc
+            raise HiggsfieldError("ambiguous", f"Submission got no response ({type(exc).__name__})") from exc
         _raise_for(response)
         return {**response.json(), "_correlation_id": response.headers.get("x-correlation-id")}
 
@@ -108,7 +108,7 @@ class HiggsfieldClient:
         try:
             response = await self._api.get(url)
         except httpx.TransportError as exc:
-            raise HiggsfieldError("network", f"Fallo de red consultando estado: {exc}") from exc
+            raise HiggsfieldError("network", f"Network error while checking status: {exc}") from exc
         _raise_for(response)
         return response.json()
 
@@ -117,16 +117,16 @@ class HiggsfieldClient:
         try:
             response = await self._api.post(url)
         except httpx.TransportError as exc:
-            raise HiggsfieldError("network", f"Fallo de red cancelando: {exc}") from exc
+            raise HiggsfieldError("network", f"Network error while canceling: {exc}") from exc
         if response.status_code == 400:
-            raise HiggsfieldError("too_late", "La generación ya empezó y no se puede cancelar", 400)
+            raise HiggsfieldError("too_late", "Generation already started and can no longer be canceled", 400)
         _raise_for(response)
 
     async def estimate(self, model: str, arguments: dict[str, Any]) -> dict:
         try:
             response = await self._api.post(f"/estimate/{model}", json=arguments)
         except httpx.TransportError as exc:
-            raise HiggsfieldError("network", f"Fallo de red estimando costo: {exc}") from exc
+            raise HiggsfieldError("network", f"Network error while estimating cost: {exc}") from exc
         _raise_for(response)
         return response.json()
 
@@ -140,10 +140,10 @@ class HiggsfieldClient:
                 ticket["upload_url"], content=data, headers=ticket.get("upload_headers") or {}
             )
         except httpx.TransportError as exc:
-            raise HiggsfieldError("network", f"Fallo de red subiendo archivo: {exc}") from exc
+            raise HiggsfieldError("network", f"Network error while uploading: {exc}") from exc
         if not put.is_success:
             raise HiggsfieldError(
-                "server", f"El almacenamiento rechazó la subida ({put.status_code})", put.status_code
+                "server", f"Storage rejected the upload ({put.status_code})", put.status_code
             )
         return ticket["public_url"]
 

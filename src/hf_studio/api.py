@@ -26,15 +26,15 @@ from .worker import Worker
 log = logging.getLogger("hf_studio.api")
 
 STAGES = {
-    "pending": "En cola local, esperando cupo de concurrencia de la cuenta",
-    "submitting": "Enviando a Higgsfield",
-    "queued": "En cola en Higgsfield",
-    "in_progress": "Generando",
-    "completed": "Listo",
-    "failed": "Falló",
-    "nsfw": "Rechazado por moderación (no se cobra)",
-    "canceled": "Cancelado",
-    "timed_out": "Tiempo de espera agotado",
+    "pending": "Waiting for a free concurrency slot",
+    "submitting": "Submitting to Higgsfield",
+    "queued": "Queued at Higgsfield",
+    "in_progress": "Generating",
+    "completed": "Ready",
+    "failed": "Failed",
+    "nsfw": "Blocked by moderation (not charged)",
+    "canceled": "Canceled",
+    "timed_out": "Timed out",
 }
 HF_ERROR_STATUS = {
     "auth": 502, "credits": 402, "not_found": 404, "validation": 422, "bad_request": 400,
@@ -96,7 +96,7 @@ def create_app(
 
     @app.exception_handler(HiggsfieldError)
     async def _hf_error(_: Request, exc: HiggsfieldError) -> JSONResponse:
-        message = "Credenciales de Higgsfield del servidor inválidas" if exc.kind == "auth" else exc.message
+        message = "The server's Higgsfield credentials are invalid" if exc.kind == "auth" else exc.message
         body = {"code": f"higgsfield_{exc.kind}", "message": message, "correlation_id": exc.correlation_id}
         return JSONResponse({"error": body}, status_code=HF_ERROR_STATUS.get(exc.kind, 502))
 
@@ -118,9 +118,7 @@ def create_app(
             else None
         )
         if not client or client.revoked_at:
-            raise ServiceError(
-                401, "unauthorized", "Falta o no es válida la clave (Authorization: Bearer hfs_…)"
-            )
+            raise ServiceError(401, "unauthorized", "Missing or invalid key (Authorization: Bearer hfs_…)")
         return client
 
     Owner = Annotated[ApiClient, Depends(client_dep)]
@@ -207,7 +205,7 @@ def create_app(
     async def get_model(model_id: str, _: Owner, catalog: CatalogDep) -> dict:
         model = catalog.get(model_id)
         if not model:
-            raise ServiceError(404, "unknown_model", f"Modelo desconocido: {model_id}")
+            raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
         return model_out(model, full=True)
 
     @app.post("/v1/estimate", tags=["generaciones"])
@@ -224,17 +222,17 @@ def create_app(
             content_type = (mimetypes.guess_type(file.filename or "")[0] or "").lower()
         if content_type not in UPLOAD_CONTENT_TYPES:
             raise ServiceError(
-                415, "unsupported_media", f"Tipos admitidos: {', '.join(sorted(UPLOAD_CONTENT_TYPES))}"
+                415, "unsupported_media", f"Supported types: {', '.join(sorted(UPLOAD_CONTENT_TYPES))}"
             )
         data = bytearray()
         while chunk := await file.read(1024 * 1024):
             data.extend(chunk)
             if len(data) > settings.max_upload_bytes:
                 raise ServiceError(
-                    413, "too_large", f"Máximo {settings.max_upload_bytes // (1024 * 1024)} MB"
+                    413, "too_large", f"Maximum {settings.max_upload_bytes // (1024 * 1024)} MB"
                 )
         if not data:
-            raise ServiceError(422, "empty_file", "El archivo está vacío")
+            raise ServiceError(422, "empty_file", "The file is empty")
         url = await request.app.state.hf.upload(bytes(data), content_type)
         record = Upload(
             owner_id=owner.id,
@@ -322,13 +320,15 @@ def create_app(
             await session.commit()
             await session.refresh(job)
             if done.rowcount != 1:
-                raise ServiceError(409, "not_cancelable", f"No se puede cancelar en estado {job.status}")
+                raise ServiceError(
+                    409, "not_cancelable", f"Cannot cancel a generation in status {job.status}"
+                )
             return job_out(job)
         if job.status == "queued" and job.hf_request_id:
             await request.app.state.hf.cancel(job.hf_request_id, job.cancel_url)
             job.status, job.finished_at, job.next_check_at = "canceled", utcnow(), None
         else:
-            raise ServiceError(409, "not_cancelable", f"No se puede cancelar en estado {job.status}")
+            raise ServiceError(409, "not_cancelable", f"Cannot cancel a generation in status {job.status}")
         await session.commit()
         return job_out(job)
 
@@ -349,14 +349,14 @@ def create_app(
             payload = None
         if not (isinstance(payload, dict) and isinstance(payload.get("request_id"), str)
                 and payload.get("status") in ("completed", "failed", "nsfw", "canceled")):  # fmt: skip
-            raise ServiceError(400, "bad_envelope", "Cuerpo de webhook no reconocido")
+            raise ServiceError(400, "bad_envelope", "Unrecognized webhook body")
         job = await session.get(Job, job_id)
         if (
             not job
             or not hmac.compare_digest(job.webhook_token, token)
             or job.hf_request_id != payload["request_id"]
         ):
-            raise ServiceError(404, "not_found", "Webhook desconocido")
+            raise ServiceError(404, "not_found", "Unknown webhook")
         if job.status not in TERMINAL or job.status == "timed_out":
             # El webhook no va firmado: solo dispara una consulta autoritativa al endpoint de estado.
             task = asyncio.create_task(refresh_job(request.app, job.id))

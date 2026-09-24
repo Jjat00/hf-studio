@@ -67,8 +67,7 @@ class Worker:
                     job,
                     "failed",
                     "submission_ambiguous",
-                    "El servidor se reinició durante el envío; "
-                    "revisa el historial en Higgsfield antes de repetir",
+                    "The server restarted during submission; check your Higgsfield history before retrying",
                 )
             await session.commit()
 
@@ -163,9 +162,9 @@ class Worker:
         kind = "submission_ambiguous" if exc.kind == "ambiguous" else exc.kind
         message = exc.message
         if exc.kind == "ambiguous":
-            message += "; no se reintenta para no duplicar la generación ni el cobro"
+            message += "; not retried automatically to avoid a duplicate generation and charge"
         elif exc.kind == "auth":
-            message = "Credenciales de Higgsfield inválidas en el servidor (HF_API_KEY_ID/HF_API_KEY_SECRET)"
+            message = "Invalid Higgsfield credentials on the server (HF_API_KEY_ID/HF_API_KEY_SECRET)"
         self._finish(job, "failed", kind, message)
         return exc.kind != "auth"
 
@@ -194,7 +193,7 @@ class Worker:
         except HiggsfieldError as exc:
             if exc.kind == "not_found":
                 self._finish(
-                    job, "failed", "not_found", "Higgsfield no reconoce la solicitud para esta cuenta"
+                    job, "failed", "not_found", "Higgsfield does not recognize this request for this account"
                 )
             else:
                 # 5xx, red o credenciales: se sigue sondeando con backoff exponencial.
@@ -213,7 +212,7 @@ class Worker:
             job.outputs = extract_outputs(result)
             error = result.get("error")
             if status == "nsfw":
-                error = error or "La moderación de contenido rechazó la entrada o la salida (no se cobra)"
+                error = error or "Content moderation rejected the input or output (not charged)"
             self._finish(job, status, None if status == "completed" else status, error)
             if status == "completed" and self.settings.download_outputs:
                 await session.commit()
@@ -261,12 +260,12 @@ class Worker:
             ).all()
             for job in jobs:
                 remote = (
-                    " La solicitud puede seguir en Higgsfield; si llega su webhook se actualizará."
+                    " The request may still finish at Higgsfield; a late webhook will update it."
                     if job.hf_request_id
                     else ""
                 )
                 self._finish(
-                    job, "timed_out", "timeout", f"Superó {self.settings.job_timeout_seconds}s.{remote}"
+                    job, "timed_out", "timeout", f"Exceeded {self.settings.job_timeout_seconds}s.{remote}"
                 )
             await session.commit()
 

@@ -27,9 +27,9 @@ def input_hash(model: str, arguments: dict) -> str:
 def check_input(catalog: Catalog, model_id: str, arguments: dict) -> dict:
     model = catalog.get(model_id)
     if not model:
-        raise ServiceError(404, "unknown_model", f"Modelo desconocido: {model_id}. Consulta GET /v1/models")
+        raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}. See GET /v1/models")
     if errors := catalog.validate(model["id"], arguments):
-        raise ServiceError(422, "invalid_input", "La entrada no cumple el esquema del modelo", errors)
+        raise ServiceError(422, "invalid_input", "The input does not match the model schema", errors)
     return model
 
 
@@ -37,7 +37,7 @@ async def get_owned_job(session: AsyncSession, owner: ApiClient, job_id: str) ->
     job = await session.get(Job, job_id)
     if not job or job.owner_id != owner.id:
         # 404 también para trabajos ajenos: no se revela su existencia.
-        raise ServiceError(404, "not_found", "Generación no encontrada")
+        raise ServiceError(404, "not_found", "Generation not found")
     return job
 
 
@@ -62,7 +62,9 @@ async def create_generation(
         if existing:
             if existing.input_hash != digest:
                 raise ServiceError(
-                    409, "idempotency_conflict", "Esa Idempotency-Key ya se usó con otra petición"
+                    409,
+                    "idempotency_conflict",
+                    "This Idempotency-Key was already used for a different request",
                 )
             return existing, False
     if not allow_duplicate:
@@ -87,7 +89,7 @@ async def create_generation(
         raise ServiceError(
             429,
             "too_many_active",
-            f"Tienes {active} generaciones activas (máximo {settings.max_active_jobs_per_client})",
+            f"You have {active} active generations (maximum {settings.max_active_jobs_per_client})",
         )
 
     job = Job(
@@ -109,6 +111,6 @@ async def create_generation(
         if existing and existing.input_hash == digest:
             return existing, False
         raise ServiceError(
-            409, "idempotency_conflict", "Esa Idempotency-Key ya se usó con otra petición"
+            409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"
         ) from None
     return job, True

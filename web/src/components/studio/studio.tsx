@@ -205,7 +205,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
         const map: Record<string, string> = {};
         for (const d of e.details) map[d.path.split("/")[0]] = d.message;
         setErrors(map);
-        setFormError(map["(raíz)"] ?? "Check the highlighted fields");
+        setFormError(map["(root)"] ?? "Check the highlighted fields");
       } else {
         setFormError(e instanceof Error ? e.message : String(e));
       }
@@ -225,7 +225,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100dvh-56px)] lg:flex-none lg:flex-row">
       {/* Panel izquierdo */}
       <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[470px]">
-        <nav className="flex gap-5 px-6 pt-5">
+        <nav className="hide-scrollbar flex gap-5 overflow-x-auto px-6 pt-5">
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -330,7 +330,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
           )}
         </div>
 
-        <div className="border-t border-line p-3">
+        <div className="sticky bottom-0 z-10 rounded-b-panel border-t border-line bg-surface-1 p-3">
           {formError && <p className="mb-2 px-1 text-sm text-danger">{formError}</p>}
           <GenerateButton onClick={submit} busy={submitting} disabled={!detail} estimate={estimate} />
         </div>
