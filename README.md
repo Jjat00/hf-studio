@@ -61,8 +61,10 @@ args = ["run", "--directory", "/home/jjat00/projects/hf-studio", "hf-studio", "m
 env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }
 ```
 
-Herramientas: `find_models`, `get_model`, `upload_media`, `estimate_cost`, `generate`, `get_generation`
-(con espera), `list_generations`, `cancel_generation`, `download_outputs`. El MCP no conoce las credenciales
+Herramientas (15): `find_models`, `get_model`, `recommend_models`, `upload_media`, `estimate_cost`,
+`generate`, `generate_batch`, `get_generation`, `wait_generations`, `list_generations`,
+`cancel_generation`, `download_outputs`, `list_presets`, `run_preset` y `save_preset`. Las que gastan
+créditos se cotizan primero (`dry_run`), y el servidor MCP pide a los agentes que muestren el costo antes de generar. El MCP no conoce las credenciales
 de Higgsfield, solo su propia clave `hfs_…`.
 
 ## API REST
@@ -74,10 +76,14 @@ Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
 | GET | `/v1/models?capability=&output=&q=` | Catálogo filtrable (lista de capacidades incluida) |
 | GET | `/v1/models/{id}` | `input_schema`, notas de uso, enlace a docs |
 | POST | `/v1/uploads` (multipart `file`) | Sube jpg/png/webp/gif/mp4/wav → URL pública |
-| POST | `/v1/estimate` `{model, input}` | Costo en créditos/USD |
+| POST | `/v1/estimate` `{model, input, hints}` | Costo antes de generar: exacto, aproximado por fórmula o pendiente de medios |
 | POST | `/v1/generations` `{model, input}` | Encola; 202 nuevo, 200 si se deduplicó. Header `Idempotency-Key` |
 | GET | `/v1/generations/{id}?wait=60` | Estado; espera hasta N s a que sea terminal |
-| GET | `/v1/generations` | Historial del cliente |
+| GET | `/v1/generations?ids=a,b&wait=60` | Historial, o espera a que terminen varias |
+| POST | `/v1/generations/batch` | Varias generaciones; `dry_run` devuelve el costo por ítem y el total |
+| GET | `/v1/recommend?task=…` | Modelos sugeridos para una tarea (es/en) con su costo |
+| GET/POST/DELETE | `/v1/presets` | Recetas de serie y propias; `POST /v1/presets/{slug}/run` (con `dry_run`) |
+| POST | `/v1/presets/from-generation/{id}` | Guardar una generación como preset |
 | POST | `/v1/generations/{id}/cancel` | Solo en `pending`/`queued` |
 | GET | `/v1/generations/{id}/files/{name}` | Copia local de la salida |
 
@@ -112,3 +118,11 @@ curl -X POST localhost:8787/v1/generations -H "Authorization: Bearer $HFS" -H 'C
 uv run pytest            # Higgsfield simulado con httpx.MockTransport: no gasta créditos
 uv run ruff check src tests
 ```
+
+## Skills de producción de Higgsfield (TouchDesigner, Blender…)
+
+No pasan por la API de generación: son integraciones locales que se usan con el MCP de Higgsfield
+(`claude.ai Higgsfield`) más un servidor MCP local por programa. `/use-touchdesigner` está instalado
+en Windows (`%USERPROFILE%\.higgsfield\touch-designer-mcp-client`) y registrado como
+`higgsfield-use-touch-designer` en Claude Code y en Codex. Usa el Node de Windows porque WSL está en
+modo NAT y TouchDesigner escucha en el `127.0.0.1:9981` de Windows.
