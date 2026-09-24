@@ -36,7 +36,8 @@ async def _create_key(session, name: str) -> int:
 async def _list_keys(session) -> int:
     for c in await session.scalars(select(ApiClient).order_by(ApiClient.created_at)):
         state = f"revocada {c.revoked_at:%Y-%m-%d}" if c.revoked_at else "activa"
-        print(f"{c.name:30} {c.key_prefix}…  {state}")
+        scope = "  ve todo" if c.sees_all else ""
+        print(f"{c.name:30} {c.key_prefix}…  {state}{scope}")
     return 0
 
 
@@ -48,6 +49,18 @@ async def _revoke_key(session, name: str) -> int:
     client.revoked_at = utcnow()
     await session.commit()
     print(f"Revocada la clave de {name!r}")
+    return 0
+
+
+async def _set_sees_all(session, name: str, value: bool) -> int:
+    client = await session.scalar(select(ApiClient).where(ApiClient.name == name))
+    if not client:
+        print(f"No existe {name!r}", file=sys.stderr)
+        return 1
+    client.sees_all = value
+    await session.commit()
+    what = "ve las generaciones de todos los clientes" if value else "solo ve sus propias generaciones"
+    print(f"{name!r} ahora {what}")
     return 0
 
 
@@ -83,6 +96,11 @@ def main() -> int:
     sub.add_parser("create-key", help="Crea un cliente (agente, UI…) y muestra su clave").add_argument("name")
     sub.add_parser("list-keys", help="Lista los clientes")
     sub.add_parser("revoke-key", help="Revoca la clave de un cliente").add_argument("name")
+    see_all = sub.add_parser(
+        "see-all", help="Deja que un cliente (p. ej. web-ui) vea las generaciones de todos"
+    )
+    see_all.add_argument("name")
+    see_all.add_argument("--off", action="store_true", help="Vuelve a limitarlo a sus propias generaciones")
     sub.add_parser("check-credentials", help="Verifica la clave de Higgsfield sin gastar créditos")
     sub.add_parser("sync-catalog", help="Regenera catalog.json desde docs.higgsfield.ai")
     sub.add_parser("mcp", help="Servidor MCP por stdio para Claude Code / Codex")
@@ -100,6 +118,8 @@ def main() -> int:
         return asyncio.run(_with_session(_list_keys))
     if args.cmd == "revoke-key":
         return asyncio.run(_with_session(lambda s: _revoke_key(s, args.name)))
+    if args.cmd == "see-all":
+        return asyncio.run(_with_session(lambda s: _set_sees_all(s, args.name, not args.off)))
     if args.cmd == "check-credentials":
         return asyncio.run(_check_credentials())
     if args.cmd == "sync-catalog":

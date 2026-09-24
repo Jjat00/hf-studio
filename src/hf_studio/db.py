@@ -5,7 +5,18 @@ import secrets
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -42,6 +53,8 @@ class ApiClient(Base):
     key_prefix: Mapped[str] = mapped_column(String(12))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Ve y gestiona las generaciones de todos los clientes (pensado para la UI, no para agentes).
+    sees_all: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
     @staticmethod
     def new_key() -> str:
@@ -102,9 +115,25 @@ def make_engine(url: str) -> AsyncEngine:
     return create_async_engine(url)
 
 
+# Columnas añadidas después de crear la tabla: create_all no altera tablas existentes.
+ADDED_COLUMNS = {"api_clients": {"sees_all": "BOOLEAN NOT NULL DEFAULT 0"}}
+
+
+def _add_missing_columns(conn) -> None:
+    from sqlalchemy import inspect
+
+    insp = inspect(conn)
+    for table, columns in ADDED_COLUMNS.items():
+        have = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in columns.items():
+            if name not in have:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+
 async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
 
 
 def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:

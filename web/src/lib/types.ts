@@ -69,6 +69,8 @@ export type Generation = {
   finished_at: string | null;
   elapsed_seconds: number;
   deduplicated?: boolean;
+  /** Cliente que la lanzó; solo llega a clientes que ven todo (la UI). */
+  source?: string;
 };
 
 export type ApiErrorBody = {

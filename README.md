@@ -43,12 +43,14 @@ uv sync
 cp .env.example .env                      # pega tu clave de Higgsfield en HF_API_KEY
 uv run hf-studio check-credentials        # valida la clave sin gastar créditos
 uv run hf-studio create-key web-ui        # clave hfs_… para la UI (se muestra una sola vez)
+uv run hf-studio see-all web-ui           # la biblioteca de la UI muestra también lo que generan tus agentes
 cp web/.env.example web/.env.local        # pega esa clave en HF_STUDIO_TOKEN
 cd web && pnpm install && cd ..
 ./dev.sh                                  # API en :8787 (docs en /docs) y UI en :3000
 ```
 
-Otros comandos: `hf-studio create-key NOMBRE`, `list-keys`, `revoke-key NOMBRE`, `sync-catalog` y `serve`.
+Otros comandos: `hf-studio create-key NOMBRE`, `list-keys`, `revoke-key NOMBRE`, `see-all NOMBRE [--off]`, `sync-catalog` y `serve`.
+Por defecto cada cliente solo ve sus generaciones; con `see-all` uno (pensado para la UI) ve y gestiona las de todos, con su origen.
 Cada cliente (la UI, Claude Code, Codex…) tiene su propia clave `hfs_…`. Las credenciales de Higgsfield solo las
 conoce la API.
 

@@ -185,7 +185,10 @@ def create_app(
     Owner = Annotated[ApiClient, Depends(client_dep)]
     CatalogDep = Annotated[Catalog, Depends(get_catalog)]
 
-    def job_out(job: Job, deduplicated: bool | None = None) -> dict:
+    async def client_names(session: AsyncSession) -> dict[str, str]:
+        return dict((await session.execute(select(ApiClient.id, ApiClient.name))).tuples().all())
+
+    def job_out(job: Job, deduplicated: bool | None = None, source: str | None = None) -> dict:
         files = {f["index"]: f for f in job.files or []}
         outputs = []
         for i, out in enumerate(job.outputs or []):
@@ -215,6 +218,8 @@ def create_app(
             "finished_at": iso(job.finished_at),
             "elapsed_seconds": round((end - job.created_at).total_seconds(), 1),
         }
+        if source is not None:
+            body["source"] = source
         if deduplicated is not None:
             body["deduplicated"] = deduplicated
         return body
@@ -240,7 +245,7 @@ def create_app(
 
     @app.get("/v1/me", tags=["sistema"])
     async def me(owner: Owner) -> dict:
-        return {"id": owner.id, "name": owner.name}
+        return {"id": owner.id, "name": owner.name, "sees_all": owner.sees_all}
 
     @app.get("/v1/models", tags=["modelos"])
     async def list_models(
@@ -378,7 +383,7 @@ def create_app(
         ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
     ) -> dict:
-        query = select(Job).where(Job.owner_id == owner.id)
+        query = select(Job) if owner.sees_all else select(Job).where(Job.owner_id == owner.id)
         if ids:
             wanted = [i for i in ids.split(",") if i][:50]
             query = query.where(Job.id.in_(wanted))
@@ -392,8 +397,9 @@ def create_app(
             await asyncio.sleep(1)
             for j in jobs:
                 await session.refresh(j)
+        names = await client_names(session) if owner.sees_all else {}
         return {
-            "generations": [job_out(j) for j in jobs],
+            "generations": [job_out(j, source=names.get(j.owner_id)) for j in jobs],
             "all_terminal": all(j.status in TERMINAL for j in jobs),
         }
 
@@ -482,7 +488,8 @@ def create_app(
             await session.commit()  # cierra la transacción para ver lo que escriba el worker
             await asyncio.sleep(1)
             await session.refresh(job)
-        return job_out(job)
+        source = (await client_names(session)).get(job.owner_id) if owner.sees_all else None
+        return job_out(job, source=source)
 
     @app.delete("/v1/generations/{job_id}", tags=["generaciones"], status_code=204)
     async def delete_generation(job_id: str, session: Session, owner: Owner) -> None:

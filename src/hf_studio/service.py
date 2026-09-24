@@ -35,7 +35,7 @@ def check_input(catalog: Catalog, model_id: str, arguments: dict) -> dict:
 
 async def get_owned_job(session: AsyncSession, owner: ApiClient, job_id: str) -> Job:
     job = await session.get(Job, job_id)
-    if not job or job.owner_id != owner.id:
+    if not job or (job.owner_id != owner.id and not owner.sees_all):
         # 404 también para trabajos ajenos: no se revela su existencia.
         raise ServiceError(404, "not_found", "Generation not found")
     return job

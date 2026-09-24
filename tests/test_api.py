@@ -427,3 +427,17 @@ async def test_preset_from_generation_is_private(env):
     other = {"Authorization": "Bearer hfs_b"}
     assert (await http.get("/v1/presets/my-road", headers=other)).status_code == 404
     assert (await http.delete("/v1/presets/hero-shot")).status_code == 404  # los de serie no se borran
+
+
+async def test_sees_all_client_reads_every_generation(env):
+    app, http, _ = env
+    job_id = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO})).json()["id"]
+    async with app.state.sessions() as s:
+        await s.execute(update(ApiClient).where(ApiClient.name == "otro").values(sees_all=True))
+        await s.commit()
+    ui = {"Authorization": "Bearer hfs_b"}
+    listed = (await http.get("/v1/generations", headers=ui)).json()["generations"]
+    assert [(g["id"], g["source"]) for g in listed] == [(job_id, "agente")]
+    assert (await http.get(f"/v1/generations/{job_id}", headers=ui)).json()["source"] == "agente"
+    # El dueño sigue viendo lo suyo sin el campo de origen.
+    assert "source" not in (await http.get(f"/v1/generations/{job_id}")).json()

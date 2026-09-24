@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
-import { IconButton, StatusPill, modelName } from "@/components/generations/generation-card";
+import { IconButton, StatusPill, modelName, sourceLabel } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
 import { outputSrc, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
@@ -185,6 +185,12 @@ export function GenerationDetail({ id }: { id: string }) {
 
           <Block title={d.info}>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+              {g.source && (
+                <>
+                  <dt className="text-fg-3">{d.source}</dt>
+                  <dd>{sourceLabel(g.source, d.webUi)}</dd>
+                </>
+              )}
               <dt className="text-fg-3">{d.created}</dt>
               <dd>{new Date(g.created_at).toLocaleString(locale)}</dd>
               {g.terminal && (

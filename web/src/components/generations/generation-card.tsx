@@ -36,6 +36,19 @@ function useElapsed(g: Generation) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
+// Nombres legibles de los clientes habituales; cualquier otro se muestra tal cual.
+const SOURCES: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "claude-desktop": "Claude Desktop",
+  codex: "Codex",
+  "chatgpt-desktop": "ChatGPT",
+};
+
+export function sourceLabel(source: string | undefined, ui: string) {
+  if (!source) return null;
+  return source === "web-ui" ? ui : (SOURCES[source] ?? source);
+}
+
 export function modelName(id: string, locale: Locale, models?: Map<string, ModelSummary>) {
   const m = models?.get(id);
   if (!m) return id;
@@ -74,6 +87,7 @@ export function GenerationCard({
     }
   }
   const prompt = typeof g.input.prompt === "string" ? g.input.prompt : "";
+  const source = sourceLabel(g.source, t.history.detail.webUi);
   const ratio = RATIO[String(g.input.aspect_ratio ?? "")] ?? "16 / 9";
   const main = g.outputs[0];
   const failed = ["failed", "nsfw", "timed_out", "canceled"].includes(g.status);
@@ -108,6 +122,9 @@ export function GenerationCard({
           <p className="text-sm font-semibold">{STAGE[g.status] ?? g.stage}</p>
           <p className="font-mono text-xs text-fg-3">{elapsed}</p>
         </div>
+      )}
+      {source && (
+        <span className="absolute top-3 right-3 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold">{source}</span>
       )}
       {g.outputs.length > 1 && (
         <span className="absolute top-3 left-3 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold">
@@ -167,6 +184,7 @@ export function GenerationCard({
   const meta = (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-fg-3">
       <span className="rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, locale, models)}</span>
+      {source && <span className="rounded-md bg-lime/10 px-1.5 py-0.5 font-medium text-lime">{source}</span>}
       {["resolution", "duration", "aspect_ratio"].map((k) =>
         g.input[k] !== undefined ? (
           <span key={k} className="rounded-md bg-glass px-1.5 py-0.5">
