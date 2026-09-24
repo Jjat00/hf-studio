@@ -20,6 +20,21 @@ uv run hf-studio serve        # http://127.0.0.1:8787  ·  docs interactivas en 
 
 Otros comandos: `hf-studio list-keys`, `hf-studio revoke-key NOMBRE`, `hf-studio sync-catalog`.
 
+## UI web (`web/`)
+
+Next.js 16 con el look de Higgsfield: Inter con eje óptico (hace de Inter Display), Space Grotesk 700 en mayúsculas para titulares, superficies «cool» `#131416` y lima `#d1fe17`. Los valores se midieron en higgsfield.ai el 2026-09-24. El logo, el nombre y las ilustraciones son propios: las imágenes se generaron con la herramienta de imágenes de Codex.
+
+```bash
+uv run hf-studio create-key web-ui
+cp web/.env.example web/.env.local    # HF_STUDIO_URL y HF_STUDIO_TOKEN=hfs_…
+uv run hf-studio serve &              # API en :8787
+cd web && pnpm install && pnpm dev    # UI en :3000
+```
+
+- **Páginas:** Explore, Video (Create Video: Text, Start & End, References · Edit Video: Edit, Extend, Objects swap · Motion Control), Image, Library, Models y MCP.
+- **Formularios:** se generan desde el `input_schema` de cada modelo, así que cualquiera de los 82 endpoints funciona sin código específico.
+- **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave `hfs_…`. La clave nunca llega al cliente.
+
 ## Conectar agentes (MCP)
 
 Claude Code:
