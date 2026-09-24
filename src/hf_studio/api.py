@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .audio import studio_notes
 from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
 from .db import (
@@ -66,6 +67,10 @@ class GenerationIn(BaseModel):
     model: str = Field(description="ID del endpoint, p. ej. bytedance/seedance-2.0/text-to-video")
     input: dict[str, Any] = Field(description="Argumentos según el input_schema del modelo")
     allow_duplicate: bool = Field(False, description="Permite repetir una petición idéntica aún activa")
+    keep_source_audio: bool = Field(
+        False,
+        description="Opción de HF Studio: al terminar, pone al resultado el audio del video de origen (video_url)",
+    )
 
 
 class BatchItem(BaseModel):
@@ -195,6 +200,8 @@ def create_app(
             item = dict(out)
             if i in files:
                 item["file_url"] = f"/v1/generations/{job.id}/files/{files[i]['name']}"
+                if "audio" in files[i]:
+                    item["audio"] = files[i]["audio"]
             outputs.append(item)
         end = job.finished_at or utcnow()
 
@@ -208,6 +215,7 @@ def create_app(
             "stage": STAGES.get(job.status, job.status),
             "terminal": job.status in TERMINAL,
             "input": job.input,
+            "keep_source_audio": job.keep_source_audio,
             "outputs": outputs,
             "error": job.error,
             "error_kind": job.error_kind,
@@ -228,7 +236,13 @@ def create_app(
         keys = ("id", "title", "output", "workflow", "family", "capabilities", "docs_url")
         base = {k: m[k] for k in keys}
         return (
-            {**base, "summary": m["summary"], "notes": m["notes"], "input_schema": m["input_schema"]}
+            {
+                **base,
+                "summary": m["summary"],
+                "notes": m["notes"],
+                "studio_notes": studio_notes(m),
+                "input_schema": m["input_schema"],
+            }
             if full
             else base
         )
@@ -367,7 +381,15 @@ def create_app(
         idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
     ) -> JSONResponse:
         job, created = await create_generation(
-            session, settings, catalog, owner, body.model, body.input, idempotency_key, body.allow_duplicate
+            session,
+            settings,
+            catalog,
+            owner,
+            body.model,
+            body.input,
+            idempotency_key,
+            body.allow_duplicate,
+            keep_source_audio=body.keep_source_audio,
         )
         if created:
             request.app.state.worker.wake()

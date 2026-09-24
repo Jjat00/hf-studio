@@ -64,6 +64,30 @@ async def _set_sees_all(session, name: str, value: bool) -> int:
     return 0
 
 
+async def _keep_source_audio(session, job_id: str) -> int:
+    """Pone a posteriori el audio del video de origen a una generación ya descargada."""
+    from pathlib import Path
+
+    from .audio import MUXED, SOURCE_KEY, apply_to_files
+    from .db import Job
+
+    job = await session.get(Job, job_id)
+    source = job.input.get(SOURCE_KEY) if job else None
+    if not job or job.status != "completed" or not job.files or not isinstance(source, str):
+        print(
+            "La generación no existe, no está completada, no tiene copia local o no tiene video_url",
+            file=sys.stderr,
+        )
+        return 1
+    storage = Path(get_settings().storage_dir) / "outputs" / job.id
+    job.files = await apply_to_files(job.files, storage, source)
+    job.keep_source_audio = True
+    await session.commit()
+    states = [f.get("audio") for f in job.files if f.get("kind") == "video"]
+    print(f"{job_id}: {', '.join(str(s) for s in states)}")
+    return 0 if all(s == MUXED for s in states) else 1
+
+
 async def _check_credentials() -> int:
     from .higgsfield import HiggsfieldClient, HiggsfieldError
 
@@ -101,6 +125,9 @@ def main() -> int:
     )
     see_all.add_argument("name")
     see_all.add_argument("--off", action="store_true", help="Vuelve a limitarlo a sus propias generaciones")
+    sub.add_parser(
+        "keep-source-audio", help="Pone a una generación ya hecha el audio de su video de origen (ffmpeg)"
+    ).add_argument("job_id")
     sub.add_parser("check-credentials", help="Verifica la clave de Higgsfield sin gastar créditos")
     sub.add_parser("sync-catalog", help="Regenera catalog.json desde docs.higgsfield.ai")
     sub.add_parser("mcp", help="Servidor MCP por stdio para Claude Code / Codex")
@@ -120,6 +147,8 @@ def main() -> int:
         return asyncio.run(_with_session(lambda s: _revoke_key(s, args.name)))
     if args.cmd == "see-all":
         return asyncio.run(_with_session(lambda s: _set_sees_all(s, args.name, not args.off)))
+    if args.cmd == "keep-source-audio":
+        return asyncio.run(_with_session(lambda s: _keep_source_audio(s, args.job_id)))
     if args.cmd == "check-credentials":
         return asyncio.run(_check_credentials())
     if args.cmd == "sync-catalog":

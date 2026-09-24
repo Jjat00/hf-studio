@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .audio import supports_source_audio
 from .catalog import Catalog
 from .config import Settings
 from .db import ACTIVE, ApiClient, Job, utcnow
@@ -50,10 +51,18 @@ async def create_generation(
     arguments: dict,
     idempotency_key: str | None = None,
     allow_duplicate: bool = False,
+    keep_source_audio: bool = False,
 ) -> tuple[Job, bool]:
     """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente."""
     model = check_input(catalog, model_id, arguments)
-    digest = input_hash(model["id"], arguments)
+    if keep_source_audio and not supports_source_audio(model):
+        raise ServiceError(
+            422, "source_audio_unsupported", "keep_source_audio needs a video model with a video_url input"
+        )
+    # La opción cambia el resultado, así que forma parte de la huella (deduplicado e idempotencia).
+    digest = input_hash(
+        model["id"], {**arguments, "__keep_source_audio": True} if keep_source_audio else arguments
+    )
 
     if idempotency_key:
         existing = await session.scalar(
@@ -98,6 +107,7 @@ async def create_generation(
         input=arguments,
         input_hash=digest,
         idempotency_key=idempotency_key,
+        keep_source_audio=keep_source_audio,
     )
     session.add(job)
     try:

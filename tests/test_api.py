@@ -441,3 +441,27 @@ async def test_sees_all_client_reads_every_generation(env):
     assert (await http.get(f"/v1/generations/{job_id}", headers=ui)).json()["source"] == "agente"
     # El dueño sigue viendo lo suyo sin el campo de origen.
     assert "source" not in (await http.get(f"/v1/generations/{job_id}")).json()
+
+
+EDIT = "bytedance/seedance-2.5/video-edit"
+
+
+async def test_keep_source_audio_only_for_video_inputs(env):
+    _, http, _ = env
+    bad = await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "keep_source_audio": True})
+    assert bad.status_code == 422
+    assert bad.json()["error"]["code"] == "source_audio_unsupported"
+    body = {"prompt": "swap the jacket", "video_url": "https://cdn.test/src.mp4", "generate_audio": False}
+    plain = (await http.post("/v1/generations", json={"model": EDIT, "input": body})).json()
+    kept = await http.post("/v1/generations", json={"model": EDIT, "input": body, "keep_source_audio": True})
+    # La opción cambia el resultado: no se deduplica contra la misma entrada sin ella.
+    assert kept.status_code == 202
+    assert kept.json()["id"] != plain["id"]
+    assert kept.json()["keep_source_audio"] is True and plain["keep_source_audio"] is False
+
+
+async def test_studio_notes_warn_about_silent_edits(env):
+    _, http, _ = env
+    notes = (await http.get(f"/v1/models/{EDIT}")).json()["studio_notes"]
+    assert any("SILENT" in n for n in notes) and any("keep_source_audio" in n for n in notes)
+    assert (await http.get(f"/v1/models/{T2V}")).json()["studio_notes"] == []

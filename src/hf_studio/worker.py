@@ -15,6 +15,7 @@ import httpx
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
 from .db import Job, utcnow
 from .higgsfield import TERMINAL_STATUSES, HiggsfieldClient, HiggsfieldError, extract_outputs
@@ -247,6 +248,9 @@ class Worker:
             files.append(
                 {"name": name, "kind": out["kind"], "size": size, "content_type": content_type, "index": i}
             )
+        source = job.input.get(SOURCE_KEY)
+        if job.keep_source_audio and isinstance(source, str):
+            files = await apply_to_files(files, Path(self.settings.storage_dir) / "outputs" / job.id, source)
         job.files = files
 
     # --- Timeout -------------------------------------------------------------------------------

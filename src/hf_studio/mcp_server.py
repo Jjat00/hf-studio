@@ -76,7 +76,8 @@ def find_models(capability: str | None = None, output: str | None = None, query:
 @mcp.tool()
 def get_model(model_id: str) -> dict:
     """Esquema de entrada (JSON Schema), notas de uso y docs de un modelo, p. ej.
-    bytedance/seedance-2.0/image-to-video. Léelo antes de generar."""
+    bytedance/seedance-2.0/image-to-video. Léelo antes de generar, incluidas las studio_notes
+    (avisos de HF Studio, p. ej. cómo conservar el audio del video de origen)."""
     return _call("GET", f"/v1/models/{model_id}")
 
 
@@ -121,13 +122,22 @@ def generate(
     allow_duplicate: bool = False,
     input_video_seconds: float | None = None,
     confirm_unknown_cost: bool = False,
+    keep_source_audio: bool = False,
 ) -> dict:
     """Encola una generación y devuelve el trabajo (id, status). No espera: usa get_generation.
     Requiere el quote_id de estimate_cost con los mismos model_id, input e input_video_seconds (el
-    usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key."""
+    usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key.
+    Al editar un video (entrada video_url), generate_audio=false da un video MUDO, no conserva el sonido
+    original; para conservarlo pasa keep_source_audio=true (gratis: HF Studio le pone el audio del
+    video de origen al resultado). Lee studio_notes en get_model."""
     payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
     headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
-    body = {"model": model_id, "input": input, "allow_duplicate": allow_duplicate}
+    body = {
+        "model": model_id,
+        "input": input,
+        "allow_duplicate": allow_duplicate,
+        "keep_source_audio": keep_source_audio,
+    }
     return _call("POST", "/v1/generations", json=body, headers=headers)
 
 

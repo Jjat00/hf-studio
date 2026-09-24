@@ -83,6 +83,8 @@ class Job(Base):
     input: Mapped[dict] = mapped_column(JSON)
     input_hash: Mapped[str] = mapped_column(String(64), index=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(200))
+    # Opción de HF Studio: al terminar, poner al resultado el audio del video de origen (audio.py).
+    keep_source_audio: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     status: Mapped[str] = mapped_column(String(20), index=True, default="pending")
     error: Mapped[str | None] = mapped_column(Text)
     error_kind: Mapped[str | None] = mapped_column(String(40))
@@ -116,7 +118,10 @@ def make_engine(url: str) -> AsyncEngine:
 
 
 # Columnas añadidas después de crear la tabla: create_all no altera tablas existentes.
-ADDED_COLUMNS = {"api_clients": {"sees_all": "BOOLEAN NOT NULL DEFAULT 0"}}
+ADDED_COLUMNS = {
+    "api_clients": {"sees_all": "BOOLEAN NOT NULL DEFAULT 0"},
+    "jobs": {"keep_source_audio": "BOOLEAN NOT NULL DEFAULT 0"},
+}
 
 
 def _add_missing_columns(conn) -> None:
