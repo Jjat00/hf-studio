@@ -178,7 +178,7 @@ export function GenerationCard({
           <Copy className="size-4" />
         </IconButton>
       )}
-      {g.status === "completed" && (
+      {g.status === "completed" && !LOCAL_MODELS[g.model] && (
         <IconButton label={saved ? t.generation.savedAs(saved) : t.generation.saveAsPreset} onClick={saveAsPreset}>
           {saved ? <Check className="size-4 text-lime" /> : <Bookmark className="size-4" />}
         </IconButton>

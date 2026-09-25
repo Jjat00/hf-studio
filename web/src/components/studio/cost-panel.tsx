@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { AlertTriangle, Info, Loader2, Sparkles } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { costBasis, costMissing } from "@/lib/i18n/cost";
-import { formatUsd, type Estimate } from "@/lib/studio";
+import { approxUsd, formatUsd, type Estimate } from "@/lib/studio";
 
 /** Se puede generar sin confirmación extra solo si hay un precio calculado. */
 export function costAllowsDirectSubmit(e: Estimate | null) {
@@ -55,7 +55,7 @@ export function CostPanel({
   } else if (estimate.kind === "approx") {
     value = (
       <span>
-        ~{formatUsd(estimate.usd!)}
+        {approxUsd(estimate.usd!)}
         {estimate.missing.length > 0 && <span className="font-normal text-warning"> + {missing}</span>}
       </span>
     );

@@ -152,15 +152,23 @@ export type Estimate = {
   description: string | null;
 };
 
+/** Un costo positivo nunca se muestra como cero: por debajo de una milésima sale «<$0.001». */
 export function formatUsd(usd: number) {
+  if (usd > 0 && usd < 0.001) return "<$0.001";
   return usd < 0.01 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`;
+}
+
+/** «~$0.12» para un aproximado; sin la tilde cuando ya es una cota («<$0.001»). */
+export function approxUsd(usd: number) {
+  const text = formatUsd(usd);
+  return text.startsWith("<") ? text : `~${text}`;
 }
 
 /** Texto corto del costo para botones: «✦ 8.57» (créditos) o «~$1.51». */
 export function costShort(e: Estimate | null): string | null {
   if (!e) return null;
   if (e.kind === "exact" && e.credits !== null) return `${+e.credits.toFixed(3)}`;
-  if (e.kind === "approx" && e.usd !== null) return `~${formatUsd(e.usd)}`;
+  if (e.kind === "approx" && e.usd !== null) return approxUsd(e.usd);
   return null;
 }
 

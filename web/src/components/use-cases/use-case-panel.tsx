@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { costMissing } from "@/lib/i18n/cost";
-import { formatUsd, studio, type Estimate } from "@/lib/studio";
+import { approxUsd, formatUsd, studio, type Estimate } from "@/lib/studio";
 import type { Channel, Step, UseCase } from "@/lib/use-cases";
 
 function CopyButton({ text }: { text: string }) {
@@ -48,7 +48,7 @@ function CostHint({ useCase }: { useCase: UseCase }) {
   let note = useCase.costNote && pick(useCase.costNote);
   if (state.failed) text = c.priceNA;
   else if (e?.kind === "exact" && e.credits !== null) text = `${+e.credits.toFixed(3)} ${c.credits}${e.usd !== null ? ` · ${formatUsd(e.usd)}` : ""}`;
-  else if (e?.kind === "approx" && e.usd !== null && e.missing.length === 0) text = `~${formatUsd(e.usd)}`;
+  else if (e?.kind === "approx" && e.usd !== null && e.missing.length === 0) text = approxUsd(e.usd);
   else if (e?.usd != null) {
     // Subtotal: aún falta un dato facturable (p. ej. la duración del video de entrada).
     text = c.from(formatUsd(e.usd));

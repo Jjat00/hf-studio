@@ -274,8 +274,13 @@ export function AudioStudio() {
                     ))}  {/* prettier-ignore */}
                   </div>
                   <p className="text-xs text-fg-3">{t.voice.orUpload}</p>
-                  <MediaSlot label={a.source} hint="" kind="video" multiple={false} max={1} required={false} value={undefined} compact
-                             onChange={(url) => typeof url === "string" && setSource({ url, label: url.split("/").pop() ?? url })} />  {/* prettier-ignore */}
+                  <div className="grid grid-cols-2 gap-2">
+                    {(["video", "audio"] as const).map((kind) => (
+                      <MediaSlot key={kind} label={kind === "video" ? t.history.filters.video : t.history.filters.audio} hint="" kind={kind}
+                                 multiple={false} max={1} required={false} value={undefined} compact
+                                 onChange={(url) => typeof url === "string" && setSource({ url, label: url.split("/").pop() ?? url })} />
+                    ))}
+                  </div>  {/* prettier-ignore */}
                 </div>
               )}
             </SettingCard>

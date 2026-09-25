@@ -109,7 +109,7 @@ SERVICES: dict[str, tuple[str, type[BaseModel]]] = {
 def _estimate(usd: float, basis: str, units: float) -> dict:
     return {
         "kind": "approx",
-        "usd": round(usd, 4),
+        "usd": round(usd, 6),  # sin redondear a 0 un costo positivo (1 carácter en Flash = 0,00005 USD)
         "credits": None,
         "discount_pct": None,
         "units": units,
