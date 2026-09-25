@@ -40,7 +40,9 @@ tras un error ambiguo, consulta list_generations primero. Reutiliza idempotency_
 Cambio de voz (ElevenLabs): list_voices busca voces (library=True para la biblioteca pública, p. ej.
 "demon", "monster"); change_voice cambia la voz de un tramo [start, end] de un video conservando lo que
 dice y su ritmo, con efecto opcional (deep, monster, ghost). Primero sin quote_id para ver el costo,
-luego con el quote_id tras el OK del usuario; el resultado es una generación más (get_generation)."""
+luego con el quote_id tras el OK del usuario; el resultado es una generación más (get_generation).
+Más audio de ElevenLabs con el mismo patrón (sin quote_id cotiza; con él, lanza): text_to_speech,
+sound_effect, compose_music e isolate_voice. elevenlabs_account muestra el plan y los créditos que quedan."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
 
@@ -219,6 +221,109 @@ def change_voice(
     with _quotes_lock:
         voice_quote = _quotes[quote_id]["estimate"].get("voice_quote")
     return _call("POST", "/v1/voice/changes", json={**body, "voice_quote": voice_quote}, headers=headers)
+
+
+def _audio(service: str, body: dict, quote_id: str | None, idempotency_key: str | None) -> dict:
+    """Sin quote_id cotiza (y devuelve un quote_id); con él, lanza con la cotización de la API."""
+    body = {k: v for k, v in body.items() if v is not None}
+    payload = {"audio": service, **body}
+    if not quote_id:
+        estimate = _call("POST", f"/v1/audio/{service}/estimate", json=body)
+        return {**estimate, "quote_id": _issue_quote(payload, estimate)}
+    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, False)}
+    with _quotes_lock:
+        audio_quote = _quotes[quote_id]["estimate"].get("audio_quote")
+    return _call("POST", f"/v1/audio/{service}", json={**body, "audio_quote": audio_quote}, headers=headers)
+
+
+@mcp.tool()
+def text_to_speech(
+    text: str,
+    voice_id: str,
+    model_id: str = "eleven_multilingual_v2",
+    language_code: str | None = None,
+    public_owner_id: str | None = None,
+    voice_name: str | None = None,
+    stability: float | None = None,
+    style: float | None = None,
+    speed: float | None = None,
+    quote_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Texto a voz con ElevenLabs (MP3 en la biblioteca). voice_id de list_voices. model_id:
+    eleven_v3 (el más expresivo; admite etiquetas como [whispers], [laughs], [screams]; hasta 5.000
+    caracteres), eleven_multilingual_v2 (estable, 10.000) o eleven_flash_v2_5 (mitad de precio, 40.000).
+    language_code ISO 639-1 (p. ej. "es"; no en multilingual_v2). Precio por caracteres: sin quote_id
+    devuelve el costo; con el OK del usuario, llama igual con ese quote_id."""
+    return _audio("text-to-speech", {"text": text, "voice_id": voice_id, "model_id": model_id,
+                  "language_code": language_code, "public_owner_id": public_owner_id, "voice_name": voice_name,
+                  "stability": stability, "style": style, "speed": speed}, quote_id, idempotency_key)  # fmt: skip
+
+
+@mcp.tool()
+def sound_effect(
+    text: str,
+    duration_seconds: float = 5,
+    prompt_influence: float = 0.3,
+    loop: bool = False,
+    quote_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Efecto de sonido con ElevenLabs a partir de una descripción (mejor en inglés, p. ej. "evil laugh
+    echoing in a cave", "door creaking slowly"). duration_seconds de 0.5 a 30; loop=True para que se
+    repita sin cortes. Sin quote_id devuelve el costo; con el OK del usuario, llama con ese quote_id."""
+    return _audio("sound-effects", {"text": text, "duration_seconds": duration_seconds,
+                  "prompt_influence": prompt_influence, "loop": loop}, quote_id, idempotency_key)  # fmt: skip
+
+
+@mcp.tool()
+def compose_music(
+    prompt: str,
+    seconds: float = 30,
+    force_instrumental: bool = False,
+    quote_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Música con ElevenLabs a partir de una descripción (género, tempo, instrumentos, ánimo). seconds de
+    3 a 600; force_instrumental=True garantiza que no haya voz. Sin quote_id devuelve el costo; con el OK
+    del usuario, llama con ese quote_id."""
+    return _audio("music", {"prompt": prompt, "seconds": seconds, "force_instrumental": force_instrumental},
+                  quote_id, idempotency_key)  # fmt: skip
+
+
+@mcp.tool()
+def isolate_voice(
+    source_generation_id: str | None = None,
+    source_path: str | None = None,
+    source_url: str | None = None,
+    quote_id: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Aísla la voz de un video o audio (quita música y ruido) con ElevenLabs; devuelve un MP3.
+    Origen: source_generation_id (de la biblioteca), source_path (archivo local; se sube) o source_url.
+    Precio por minuto de la fuente: sin quote_id devuelve el costo; con el OK, llama con ese quote_id."""
+    quoted = {"source_path": source_path} if source_path else {}
+    if source_path:
+        source_url = _uploaded_url(source_path)
+    body = {"source_generation_id": source_generation_id, "source_url": source_url}
+    body = {k: v for k, v in body.items() if v is not None}
+    # Se cotiza sobre la ruta local, no sobre la URL de la subida (igual que change_voice).
+    payload = {"audio": "voice-isolator", **body, **quoted, **({"source_url": None} if source_path else {})}
+    if not quote_id:
+        estimate = _call("POST", "/v1/audio/voice-isolator/estimate", json=body)
+        return {**estimate, "quote_id": _issue_quote(payload, estimate), "source_url": source_url}
+    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, False)}
+    with _quotes_lock:
+        audio_quote = _quotes[quote_id]["estimate"].get("audio_quote")
+    return _call(
+        "POST", "/v1/audio/voice-isolator", json={**body, "audio_quote": audio_quote}, headers=headers
+    )
+
+
+@mcp.tool()
+def elevenlabs_account() -> dict:
+    """Estado de ElevenLabs: si está configurado, el plan y los créditos que quedan."""
+    return _call("GET", "/v1/voice/status")
 
 
 @mcp.tool()

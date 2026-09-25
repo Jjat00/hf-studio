@@ -3,9 +3,32 @@ import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset, Voice
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
 
-/** Tipo de salida de una generación: del catálogo de Higgsfield, o video para el cambio de voz. */
+/** Servicios de audio de ElevenLabs: servicio de la API → modelo del trabajo local. */
+export const AUDIO_SERVICES = {
+  "text-to-speech": "elevenlabs/text-to-speech",
+  "sound-effects": "elevenlabs/sound-effects",
+  music: "elevenlabs/music",
+  "voice-isolator": "elevenlabs/voice-isolator",
+} as const;
+export type AudioService = keyof typeof AUDIO_SERVICES;
+const AUDIO_MODEL_SET = new Set<string>(Object.values(AUDIO_SERVICES));
+
+export function isAudioModel(model: string) {
+  return AUDIO_MODEL_SET.has(model);
+}
+
+/** Tipo de salida de una generación: del catálogo de Higgsfield, video (cambio de voz) o audio (ElevenLabs). */
 export function outputOf(model: string, models: Map<string, ModelSummary>): string | undefined {
-  return model === VOICE_MODEL ? "video" : models.get(model)?.output;
+  if (model === VOICE_MODEL) return "video";
+  if (isAudioModel(model)) return "audio";
+  return models.get(model)?.output;
+}
+
+/** Ruta para reutilizar los ajustes de una generación. */
+export function reuseHref(model: string, id: string, models: Map<string, ModelSummary>) {
+  if (model === VOICE_MODEL) return `/voice?reuse=${id}`;
+  if (isAudioModel(model)) return `/audio?reuse=${id}`;
+  return `/${models.get(model)?.output === "image" ? "image" : "video"}?reuse=${id}`;
 }
 
 /** Cliente del navegador: todo pasa por el proxy /api/studio, que añade la clave en el servidor. */
@@ -68,6 +91,18 @@ export const studio = {
     }),
   changeVoice: (body: VoiceChangeBody, idempotencyKey: string) =>
     call<Generation>("/v1/voice/changes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(body),
+    }),
+  audioEstimate: (service: AudioService, body: Record<string, unknown>) =>
+    call<Estimate & { units: number; audio_quote: string }>(`/v1/audio/${service}/estimate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  createAudio: (service: AudioService, body: Record<string, unknown>, idempotencyKey: string) =>
+    call<Generation>(`/v1/audio/${service}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),

@@ -25,7 +25,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
-import { costShort, modelLabel, outputOf, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
+import { costShort, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { Masonry } from "@/components/masonry";
@@ -186,8 +186,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
   }
 
   function reuse(g: Generation) {
-      if (g.model === VOICE_MODEL) {
-        router.push(`/voice?reuse=${g.id}`);
+      if (g.model === VOICE_MODEL || isAudioModel(g.model)) {
+        router.push(reuseHref(g.model, g.id, byId));
         return;
       }
       for (const tb of tabs) {

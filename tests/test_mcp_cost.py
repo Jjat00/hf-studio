@@ -152,3 +152,22 @@ def test_change_voice_quotes_then_runs_with_one_upload(monkeypatch, tmp_path):
     assert job["json"]["voice_quote"] == "vq_1"  # la API recibe su propia cotización
     with pytest.raises(ToolError):  # la cotización es de un solo uso
         mcp_server.change_voice(**{**args, "end": 7}, quote_id=q["quote_id"])
+
+
+def test_audio_tools_quote_then_run_with_the_api_quote(monkeypatch):
+    calls = []
+
+    def call(method, path, **kw):
+        calls.append((path, kw.get("json")))
+        if path.endswith("/estimate"):
+            return {"kind": "approx", "usd": 0.003, "complete": True, "units": 27, "audio_quote": "aq_1"}
+        return {"id": "job"}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.text_to_speech("Hola", "v_demon", model_id="eleven_v3")
+    assert q["usd"] == 0.003 and calls[-1][0] == "/v1/audio/text-to-speech/estimate"
+    mcp_server.text_to_speech("Hola", "v_demon", model_id="eleven_v3", quote_id=q["quote_id"])
+    assert calls[-1] == ("/v1/audio/text-to-speech", {"text": "Hola", "voice_id": "v_demon",
+                         "model_id": "eleven_v3", "audio_quote": "aq_1"})  # fmt: skip
+    with pytest.raises(ToolError):  # otra petición no puede usar esa cotización
+        mcp_server.sound_effect("scream", quote_id=q["quote_id"])

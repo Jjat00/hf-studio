@@ -7,10 +7,10 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { Masonry } from "@/components/masonry";
 import { useI18n } from "@/components/i18n-provider";
-import { outputOf, studio, VOICE_MODEL } from "@/lib/studio";
+import { outputOf, reuseHref, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
-const FILTERS = ["all", "video", "image", "active", "failed"] as const;
+const FILTERS = ["all", "video", "image", "audio", "active", "failed"] as const;
 
 export default function HistoryPage() {
   const { t } = useI18n();
@@ -26,7 +26,7 @@ export default function HistoryPage() {
     () =>
       items.filter((g) => {
         const out = outputOf(g.model, models);
-        if (filter === "video" || filter === "image") return out === filter;
+        if (filter === "video" || filter === "image" || filter === "audio") return out === filter;
         if (filter === "active") return !g.terminal;
         if (filter === "failed") return g.terminal && g.status !== "completed";
         return true;
@@ -34,12 +34,7 @@ export default function HistoryPage() {
     [items, models, filter],
   );
 
-  const reuse = (g: Generation) =>
-    router.push(
-      g.model === VOICE_MODEL
-        ? `/voice?reuse=${g.id}`
-        : `/${models.get(g.model)?.output === "image" ? "image" : "video"}?reuse=${g.id}`,
-    );
+  const reuse = (g: Generation) => router.push(reuseHref(g.model, g.id, models));
 
   return (
     <div className="px-4 py-8 md:px-8">

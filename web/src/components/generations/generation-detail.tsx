@@ -5,9 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
-import { IconButton, StatusPill, modelName, sourceLabel } from "@/components/generations/generation-card";
+import { AudioPlayer, IconButton, StatusPill, modelName, sourceLabel } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
-import { outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
+import { outputSrc, reuseHref, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 // Mismo criterio que la API (pricing._media_kind): claves que llevan archivos de entrada.
@@ -73,7 +73,6 @@ export function GenerationDetail({ id }: { id: string }) {
   const entries = Object.entries(g.input);
   const media = entries.filter(([k]) => mediaKind(k));
   const params = entries.filter(([k]) => !mediaKind(k) && !TEXT_KEYS.has(k));
-  const output = models.get(g.model)?.output;
   const fieldLabel = (k: string) => t.controls.fields[k] ?? t.media.labels[k]?.[0] ?? k;
   const show = (v: unknown) =>
     typeof v === "boolean" ? (v ? t.controls.on : t.controls.off) : typeof v === "object" ? JSON.stringify(v) : String(v);
@@ -86,7 +85,9 @@ export function GenerationDetail({ id }: { id: string }) {
         <section className="flex min-w-0 flex-col gap-4">
           {g.status === "completed" && g.outputs.length > 0 ? (
             g.outputs.map((o, i) =>
-              o.kind === "video" ? (
+              o.kind === "audio" ? (
+                <AudioPlayer key={i} src={outputSrc(o)} />
+              ) : o.kind === "video" ? (
                 <video key={i} src={outputSrc(o)} className="max-h-[80vh] w-full rounded-2xl bg-surface-3 object-contain" controls loop playsInline />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -119,11 +120,7 @@ export function GenerationDetail({ id }: { id: string }) {
               )}
               <IconButton
                 label={t.generation.reuse}
-                onClick={() =>
-                  router.push(
-                    g.model === VOICE_MODEL ? `/voice?reuse=${g.id}` : `/${output === "image" ? "image" : "video"}?reuse=${g.id}`,
-                  )
-                }
+                onClick={() => router.push(reuseHref(g.model, g.id, models))}
               >
                 <RotateCcw className="size-4" />
               </IconButton>

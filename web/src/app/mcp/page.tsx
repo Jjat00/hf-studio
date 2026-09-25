@@ -34,6 +34,11 @@ const TOOLS = [
   "save_preset",
   "list_voices",
   "change_voice",
+  "text_to_speech",
+  "sound_effect",
+  "compose_music",
+  "isolate_voice",
+  "elevenlabs_account",
 ];
 
 export default async function McpPage() {

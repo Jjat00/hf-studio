@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, Ban, Bookmark, Check, Copy, Download, Info, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -36,6 +36,25 @@ function useElapsed(g: Generation) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
+// Trabajos locales de ElevenLabs (no están en el catálogo de Higgsfield).
+const LOCAL_MODELS: Record<string, Record<Locale, string>> = {
+  [VOICE_MODEL]: { es: "Cambio de voz", en: "Voice change" },
+  "elevenlabs/text-to-speech": { es: "Texto a voz", en: "Text to speech" },
+  "elevenlabs/sound-effects": { es: "Efecto de sonido", en: "Sound effect" },
+  "elevenlabs/music": { es: "Música", en: "Music" },
+  "elevenlabs/voice-isolator": { es: "Voz aislada", en: "Isolated voice" },
+};
+
+/** Reproductor de un resultado de audio (texto a voz, efectos, música…). */
+export function AudioPlayer({ src }: { src: string }) {
+  return (
+    <div className="flex w-full flex-col items-center justify-center gap-4 rounded-2xl bg-gradient-to-br from-lime/15 via-surface-3 to-pink/10 px-4 py-8">
+      <AudioLines className="size-10 text-lime" />
+      <audio src={src} controls preload="metadata" className="w-full" />
+    </div>
+  );
+}
+
 // Nombres legibles de los clientes habituales; cualquier otro se muestra tal cual.
 const SOURCES: Record<string, string> = {
   "claude-code": "Claude Code",
@@ -50,7 +69,8 @@ export function sourceLabel(source: string | undefined, ui: string) {
 }
 
 export function modelName(id: string, locale: Locale, models?: Map<string, ModelSummary>) {
-  if (id === VOICE_MODEL) return locale === "es" ? "ElevenLabs · Cambio de voz" : "ElevenLabs · Voice change";
+  const own = LOCAL_MODELS[id];
+  if (own) return `ElevenLabs · ${own[locale]}`;
   const m = models?.get(id);
   if (!m) return id;
   const { name, workflow } = modelLabel(m.title);
@@ -99,7 +119,9 @@ export function GenerationCard({
       style={{ aspectRatio: g.status === "completed" && main ? undefined : ratio }}
     >
       {g.status === "completed" && main ? (
-        main.kind === "video" ? (
+        main.kind === "audio" ? (
+          <AudioPlayer src={outputSrc(main)} />
+        ) : main.kind === "video" ? (
           <video src={outputSrc(main)} className="block w-full" controls loop playsInline preload="metadata" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element

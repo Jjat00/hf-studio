@@ -36,9 +36,6 @@ export function VoiceStudio() {
   const [duration, setDuration] = useState(0);
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState<number | null>(null);
-  const [library, setLibrary] = useState(false);
-  const [query, setQuery] = useState("");
-  const [voices, setVoices] = useState<Voice[] | null>(null);
   const [voice, setVoice] = useState<Voice | null>(null);
   const [effect, setEffect] = useState<VoiceEffect>("none");
   const [originalVolume, setOriginalVolume] = useState(0);
@@ -85,22 +82,6 @@ export function VoiceStudio() {
     }
   }, [from, reuseId]);
 
-  // Búsqueda de voces con un pequeño retardo.
-  useEffect(() => {
-    if (!status?.configured) return;
-    let alive = true;
-    const timer = setTimeout(() => {
-      setVoices(null);
-      studio
-        .voices(query.trim(), library)
-        .then((r) => alive && setVoices(r.voices))
-        .catch(() => alive && setVoices([]));
-    }, 300);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [query, library, status?.configured]);
 
   const body: VoiceChangeBody | null =
     source && voice
@@ -280,24 +261,7 @@ export function VoiceStudio() {
           </SettingCard>
 
           <SettingCard label={v.voice}>
-            <div className="mb-2 flex gap-1.5">
-              <Chip active={!library} onClick={() => setLibrary(false)}>
-                {v.mine}
-              </Chip>
-              <Chip active={library} onClick={() => setLibrary(true)}>
-                {v.library}
-              </Chip>
-            </div>
-            <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface-4 px-2.5">
-              <Search className="size-4 text-fg-3" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={v.search}
-                className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-fg-4"
-              />
-            </div>
-            <VoiceList voices={status && !status.configured ? [] : voices} selected={voice} onSelect={setVoice} empty={v.noVoices} />
+            <VoicePicker enabled={!!status?.configured} selected={voice} onSelect={setVoice} />
           </SettingCard>
 
           <SettingCard label={v.effect}>
@@ -399,6 +363,62 @@ export function VoiceStudio() {
         )}
       </section>
     </div>
+  );
+}
+
+/** Voces de la cuenta o de la biblioteca pública de ElevenLabs, con búsqueda y escucha previa. */
+export function VoicePicker({
+  enabled,
+  selected,
+  onSelect,
+}: {
+  enabled: boolean;
+  selected: Voice | null;
+  onSelect: (v: Voice) => void;
+}) {
+  const v = useI18n().t.voice;
+  const [library, setLibrary] = useState(false);
+  const [query, setQuery] = useState("");
+  const [voices, setVoices] = useState<Voice[] | null>(null);
+
+  // Búsqueda con un pequeño retardo.
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      setVoices(null);
+      studio
+        .voices(query.trim(), library)
+        .then((r) => alive && setVoices(r.voices))
+        .catch(() => alive && setVoices([]));
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query, library, enabled]);
+
+  return (
+    <>
+      <div className="mb-2 flex gap-1.5">
+        <Chip active={!library} onClick={() => setLibrary(false)}>
+          {v.mine}
+        </Chip>
+        <Chip active={library} onClick={() => setLibrary(true)}>
+          {v.library}
+        </Chip>
+      </div>
+      <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface-4 px-2.5">
+        <Search className="size-4 text-fg-3" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={v.search}
+          className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-fg-4"
+        />
+      </div>
+      <VoiceList voices={enabled ? voices : []} selected={selected} onSelect={onSelect} empty={v.noVoices} />
+    </>
   );
 }
 
