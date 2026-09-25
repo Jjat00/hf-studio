@@ -42,7 +42,10 @@ Cambio de voz (ElevenLabs): list_voices busca voces (library=True para la biblio
 dice y su ritmo, con efecto opcional (deep, monster, ghost). Primero sin quote_id para ver el costo,
 luego con el quote_id tras el OK del usuario; el resultado es una generación más (get_generation).
 Más audio de ElevenLabs con el mismo patrón (sin quote_id cotiza; con él, lanza): text_to_speech,
-sound_effect, compose_music e isolate_voice. elevenlabs_account muestra el plan y los créditos que quedan."""
+sound_effect, compose_music e isolate_voice. elevenlabs_account muestra el plan y los créditos que quedan.
+Al generar audio, pasa title, category (voice, scream, laugh, creature, ambience, impact, foley, transition,
+music, other) y tags para que quede bien ordenado en la sonoteca. Antes de generar un sonido, busca en
+list_sounds si ya existe uno que sirva: reutilizarlo es gratis."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
 
@@ -247,6 +250,9 @@ def text_to_speech(
     stability: float | None = None,
     style: float | None = None,
     speed: float | None = None,
+    title: str | None = None,
+    category: str | None = None,
+    tags: list[str] | None = None,
     quote_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
@@ -257,7 +263,8 @@ def text_to_speech(
     devuelve el costo; con el OK del usuario, llama igual con ese quote_id."""
     return _audio("text-to-speech", {"text": text, "voice_id": voice_id, "model_id": model_id,
                   "language_code": language_code, "public_owner_id": public_owner_id, "voice_name": voice_name,
-                  "stability": stability, "style": style, "speed": speed}, quote_id, idempotency_key)  # fmt: skip
+                  "stability": stability, "style": style, "speed": speed, "title": title, "category": category,
+                  "tags": tags}, quote_id, idempotency_key)  # fmt: skip
 
 
 @mcp.tool()
@@ -266,6 +273,9 @@ def sound_effect(
     duration_seconds: float = 5,
     prompt_influence: float = 0.3,
     loop: bool = False,
+    title: str | None = None,
+    category: str | None = None,
+    tags: list[str] | None = None,
     quote_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
@@ -273,7 +283,8 @@ def sound_effect(
     echoing in a cave", "door creaking slowly"). duration_seconds de 0.5 a 30; loop=True para que se
     repita sin cortes. Sin quote_id devuelve el costo; con el OK del usuario, llama con ese quote_id."""
     return _audio("sound-effects", {"text": text, "duration_seconds": duration_seconds,
-                  "prompt_influence": prompt_influence, "loop": loop}, quote_id, idempotency_key)  # fmt: skip
+                  "prompt_influence": prompt_influence, "loop": loop, "title": title, "category": category,
+                  "tags": tags}, quote_id, idempotency_key)  # fmt: skip
 
 
 @mcp.tool()
@@ -281,14 +292,17 @@ def compose_music(
     prompt: str,
     seconds: float = 30,
     force_instrumental: bool = False,
+    title: str | None = None,
+    category: str | None = None,
+    tags: list[str] | None = None,
     quote_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
     """Música con ElevenLabs a partir de una descripción (género, tempo, instrumentos, ánimo). seconds de
     3 a 600; force_instrumental=True garantiza que no haya voz. Sin quote_id devuelve el costo; con el OK
     del usuario, llama con ese quote_id."""
-    return _audio("music", {"prompt": prompt, "seconds": seconds, "force_instrumental": force_instrumental},
-                  quote_id, idempotency_key)  # fmt: skip
+    return _audio("music", {"prompt": prompt, "seconds": seconds, "force_instrumental": force_instrumental,
+                  "title": title, "category": category, "tags": tags}, quote_id, idempotency_key)  # fmt: skip
 
 
 @mcp.tool()
@@ -296,6 +310,9 @@ def isolate_voice(
     source_generation_id: str | None = None,
     source_path: str | None = None,
     source_url: str | None = None,
+    title: str | None = None,
+    category: str | None = None,
+    tags: list[str] | None = None,
     quote_id: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
@@ -305,7 +322,8 @@ def isolate_voice(
     quoted = {"source_path": source_path} if source_path else {}
     if source_path:
         source_url = _uploaded_url(source_path)
-    body = {"source_generation_id": source_generation_id, "source_url": source_url}
+    body = {"source_generation_id": source_generation_id, "source_url": source_url, "title": title,
+            "category": category, "tags": tags}  # fmt: skip
     body = {k: v for k, v in body.items() if v is not None}
     # Se cotiza sobre la ruta local, no sobre la URL de la subida (igual que change_voice).
     payload = {"audio": "voice-isolator", **body, **quoted, **({"source_url": None} if source_path else {})}
@@ -318,6 +336,35 @@ def isolate_voice(
     return _call(
         "POST", "/v1/audio/voice-isolator", json={**body, "audio_quote": audio_quote}, headers=headers
     )
+
+
+@mcp.tool()
+def list_sounds(category: str | None = None, search: str | None = None, limit: int = 50) -> dict:
+    """Sonoteca: sonidos de ElevenLabs ya generados (voces, efectos, música, voz aislada), para
+    reutilizarlos sin volver a pagar. category: voice, scream, laugh, creature, ambience, impact, foley,
+    transition, music u other; search busca en título, texto y etiquetas. Cada uno trae file_url."""
+    params = {
+        "limit": limit,
+        **({"category": category} if category else {}),
+        **({"q": search} if search else {}),
+    }
+    return _call("GET", "/v1/sounds", params=params)
+
+
+@mcp.tool()
+def label_sound(
+    sound_id: str, title: str | None = None, category: str | None = None, tags: list[str] | None = None
+) -> dict:
+    """Corrige el título, la categoría o las etiquetas de un sonido de la sonoteca (gratis)."""
+    body = {k: v for k, v in {"title": title, "category": category, "tags": tags}.items() if v is not None}
+    return _call("PATCH", f"/v1/sounds/{sound_id}", json=body)
+
+
+@mcp.tool()
+def import_elevenlabs_history() -> dict:
+    """Trae a la sonoteca las voces generadas fuera de HF Studio (web de ElevenLabs u otras apps).
+    Gratis. La API de ElevenLabs no expone los efectos ni la música de su historial."""
+    return _call("POST", "/v1/sounds/import-elevenlabs")
 
 
 @mcp.tool()

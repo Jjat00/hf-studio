@@ -29,6 +29,9 @@ agents and a web UI (Spanish by default, English available).*
 - **Biblioteca** en cuadrícula masonry con todo lo generado desde la UI y desde los agentes (con su origen), filtros por
   tipo y una página de detalle por resultado con su configuración completa (modelo, prompt, parámetros, archivos de
   entrada y JSON).
+- **Sonoteca:** todos tus sonidos de ElevenLabs (los de HF Studio y las voces generadas en su web, que se importan
+  gratis) ordenados por lo que son (voces, gritos, risas, criaturas, ambientes, golpes, objetos y pasos, transiciones,
+  música) con título y etiquetas editables, para reutilizarlos sin volver a pagar.
 - **Presets** (recetas con variables), **lotes** con cotización total, **recomendador** de modelos en lenguaje
   natural (es/en) y **12 casos de uso** con tutorial paso a paso para la UI y para los agentes.
 - **Interfaz bilingüe:** español por defecto e inglés con un clic.
@@ -86,7 +89,7 @@ ElevenLabs solo las conoce la API.
 Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nombre y las ilustraciones son propios.
 
 - **Páginas:** Explorar, Imagen, Video (Crear: texto, fotograma inicial y final, referencias · Genjutsu · Editar
-  video · Movimiento), Voz, Audio, Casos de uso, Presets, Biblioteca (con detalle en `/history/<id>`), Modelos y MCP.
+  video · Movimiento), Voz, Audio, Sonoteca, Casos de uso, Presets, Biblioteca (con detalle en `/history/<id>`), Modelos y MCP.
 - **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 82 endpoints funcionan sin código
   específico. El formato muestra un rectángulo con su proporción.
 - **Voz** (`/voice`): elige un video, marca el tramo sobre la línea de tiempo, busca una voz (tu cuenta o la
@@ -125,7 +128,7 @@ Claude Desktop, ChatGPT desktop u otro cliente MCP por stdio usan el mismo coman
 variables. Crea una clave por cliente (`hf-studio create-key claude-desktop`). Los clientes cargan la lista de
 herramientas al arrancar: tras actualizar HF Studio, reinícialos.
 
-Herramientas (22):
+Herramientas (25):
 
 | Grupo | Herramientas |
 | --- | --- |
@@ -135,6 +138,7 @@ Herramientas (22):
 | Presets | `list_presets`, `run_preset`, `save_preset` |
 | Voz (ElevenLabs) | `list_voices`, `change_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
+| Sonoteca | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 
 **Nada se genera sin cotizar antes esa misma petición.** `estimate_cost`, y `generate_batch` o `run_preset`
 con `dry_run=True`, devuelven el costo y un `quote_id`. `generate`, y los lotes y presets con `dry_run=False`,
@@ -170,6 +174,8 @@ Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
 | GET | `/v1/voice/status` | ¿ElevenLabs configurado?, plan y créditos que quedan |
 | GET | `/v1/voice/voices?search=&library=` | Voces de la cuenta o de la biblioteca pública |
 | POST | `/v1/voice/estimate` · `/v1/voice/changes` | Cambio de voz en un tramo: cotiza (`voice_quote`) y lanza con ella |
+| GET/PATCH | `/v1/sounds?category=&q=` · `/v1/sounds/{id}` | Sonoteca con recuento por categoría; corregir título, categoría y etiquetas |
+| POST | `/v1/sounds/import-elevenlabs` | Trae a la sonoteca las voces del historial de ElevenLabs (gratis) |
 | POST | `/v1/audio/{servicio}/estimate` · `/v1/audio/{servicio}` | `text-to-speech`, `sound-effects`, `music`, `voice-isolator`: cotiza (`audio_quote`) y lanza con ella |
 
 Estados: `pending` (cola local) → `submitting` → `queued` → `in_progress` → `completed` | `failed` | `nsfw` |

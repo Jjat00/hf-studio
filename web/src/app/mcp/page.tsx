@@ -39,6 +39,9 @@ const TOOLS = [
   "compose_music",
   "isolate_voice",
   "elevenlabs_account",
+  "list_sounds",
+  "label_sound",
+  "import_elevenlabs_history",
 ];
 
 export default async function McpPage() {

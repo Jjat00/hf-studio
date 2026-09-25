@@ -386,4 +386,6 @@ def test_classify_by_what_the_sound_is():
     assert classify("gruñido de un monstruo", "sound_effect")[0] == "creature"
     assert classify("[screams] ayuda", "speech") == ("voice", ["scream"])
     assert classify("dark horror ambient", "music") == ("music", ["terror"])
+    assert classify("small spider legs scuttling fast", "sound_effect")[0] == "creature"
+    assert classify("light switch click followed by a hum", "sound_effect")[0] == "foley"
     assert classify("bip", "sound_effect")[0] == "other"

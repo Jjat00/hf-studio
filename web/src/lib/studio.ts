@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset, Sound, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -107,6 +107,14 @@ export const studio = {
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
     }),
+  sounds: () => call<{ sounds: Sound[]; counts: Record<string, number>; categories: string[] }>("/v1/sounds?limit=500"),
+  updateSound: (id: string, patch: { title?: string; category?: string; tags?: string[] }) =>
+    call<Sound>(`/v1/sounds/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+  importElevenlabs: () => call<{ imported: number; skipped: number }>("/v1/sounds/import-elevenlabs", { method: "POST" }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
   get: (id: string, wait = 0) => call<Generation>(`/v1/generations/${id}${wait ? `?wait=${wait}` : ""}`),
   presets: () => call<{ presets: Preset[] }>("/v1/presets"),

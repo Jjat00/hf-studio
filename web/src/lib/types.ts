@@ -136,3 +136,18 @@ export type VoiceChangeBody = {
   /** Cotización de /v1/voice/estimate para esta misma petición (un solo uso): sin ella la API no gasta. */
   voice_quote?: string;
 };
+
+export type Sound = {
+  id: string;
+  job_id: string | null;
+  origin: "studio" | "elevenlabs";
+  kind: "speech" | "voice_change" | "sound_effect" | "music" | "isolated";
+  title: string;
+  category: string;
+  tags: string[];
+  text: string;
+  duration: number | null;
+  file_url: string;
+  created_at: string;
+  source?: string;
+};
