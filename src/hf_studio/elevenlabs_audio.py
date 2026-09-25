@@ -18,6 +18,11 @@ from pydantic import BaseModel, Field, model_validator
 from .audio import PROTOCOLS, duration, has_audio
 from .voice import ElevenLabsClient, VoiceError, _run
 
+# Categorías de la sonoteca (sounds.LABELS); el agente puede elegir una al generar.
+SoundCategory = Literal[
+    "voice", "scream", "laugh", "creature", "ambience", "impact", "foley", "transition", "music", "other"
+]
+
 TTS_MODEL = "elevenlabs/text-to-speech"
 SFX_MODEL = "elevenlabs/sound-effects"
 MUSIC_MODEL = "elevenlabs/music"
@@ -60,6 +65,13 @@ class TextToSpeechIn(BaseModel):
     stability: float | None = Field(None, ge=0, le=1)
     style: float | None = Field(None, ge=0, le=1)
     speed: float | None = Field(None, ge=0.7, le=1.2)
+    title: str | None = Field(
+        None, max_length=200, description="Título en la sonoteca (si no, se deduce del texto)"
+    )
+    category: SoundCategory | None = Field(
+        None, description="Categoría en la sonoteca (si no, se clasifica sola)"
+    )
+    tags: list[str] | None = Field(None, max_length=12, description="Etiquetas para encontrarlo después")
     audio_quote: str | None = Field(None, description="audio_quote de la cotización; obligatorio al lanzar")
 
     @model_validator(mode="after")
@@ -74,6 +86,13 @@ class SoundEffectIn(BaseModel):
     duration_seconds: float = Field(5, ge=0.5, le=30, description="Duración del efecto")
     prompt_influence: float = Field(0.3, ge=0, le=1, description="Más alto = sigue más el texto")
     loop: bool = Field(False, description="Que se pueda repetir en bucle sin cortes")
+    title: str | None = Field(
+        None, max_length=200, description="Título en la sonoteca (si no, se deduce del texto)"
+    )
+    category: SoundCategory | None = Field(
+        None, description="Categoría en la sonoteca (si no, se clasifica sola)"
+    )
+    tags: list[str] | None = Field(None, max_length=12, description="Etiquetas para encontrarlo después")
     audio_quote: str | None = None
 
 
@@ -83,12 +102,26 @@ class MusicIn(BaseModel):
     )
     seconds: float = Field(30, ge=3, le=600, description="Duración de la pista")
     force_instrumental: bool = Field(False, description="Garantiza que no haya voz cantada")
+    title: str | None = Field(
+        None, max_length=200, description="Título en la sonoteca (si no, se deduce del texto)"
+    )
+    category: SoundCategory | None = Field(
+        None, description="Categoría en la sonoteca (si no, se clasifica sola)"
+    )
+    tags: list[str] | None = Field(None, max_length=12, description="Etiquetas para encontrarlo después")
     audio_quote: str | None = None
 
 
 class IsolateIn(BaseModel):
     source_generation_id: str | None = Field(None, description="Video o audio de tu biblioteca")
     source_url: str | None = Field(None, description="URL de upload_media")
+    title: str | None = Field(
+        None, max_length=200, description="Título en la sonoteca (si no, se deduce del texto)"
+    )
+    category: SoundCategory | None = Field(
+        None, description="Categoría en la sonoteca (si no, se clasifica sola)"
+    )
+    tags: list[str] | None = Field(None, max_length=12, description="Etiquetas para encontrarlo después")
     audio_quote: str | None = None
 
     @model_validator(mode="after")

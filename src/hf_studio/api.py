@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import logging
 import mimetypes
+import re
 import shutil
 import time
 import uuid
@@ -16,7 +17,7 @@ from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,7 @@ from .db import (
     ApiClient,
     Job,
     Preset,
+    Sound,
     Upload,
     hash_token,
     init_db,
@@ -49,6 +51,14 @@ from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
 from .recommend import recommend
 from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
+from .sounds import LABELS as SOUND_LABELS
+from .sounds import as_dict as sound_dict
+from .sounds import backfill as backfill_sounds
+from .sounds import classify as classify_sound
+from .sounds import clean_tags as clean_sound_tags
+from .sounds import history_kind as sound_history_kind
+from .sounds import register_job as register_sound
+from .sounds import title_from as sound_title
 from .voice import (
     VOICE_MODEL,
     VOICE_QUOTE_TTL,
@@ -561,6 +571,7 @@ def create_app(
         job = await get_owned_job(session, owner, job_id)
         if job.status not in TERMINAL:
             raise ServiceError(409, "still_active", "Cancel the generation before deleting it")
+        await session.execute(delete(Sound).where(Sound.job_id == job.id))  # su sonido en la sonoteca
         await session.delete(job)
         await session.commit()
         shutil.rmtree(Path(settings.storage_dir) / "outputs" / job_id, ignore_errors=True)
@@ -1107,7 +1118,117 @@ def create_app(
                 job.outputs = [{"kind": "audio", "url": f"/v1/generations/{job_id}/files/{name}"}]
                 job.files = [{"name": name, "kind": "audio", "size": out.stat().st_size,
                               "content_type": "audio/mpeg", "index": 0}]  # fmt: skip
+                await register_sound(s, job, Path(settings.storage_dir))
             await s.commit()
+
+    # --- Sonoteca ------------------------------------------------------------------------------
+
+    def sounds_query(owner: ApiClient):
+        query = select(Sound)
+        return query if owner.sees_all else query.where(Sound.owner_id == owner.id)
+
+    async def owned_sound(session: AsyncSession, owner: ApiClient, sound_id: str) -> Sound:
+        sound = await session.get(Sound, sound_id)
+        if not sound or (sound.owner_id != owner.id and not owner.sees_all):
+            raise ServiceError(404, "not_found", "Sound not found")
+        return sound
+
+    @app.get("/v1/sounds", tags=["sonoteca"])
+    async def list_sounds(
+        session: Session,
+        owner: Owner,
+        category: str | None = Query(None, description="voice, scream, laugh, creature, ambience, impact…"),
+        q: str | None = Query(None, max_length=100, description="Busca en título, texto y etiquetas"),
+        limit: int = Query(200, ge=1, le=500),
+    ) -> dict:
+        """Sonidos de ElevenLabs (de HF Studio e importados), del más nuevo al más viejo, con el recuento por categoría."""
+        await backfill_sounds(session, Path(settings.storage_dir), owner)
+        rows = list(await session.scalars(sounds_query(owner).order_by(Sound.created_at.desc())))
+        counts = {c: 0 for c in SOUND_LABELS}
+        for r in rows:
+            counts[r.category] = counts.get(r.category, 0) + 1
+        if category:
+            rows = [r for r in rows if r.category == category]
+        if q:
+            needle = q.lower()
+            rows = [r for r in rows if needle in f"{r.title} {r.text} {' '.join(r.tags or [])}".lower()]
+        names = await client_names(session) if owner.sees_all else {}
+        return {
+            "sounds": [sound_dict(r, names.get(r.owner_id)) for r in rows[:limit]],
+            "counts": counts,
+            "categories": list(SOUND_LABELS),
+        }
+
+    class SoundPatch(BaseModel):
+        title: str | None = Field(None, min_length=1, max_length=200)
+        category: str | None = None
+        tags: list[str] | None = Field(None, max_length=12)
+
+    @app.patch("/v1/sounds/{sound_id}", tags=["sonoteca"])
+    async def update_sound(sound_id: str, body: SoundPatch, session: Session, owner: Owner) -> dict:
+        """Corrige el título, la categoría o las etiquetas de un sonido."""
+        sound = await owned_sound(session, owner, sound_id)
+        if body.category is not None:
+            if body.category not in SOUND_LABELS:
+                raise ServiceError(
+                    422, "invalid_category", f"category must be one of {', '.join(SOUND_LABELS)}"
+                )
+            sound.category = body.category
+        if body.title is not None:
+            sound.title = body.title.strip()
+        if body.tags is not None:
+            sound.tags = clean_sound_tags(body.tags)
+        await session.commit()
+        return sound_dict(sound)
+
+    @app.get("/v1/sounds/{sound_id}/file", tags=["sonoteca"])
+    async def sound_file(sound_id: str, session: Session, owner: Owner) -> FileResponse:
+        sound = await owned_sound(session, owner, sound_id)
+        root = Path(settings.storage_dir).resolve()
+        path = (root / sound.file_name).resolve()
+        if not path.is_relative_to(root) or not path.exists():
+            raise ServiceError(404, "not_found", "The sound file is missing")
+        slug = re.sub(r"[^a-z0-9]+", "-", sound.title.lower()).strip("-")[:60] or "sound"
+        return FileResponse(path, media_type="audio/mpeg", filename=f"{slug}{path.suffix}",
+                            content_disposition_type="inline")  # fmt: skip
+
+    @app.post("/v1/sounds/import-elevenlabs", tags=["sonoteca"])
+    async def import_elevenlabs(request: Request, session: Session, owner: Owner) -> dict:
+        """Trae a la sonoteca el historial de voz de ElevenLabs (lo generado en su web u otras apps). Gratis:
+        solo lee. La API de ElevenLabs no expone los efectos ni la música de su historial."""
+        eleven = request.app.state.eleven
+        known = set(await session.scalars(select(Sound.external_id).where(Sound.owner_id == owner.id,
+                                                                           Sound.external_id.is_not(None))))  # fmt: skip
+        folder = Path(settings.storage_dir) / "sounds"
+        folder.mkdir(parents=True, exist_ok=True)
+        imported, skipped, after = 0, 0, None
+        for _ in range(10):  # hasta 1.000 elementos
+            page = await eleven.history(100, after)
+            for item in page.get("history", []):
+                hid = item.get("history_item_id")
+                if not hid or hid in known:
+                    skipped += 1
+                    continue
+                data = await eleven.history_audio(hid)
+                name = f"sounds/{re.sub(r'[^A-Za-z0-9_-]', '', hid)}.mp3"
+                (Path(settings.storage_dir) / name).write_bytes(data)
+                kind = sound_history_kind(item.get("source"))
+                text = item.get("text") or " ".join(d.get("text", "") for d in item.get("dialogue") or [])
+                category, tags = classify_sound(text, kind)
+                session.add(Sound(
+                    owner_id=owner.id, external_id=hid, origin="elevenlabs", kind=kind,
+                    title=sound_title(text) if text else "ElevenLabs", category=category,
+                    tags=clean_sound_tags([*tags, str(item.get("source") or "").lower()]), text=text,
+                    file_name=name, duration=await probe_duration(str(Path(settings.storage_dir) / name)),
+                    created_at=datetime.fromtimestamp(item.get("date_unix") or 0, UTC).replace(tzinfo=None),
+                ))  # fmt: skip
+                known.add(hid)
+                imported += 1
+            await session.commit()
+            after = page.get("last_history_item_id")
+            if not page.get("has_more") or not after:
+                break
+        return {"imported": imported, "skipped": skipped}
 
     @app.post("/v1/webhooks/higgsfield/{job_id}", tags=["sistema"], include_in_schema=False)
     async def webhook(job_id: str, request: Request, session: Session, token: str = "") -> dict:

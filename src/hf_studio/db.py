@@ -170,3 +170,25 @@ class Preset(Base):
             "output": self.output, "model": self.model, "template": self.template, "variables": self.variables,
             "cover": self.cover, "builtin": False,
         }  # fmt: skip
+
+
+class Sound(Base):
+    """Un sonido de la sonoteca: salida de un trabajo de audio de HF Studio o un audio importado del
+    historial de ElevenLabs. Guarda cómo se identifica (título, categoría, etiquetas) para reutilizarlo."""
+
+    __tablename__ = "sounds"
+    __table_args__ = (UniqueConstraint("owner_id", "external_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), unique=True)
+    external_id: Mapped[str | None] = mapped_column(String(64))  # history_item_id de ElevenLabs
+    origin: Mapped[str] = mapped_column(String(20))  # studio | elevenlabs
+    kind: Mapped[str] = mapped_column(String(20))  # speech | voice_change | sound_effect | music | isolated
+    title: Mapped[str] = mapped_column(String(200))
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    text: Mapped[str] = mapped_column(Text, default="")  # texto o descripción que lo generó
+    file_name: Mapped[str] = mapped_column(String(200))  # relativo a storage_dir
+    duration: Mapped[float | None] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

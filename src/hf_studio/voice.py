@@ -213,6 +213,17 @@ class ElevenLabsClient:
         )
         return response.content
 
+    async def history(self, page_size: int = 100, start_after: str | None = None) -> dict:
+        """Historial de voz de la cuenta (texto a voz, cambio de voz, doblaje). No incluye efectos ni música."""
+        params = {
+            "page_size": page_size,
+            **({"start_after_history_item_id": start_after} if start_after else {}),
+        }
+        return (await self._request("GET", "/v1/history", params=params)).json()
+
+    async def history_audio(self, history_item_id: str) -> bytes:
+        return (await self._request("GET", f"/v1/history/{history_item_id}/audio")).content
+
     async def isolate(self, audio: bytes) -> bytes:
         response = await self._request(
             "POST", "/v1/audio-isolation", files={"audio": ("input.wav", audio, "audio/wav")}

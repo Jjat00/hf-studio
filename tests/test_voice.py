@@ -51,6 +51,13 @@ class FakeElevenLabs:
             ], "has_more": False})  # fmt: skip
         if path == "/v1/voices/add/owner1/lib1":
             return httpx.Response(200, json={"voice_id": "added1"})
+        if path == "/v1/history":
+            return httpx.Response(200, json={"history": [
+                {"history_item_id": "h1", "date_unix": 1790310894, "text": "[laughs] Hola como estas", "source": "TTS"},
+                {"history_item_id": "h2", "date_unix": 1779388703, "text": "Conoce a Gu", "source": "STS"},
+            ], "has_more": False, "last_history_item_id": "h2"})  # fmt: skip
+        if path.startswith("/v1/history/") and path.endswith("/audio"):
+            return httpx.Response(200, content=self.voice_wav, headers={"content-type": "audio/mpeg"})
         if path == "/v1/user/subscription":
             return httpx.Response(
                 200, json={"tier": "starter", "character_count": 1000, "character_limit": 30000}
@@ -326,3 +333,57 @@ async def test_tts_rejects_text_over_the_model_limit(voice_env):
         json={"text": "a" * 5001, "voice_id": "v", "model_id": "eleven_v3"},
     )
     assert r.status_code == 422
+
+
+async def run_audio(app, http, service, body):
+    est = (await http.post(f"/v1/audio/{service}/estimate", json=body)).json()
+    job = (await http.post(f"/v1/audio/{service}", json={**body, "audio_quote": est["audio_quote"]})).json()
+    await asyncio.gather(*app.state.tasks)
+    return job["id"]
+
+
+async def test_generated_sounds_land_classified_in_the_library(voice_env):
+    app, http, _, _ = voice_env
+    await run_audio(
+        app, http, "sound-effects", {"text": "evil laugh echoing in a haunted cave", "duration_seconds": 2}
+    )
+    # El agente puede dar su propia clasificación.
+    await run_audio(app, http, "sound-effects", {"text": "zzz", "duration_seconds": 1, "title": "Ronquido de ogro",
+                                                 "category": "creature", "tags": ["Ogro"]})  # fmt: skip
+    lib = (await http.get("/v1/sounds")).json()
+    assert lib["counts"]["laugh"] == 1 and lib["counts"]["creature"] == 1
+    laugh = next(s for s in lib["sounds"] if s["category"] == "laugh")
+    assert laugh["title"] == "evil laugh echoing in a haunted cave" and "terror" in laugh["tags"]
+    ogre = next(s for s in lib["sounds"] if s["category"] == "creature")
+    assert ogre["title"] == "Ronquido de ogro" and ogre["tags"] == ["ogro"]
+    assert (await http.get(laugh["file_url"])).status_code == 200
+    only = (await http.get("/v1/sounds", params={"q": "ogro"})).json()["sounds"]
+    assert [s["id"] for s in only] == [ogre["id"]]
+    fixed = await http.patch(
+        f"/v1/sounds/{laugh['id']}", json={"title": "Risa malvada", "tags": ["Risa", "cueva"]}
+    )
+    assert fixed.json()["title"] == "Risa malvada" and fixed.json()["tags"] == ["risa", "cueva"]
+    bad = await http.patch(f"/v1/sounds/{laugh['id']}", json={"category": "nope"})
+    assert bad.status_code == 422
+
+
+async def test_import_elevenlabs_history_once(voice_env):
+    _, http, _, _ = voice_env
+    first = (await http.post("/v1/sounds/import-elevenlabs")).json()
+    assert first == {"imported": 2, "skipped": 0}
+    assert (await http.post("/v1/sounds/import-elevenlabs")).json() == {"imported": 0, "skipped": 2}
+    sounds = (await http.get("/v1/sounds")).json()["sounds"]
+    assert {s["kind"] for s in sounds} == {"speech", "voice_change"}
+    hola = next(s for s in sounds if s["text"].endswith("Hola como estas"))
+    assert hola["origin"] == "elevenlabs" and hola["title"] == "Hola como estas" and "laugh" in hola["tags"]
+
+
+def test_classify_by_what_the_sound_is():
+    from hf_studio.sounds import classify
+
+    assert classify("door creaking slowly", "sound_effect")[0] == "foley"
+    assert classify("lluvia y truenos de noche", "sound_effect")[0] == "ambience"
+    assert classify("gruñido de un monstruo", "sound_effect")[0] == "creature"
+    assert classify("[screams] ayuda", "speech") == ("voice", ["scream"])
+    assert classify("dark horror ambient", "music") == ("music", ["terror"])
+    assert classify("bip", "sound_effect")[0] == "other"
