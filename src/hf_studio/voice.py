@@ -195,6 +195,30 @@ class ElevenLabsClient:
         )
         return response.content
 
+    async def text_to_speech(self, voice_id: str, body: dict) -> bytes:
+        response = await self._request(
+            "POST", f"/v1/text-to-speech/{voice_id}", params={"output_format": "mp3_44100_128"}, json=body
+        )
+        return response.content
+
+    async def sound_effect(self, body: dict) -> bytes:
+        response = await self._request(
+            "POST", "/v1/sound-generation", params={"output_format": "mp3_44100_128"}, json=body
+        )
+        return response.content
+
+    async def music(self, body: dict) -> bytes:
+        response = await self._request(
+            "POST", "/v1/music", params={"output_format": "mp3_44100_128"}, json=body
+        )
+        return response.content
+
+    async def isolate(self, audio: bytes) -> bytes:
+        response = await self._request(
+            "POST", "/v1/audio-isolation", files={"audio": ("input.wav", audio, "audio/wav")}
+        )
+        return response.content
+
 
 # --- ffmpeg --------------------------------------------------------------------------------------
 

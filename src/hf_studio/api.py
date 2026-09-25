@@ -36,11 +36,19 @@ from .db import (
     make_sessionmaker,
     utcnow,
 )
+from .elevenlabs_audio import (
+    AUDIO_MODELS,
+    MAX_ISOLATE_SECONDS,
+    IsolateIn,
+)
+from .elevenlabs_audio import SERVICES as AUDIO_SERVICES
+from .elevenlabs_audio import estimate as audio_estimate
+from .elevenlabs_audio import run as run_audio_service
 from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
 from .recommend import recommend
-from .service import ServiceError, check_input, create_generation, get_owned_job, trusted_media
+from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
 from .voice import (
     VOICE_MODEL,
     VOICE_QUOTE_TTL,
@@ -156,7 +164,7 @@ def create_app(
         async with app.state.sessions() as s:
             await s.execute(
                 update(Job)
-                .where(Job.model == VOICE_MODEL, Job.status.in_(ACTIVE))
+                .where(Job.model.in_((VOICE_MODEL, *AUDIO_MODELS)), Job.status.in_(ACTIVE))
                 .values(status="failed", error_kind="interrupted", error="Interrupted by a server restart",
                         finished_at=utcnow())
             )  # fmt: skip
@@ -907,6 +915,198 @@ def create_app(
                 job.outputs = [{"kind": "video", "url": f"/v1/generations/{job_id}/files/{name}"}]
                 job.files = [{"name": name, "kind": "video", "size": out.stat().st_size,
                               "content_type": "video/mp4", "index": 0}]  # fmt: skip
+            await s.commit()
+
+    # --- Audio de ElevenLabs: texto a voz, efectos, música y aislamiento ------------------------
+
+    async def audio_source(session: AsyncSession, owner: ApiClient, body: IsolateIn) -> str:
+        """Ruta local o URL de un video o audio propio (nunca una URL arbitraria)."""
+        if body.source_url:
+            if not await trusted_media(session, owner, body.source_url):
+                raise ServiceError(
+                    422,
+                    "untrusted_source",
+                    "source_url must come from /v1/uploads (upload_media) or your generations",
+                )
+            return body.source_url
+        job = await get_owned_job(session, owner, body.source_generation_id or "")
+        media = [o for o in job.outputs or [] if o.get("kind") in ("video", "audio")]
+        if job.status != "completed" or not media:
+            raise ServiceError(
+                422, "invalid_source", "The source generation is not a completed video or audio"
+            )
+        for f in job.files or []:
+            path = Path(settings.storage_dir) / "outputs" / job.id / f["name"]
+            if f.get("kind") in ("video", "audio") and path.exists():
+                return str(path.resolve())
+        return media[0]["url"]
+
+    async def audio_plan(session: AsyncSession, owner: ApiClient, body: BaseModel) -> tuple[str | None, dict]:
+        """(fuente, cotización) de un servicio de audio; el aislamiento mide la duración de la fuente."""
+        if not isinstance(body, IsolateIn):
+            return None, audio_estimate(body)
+        source = await audio_source(session, owner, body)
+        seconds = await probe_duration(source)
+        if seconds is None:
+            raise ServiceError(422, "invalid_source", "Could not read the source media")
+        if seconds > MAX_ISOLATE_SECONDS:
+            raise ServiceError(
+                422, "source_too_long", f"The source must last at most {MAX_ISOLATE_SECONDS:.0f}s"
+            )
+        return source, audio_estimate(body, seconds)
+
+    def add_audio_routes(service: str, model_id: str, schema: type[BaseModel]) -> None:
+        def digest_of(body: BaseModel) -> str:
+            return input_hash(model_id, body.model_dump(exclude_none=True, exclude={"audio_quote"}))
+
+        async def estimate_route(body: schema, request: Request, session: Session, owner: Owner) -> dict:  # type: ignore[valid-type]
+            _, est = await audio_plan(session, owner, body)
+            quotes: dict = request.app.state.voice_quotes
+            now = time.monotonic()
+            for qid in [q for q, v in quotes.items() if v["expires"] < now]:
+                del quotes[qid]
+            qid = "aq_" + uuid.uuid4().hex
+            quotes[qid] = {"owner": owner.id, "digest": digest_of(body), "seconds": est["units"],
+                           "expires": now + VOICE_QUOTE_TTL, "used": False}  # fmt: skip
+            return {**est, "audio_quote": qid}
+
+        async def create_route(
+            body: schema,  # type: ignore[valid-type]
+            request: Request,
+            session: Session,
+            owner: Owner,
+            idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+        ) -> JSONResponse:
+            if not request.app.state.eleven.configured:
+                raise VoiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
+            if not body.audio_quote:
+                raise ServiceError(
+                    422,
+                    "quote_required",
+                    f"Quote first (POST /v1/audio/{service}/estimate) and send its audio_quote",
+                )
+            digest = digest_of(body)
+            if idempotency_key:
+                existing = await session.scalar(
+                    select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
+                )
+                if existing:
+                    if existing.input_hash != digest:
+                        raise ServiceError(
+                            409,
+                            "idempotency_conflict",
+                            "This Idempotency-Key was already used for a different request",
+                        )
+                    return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
+            quote = request.app.state.voice_quotes.get(body.audio_quote)
+            if (
+                not quote
+                or quote["owner"] != owner.id
+                or quote["digest"] != digest
+                or quote["used"]
+                or quote["expires"] < time.monotonic()
+            ):
+                raise ServiceError(
+                    409,
+                    "quote_invalid",
+                    "Missing, expired, used or mismatched audio_quote. Quote this exact request again",
+                )
+            # Reserva atómica (sin await desde la comprobación); se libera si falla antes de crear el trabajo.
+            quote["used"] = True
+            try:
+                source, est = await audio_plan(session, owner, body)
+                if abs(est["units"] - quote["seconds"]) > 0.05:
+                    raise ServiceError(
+                        409, "cost_changed", "The input changed since it was quoted. Quote again"
+                    )
+                active = await session.scalar(
+                    select(func.count())
+                    .select_from(Job)
+                    .where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
+                )
+                if active >= settings.max_active_jobs_per_client:
+                    raise ServiceError(
+                        429, "too_many_active",
+                        f"You have {active} active jobs (maximum {settings.max_active_jobs_per_client})",
+                    )  # fmt: skip
+                job = Job(
+                    owner_id=owner.id,
+                    model=model_id,
+                    input=body.model_dump(exclude_none=True, exclude={"audio_quote"}),
+                    input_hash=digest,
+                    idempotency_key=idempotency_key,
+                    status="in_progress",
+                    submitted_at=utcnow(),
+                )
+                session.add(job)
+                try:
+                    await session.commit()
+                except IntegrityError:
+                    await session.rollback()
+                    existing = await session.scalar(
+                        select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
+                    )
+                    if existing and existing.input_hash == digest:
+                        quote["used"] = False
+                        return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
+                    raise ServiceError(
+                        409,
+                        "idempotency_conflict",
+                        "This Idempotency-Key was already used for a different request",
+                    ) from None
+            except BaseException:
+                quote["used"] = False
+                raise
+            task = asyncio.create_task(run_audio_job(request.app, job.id, body, source))
+            request.app.state.tasks.add(task)
+            task.add_done_callback(request.app.state.tasks.discard)
+            return JSONResponse(job_out(job, deduplicated=False), status_code=202)
+
+        estimate_route.__doc__ = f"Costo de {service} en ElevenLabs, con un audio_quote de un solo uso."
+        create_route.__doc__ = (
+            f"Lanza {service} en ElevenLabs (asíncrono: sigue el trabajo en /v1/generations)."
+        )
+        app.post(f"/v1/audio/{service}/estimate", tags=["audio"], operation_id=f"estimate_{service}")(
+            estimate_route
+        )
+        app.post(f"/v1/audio/{service}", tags=["audio"], status_code=202, operation_id=f"create_{service}")(
+            create_route
+        )
+
+    for _service, (_model, _schema) in AUDIO_SERVICES.items():
+        add_audio_routes(_service, _model, _schema)
+
+    async def run_audio_job(app: FastAPI, job_id: str, body: BaseModel, source: str | None) -> None:
+        name = "0-audio.mp3"
+        out = Path(settings.storage_dir) / "outputs" / job_id / name
+        error: tuple[str, str] | None = None
+
+        async def produce() -> None:
+            async with app.state.voice_slots:
+                await run_audio_service(app.state.eleven, body, out, source)
+
+        try:
+            await asyncio.wait_for(produce(), settings.job_timeout_seconds)
+        except TimeoutError:
+            error = ("timed_out", f"Exceeded {settings.job_timeout_seconds}s")
+        except VoiceError as exc:
+            error = (exc.code, exc.message)
+        except Exception as exc:
+            log.exception("Trabajo de audio %s falló", job_id)
+            error = ("internal", str(exc))
+        async with app.state.sessions() as s:
+            job = await s.get(Job, job_id)
+            if not job:
+                return
+            job.finished_at = utcnow()
+            if error:
+                job.status = "timed_out" if error[0] == "timed_out" else "failed"
+                job.error_kind, job.error = error[0], error[1]
+            else:
+                job.status = "completed"
+                job.outputs = [{"kind": "audio", "url": f"/v1/generations/{job_id}/files/{name}"}]
+                job.files = [{"name": name, "kind": "audio", "size": out.stat().st_size,
+                              "content_type": "audio/mpeg", "index": 0}]  # fmt: skip
             await s.commit()
 
     @app.post("/v1/webhooks/higgsfield/{job_id}", tags=["sistema"], include_in_schema=False)

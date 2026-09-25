@@ -55,7 +55,11 @@ class FakeElevenLabs:
             return httpx.Response(
                 200, json={"tier": "starter", "character_count": 1000, "character_limit": 30000}
             )
-        if path.startswith("/v1/speech-to-speech/"):
+        if path.startswith(("/v1/speech-to-speech/", "/v1/text-to-speech/")) or path in (
+            "/v1/sound-generation",
+            "/v1/music",
+            "/v1/audio-isolation",
+        ):
             return httpx.Response(200, content=self.voice_wav, headers={"content-type": "audio/wav"})
         return httpx.Response(404, json={"detail": "not found"})
 
@@ -272,3 +276,53 @@ async def test_one_quote_cannot_pay_two_simultaneous_runs(voice_env):
     assert sorted(r.status_code for r in runs) == [202, 409]
     await asyncio.gather(*app.state.tasks)
     assert len([c for c in fake.calls if "speech-to-speech" in c.url.path]) == 1
+
+
+AUDIO_CASES = [
+    ("text-to-speech", {"text": "Hola, soy tu peor pesadilla", "voice_id": "v_demon", "model_id": "eleven_v3"},
+     round(27 / 1000 * 0.10, 4), "/v1/text-to-speech/v_demon"),
+    ("sound-effects", {"text": "evil laugh echoing in a cave", "duration_seconds": 3}, round(3 / 60 * 0.12, 4),
+     "/v1/sound-generation"),
+    ("music", {"prompt": "dark horror ambient, low drones", "seconds": 20, "force_instrumental": True},
+     round(20 / 60 * 0.15, 4), "/v1/music"),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("service", "body", "usd", "upstream"), AUDIO_CASES)
+async def test_audio_service_quote_then_run(voice_env, service, body, usd, upstream):
+    app, http, fake, _ = voice_env
+    assert (await http.post(f"/v1/audio/{service}", json=body)).json()["error"]["code"] == "quote_required"
+    est = (await http.post(f"/v1/audio/{service}/estimate", json=body)).json()
+    assert est["usd"] == usd and est["audio_quote"].startswith("aq_")
+    assert not [c for c in fake.calls if c.url.path == upstream]  # cotizar no llama a ElevenLabs
+    job = await http.post(f"/v1/audio/{service}", json={**body, "audio_quote": est["audio_quote"]})
+    assert job.status_code == 202
+    await asyncio.gather(*app.state.tasks)
+    done = (await http.get(f"/v1/generations/{job.json()['id']}")).json()
+    assert done["status"] == "completed", done["error"]
+    assert done["outputs"][0]["kind"] == "audio"
+    assert (await http.get(done["outputs"][0]["file_url"])).status_code == 200
+    # Cotización de un solo uso.
+    again = await http.post(f"/v1/audio/{service}", json={**body, "audio_quote": est["audio_quote"]})
+    assert again.json()["error"]["code"] == "quote_invalid"
+
+
+async def test_isolate_voice_from_a_library_video(voice_env):
+    app, http, fake, src = voice_env
+    body = {"source_generation_id": src}
+    est = (await http.post("/v1/audio/voice-isolator/estimate", json=body)).json()
+    assert est["units"] == pytest.approx(6, abs=0.1)
+    job = await http.post("/v1/audio/voice-isolator", json={**body, "audio_quote": est["audio_quote"]})
+    await asyncio.gather(*app.state.tasks)
+    done = (await http.get(f"/v1/generations/{job.json()['id']}")).json()
+    assert done["status"] == "completed", done["error"]
+    assert [c.url.path for c in fake.calls].count("/v1/audio-isolation") == 1
+
+
+async def test_tts_rejects_text_over_the_model_limit(voice_env):
+    _, http, _, _ = voice_env
+    r = await http.post(
+        "/v1/audio/text-to-speech/estimate",
+        json={"text": "a" * 5001, "voice_id": "v", "model_id": "eleven_v3"},
+    )
+    assert r.status_code == 422

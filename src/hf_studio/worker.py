@@ -18,8 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
 from .db import Job, utcnow
+from .elevenlabs_audio import AUDIO_MODELS
 from .higgsfield import TERMINAL_STATUSES, HiggsfieldClient, HiggsfieldError, extract_outputs
-from .voice import VOICE_MODEL  # trabajo local: no ocupa concurrencia de Higgsfield
+from .voice import VOICE_MODEL
+
+# Trabajos locales (ElevenLabs): no ocupan concurrencia de Higgsfield.
+LOCAL_MODELS = (VOICE_MODEL, *AUDIO_MODELS)
 
 log = logging.getLogger("hf_studio.worker")
 
@@ -87,7 +91,9 @@ class Worker:
             in_flight = await session.scalar(
                 select(func.count())
                 .select_from(Job)
-                .where(Job.status.in_(("submitting", "queued", "in_progress")), Job.model != VOICE_MODEL)
+                .where(
+                    Job.status.in_(("submitting", "queued", "in_progress")), Job.model.not_in(LOCAL_MODELS)
+                )
             )
             slots = self.settings.hf_max_concurrency - (in_flight or 0)
             if slots <= 0:
