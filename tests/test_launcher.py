@@ -42,19 +42,24 @@ def test_a_ui_we_stopped_is_not_a_crash(monkeypatch):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="grupos de procesos POSIX")
-def test_stop_cleans_the_group_even_if_the_parent_already_exited():
+def test_stop_cleans_the_group_even_if_the_parent_already_exited(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    child = "import time; time.sleep(60)"
     ui = _ui(
-        "import subprocess, sys; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])"
+        "import subprocess, sys;"
+        f"p = subprocess.Popen([sys.executable, '-c', {child!r}]);"
+        f"open({str(pid_file)!r}, 'w').write(str(p.pid))"
     )
     ui.proc.wait()
+    pid = int(pid_file.read_text())
     ui.stop()  # el hijo vivía en el grupo: killpg lo cierra
     for _ in range(50):
         try:
-            os.killpg(ui.proc.pid, 0)
+            os.kill(pid, 0)
         except ProcessLookupError:
             return
         time.sleep(0.1)
-    pytest.fail("the UI group is still alive")
+    pytest.fail("the UI child is still alive")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Job Object de Windows")

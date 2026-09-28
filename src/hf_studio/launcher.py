@@ -197,8 +197,8 @@ class UI:
         else:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            except (ProcessLookupError, PermissionError):
+                pass  # sin procesos vivos en el grupo (macOS da EPERM si solo quedan zombis)
         try:
             self.proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
