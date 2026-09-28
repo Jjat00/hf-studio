@@ -21,6 +21,7 @@ from urllib.parse import urljoin
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 INSTRUCTIONS = """Genera imágenes y videos con los modelos de Higgsfield a través de HF Studio.
 Atajos: recommend_models("lo que quiere el usuario") sugiere modelos con su costo; list_presets y
@@ -48,6 +49,11 @@ music, other) y tags para que quede bien ordenado en la sonoteca. Antes de gener
 list_sounds si ya existe uno que sirva: reutilizarlo es gratis."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
+# Cada herramienta declara las cuatro pistas para que el cliente avise antes de invocarla: solo lectura
+# (catálogo, biblioteca, estados), gasta créditos (siempre tras una cotización que vio el usuario, título
+# «spends credits»), o modifica algo (cancelar, etiquetar, escribir archivos). estimate_cost cuenta como
+# solo lectura: no gasta ni toca la base, aunque emite un quote_id en memoria (15 min, un solo uso).
+# list_sounds no lo es: antes de listar registra en la sonoteca los audios terminados que falten.
 
 
 def _client() -> httpx.Client:
@@ -73,7 +79,12 @@ def _call(method: str, path: str, **kwargs: Any) -> Any:
     raise ToolError(f"HTTP {response.status_code}: {error}")
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Find models",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def find_models(capability: str | None = None, output: str | None = None, query: str | None = None) -> dict:
     """Busca modelos. capability: text-to-video, image-to-video, first-last-frame, video-input,
     reference-to-video, image-references, audio-input, video-edit, video-extend, motion-transfer,
@@ -82,7 +93,12 @@ def find_models(capability: str | None = None, output: str | None = None, query:
     return _call("GET", "/v1/models", params=params)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Get model schema",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def get_model(model_id: str) -> dict:
     """Esquema de entrada (JSON Schema), notas de uso y docs de un modelo, p. ej.
     bytedance/seedance-2.0/image-to-video. Léelo antes de generar, incluidas las studio_notes
@@ -100,7 +116,12 @@ def _local_path(path: str) -> Path:
     return Path(path).expanduser()
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Upload local media",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def upload_media(path: str) -> dict:
     """Sube una imagen (jpg/png/webp/gif), video mp4 o audio wav local y devuelve una URL pública
     para usar en campos *_url / *_urls del modelo. Acepta rutas de Windows (C:\\...) si el MCP corre en WSL."""
@@ -112,7 +133,12 @@ def upload_media(path: str) -> dict:
         return _call("POST", "/v1/uploads", files={"file": (file.name, fh, content_type)})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Estimate cost",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None = None) -> dict:
     """Costo de una generación sin ejecutarla. Funciona aunque falten los medios. Si el modelo cobra
     por segundos de video de entrada, pasa input_video_seconds (duración del video que subirás).
@@ -122,7 +148,12 @@ def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None 
     return {**estimate, "quote_id": _issue_quote(payload, estimate)}
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Generate (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def generate(
     model_id: str,
     input: dict,
@@ -150,7 +181,12 @@ def generate(
     return _call("POST", "/v1/generations", json=body, headers=headers)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List voices",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
 def list_voices(search: str | None = None, library: bool = False, limit: int = 20) -> dict:
     """Voces de ElevenLabs para change_voice. Sin library: las de la cuenta (incluye predefinidas).
     Con library=True busca en la biblioteca pública (p. ej. search="demon", "monster", "horror",
@@ -175,7 +211,12 @@ def _uploaded_url(path: str) -> str:
     return _upload_cache[key]
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Change voice (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def change_voice(
     voice_id: str,
     source_generation_id: str | None = None,
@@ -239,7 +280,12 @@ def _audio(service: str, body: dict, quote_id: str | None, idempotency_key: str 
     return _call("POST", f"/v1/audio/{service}", json={**body, "audio_quote": audio_quote}, headers=headers)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Text to speech (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def text_to_speech(
     text: str,
     voice_id: str,
@@ -267,7 +313,12 @@ def text_to_speech(
                   "tags": tags}, quote_id, idempotency_key)  # fmt: skip
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Sound effect (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def sound_effect(
     text: str,
     duration_seconds: float = 5,
@@ -287,7 +338,12 @@ def sound_effect(
                   "tags": tags}, quote_id, idempotency_key)  # fmt: skip
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Compose music (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def compose_music(
     prompt: str,
     seconds: float = 30,
@@ -305,7 +361,12 @@ def compose_music(
                   "title": title, "category": category, "tags": tags}, quote_id, idempotency_key)  # fmt: skip
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Isolate voice (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def isolate_voice(
     source_generation_id: str | None = None,
     source_path: str | None = None,
@@ -338,7 +399,12 @@ def isolate_voice(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List sound library",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def list_sounds(category: str | None = None, search: str | None = None, limit: int = 50) -> dict:
     """Sonoteca: sonidos de ElevenLabs ya generados (voces, efectos, música, voz aislada), para
     reutilizarlos sin volver a pagar. category: voice, scream, laugh, creature, ambience, impact, foley,
@@ -351,7 +417,12 @@ def list_sounds(category: str | None = None, search: str | None = None, limit: i
     return _call("GET", "/v1/sounds", params=params)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Label sound",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    ),
+)
 def label_sound(
     sound_id: str, title: str | None = None, category: str | None = None, tags: list[str] | None = None
 ) -> dict:
@@ -360,20 +431,35 @@ def label_sound(
     return _call("PATCH", f"/v1/sounds/{sound_id}", json=body)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Import ElevenLabs history",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
 def import_elevenlabs_history() -> dict:
     """Trae a la sonoteca las voces generadas fuera de HF Studio (web de ElevenLabs u otras apps).
     Gratis. La API de ElevenLabs no expone los efectos ni la música de su historial."""
     return _call("POST", "/v1/sounds/import-elevenlabs")
 
 
-@mcp.tool()
+@mcp.tool(
+    title="ElevenLabs account",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
 def elevenlabs_account() -> dict:
     """Estado de ElevenLabs: si está configurado, el plan y los créditos que quedan."""
     return _call("GET", "/v1/voice/status")
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Get generation",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def get_generation(generation_id: str, wait_seconds: int = 50) -> dict:
     """Estado de una generación. Espera hasta wait_seconds (máx. 120) a que sea terminal.
     Los videos suelen tardar de 1 a 10 minutos: repite la llamada mientras terminal sea false."""
@@ -381,20 +467,35 @@ def get_generation(generation_id: str, wait_seconds: int = 50) -> dict:
     return _call("GET", f"/v1/generations/{generation_id}", params={"wait": wait})
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List generations",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def list_generations(status: str | None = None, limit: int = 20) -> dict:
     """Lista tus generaciones recientes (status: pending, queued, in_progress, completed, failed…)."""
     params = {"limit": limit, **({"status": status} if status else {})}
     return _call("GET", "/v1/generations", params=params)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Cancel generation",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True
+    ),
+)
 def cancel_generation(generation_id: str) -> dict:
     """Cancela una generación que aún no empezó (pending o queued). Lo cancelado se reembolsa."""
     return _call("POST", f"/v1/generations/{generation_id}/cancel")
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Download outputs",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True
+    ),
+)
 def download_outputs(generation_id: str, dest_dir: str = ".") -> dict:
     """Descarga las salidas de una generación completada a dest_dir y devuelve las rutas locales."""
     job = _call("GET", f"/v1/generations/{generation_id}")
@@ -422,7 +523,12 @@ def download_outputs(generation_id: str, dest_dir: str = ".") -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Recommend models",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
 def recommend_models(task: str, output: str | None = None, limit: int = 5) -> dict:
     """Sugiere modelos para una tarea en lenguaje natural (es/en), p. ej. 'video barato entre dos fotos',
     con el costo de una configuración estándar (5 s, 720p). output opcional: video | image."""
@@ -496,7 +602,12 @@ def _redeem_quote(
         return key
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Generate batch (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def generate_batch(
     items: list[dict],
     dry_run: bool = True,
@@ -519,7 +630,12 @@ def generate_batch(
     return _call("POST", "/v1/generations/batch", json={**payload, "dry_run": False}, headers=headers)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Wait for generations",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def wait_generations(generation_ids: list[str], wait_seconds: int = 60) -> dict:
     """Espera hasta wait_seconds (máx. 120) a que terminen varias generaciones y devuelve su estado.
     Repite mientras all_terminal sea false."""
@@ -527,7 +643,12 @@ def wait_generations(generation_ids: list[str], wait_seconds: int = 60) -> dict:
     return _call("GET", "/v1/generations", params=params)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="List presets",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
 def list_presets() -> dict:
     """Recetas disponibles (de serie y propias): slug, modelo, variables que piden y salida."""
     presets = _call("GET", "/v1/presets")["presets"]
@@ -551,7 +672,12 @@ def list_presets() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Run preset (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
 def run_preset(
     slug: str,
     variables: dict,
@@ -574,7 +700,12 @@ def run_preset(
     return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": False}, headers=headers)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Save preset",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+    ),
+)
 def save_preset(generation_id: str, slug: str, title: str, description: str = "") -> dict:
     """Guarda una generación como preset propio: mismos ajustes y medios, con el prompt como variable."""
     body = {"slug": slug, "title": title, "description": description}

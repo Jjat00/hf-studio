@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 from itertools import pairwise
@@ -258,6 +259,7 @@ def test_mix_never_cuts_the_image_when_source_audio_is_shorter(tmp_path):
     assert abs(float(out.stdout) - 4) < 0.1
 
 
+@pytest.mark.skipif(os.name == "nt", reason="usa sleep y pgrep")
 async def test_cancelling_kills_ffmpeg():
     from hf_studio import voice
 
@@ -389,3 +391,19 @@ def test_classify_by_what_the_sound_is():
     assert classify("small spider legs scuttling fast", "sound_effect")[0] == "creature"
     assert classify("light switch click followed by a hum", "sound_effect")[0] == "foley"
     assert classify("bip", "sound_effect")[0] == "other"
+
+
+async def test_listing_sounds_registers_finished_audio_jobs_missing_from_the_library(voice_env):
+    """Por esto `list_sounds` no se anuncia como solo lectura en el MCP: listar puede escribir."""
+    from sqlalchemy import delete, func, select
+
+    from hf_studio.db import Sound
+
+    app, http, _, _ = voice_env
+    await run_audio(app, http, "sound-effects", {"text": "door creaking slowly", "duration_seconds": 1})
+    async with app.state.sessions() as s:
+        await s.execute(delete(Sound))
+        await s.commit()
+    assert (await http.get("/v1/sounds")).json()["sounds"][0]["title"] == "door creaking slowly"
+    async with app.state.sessions() as s:
+        assert await s.scalar(select(func.count()).select_from(Sound)) == 1
