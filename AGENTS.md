@@ -8,7 +8,8 @@ owner's credits.
 
 ## Set it up for a user
 
-1. Prerequisites: `uv`, and for the UI also Node.js 20+ and `pnpm`. `ffmpeg` is needed for the audio features.
+1. Prerequisites: `uv`, and for the UI also Node.js 20+ and `pnpm`. `ffmpeg` is needed for the audio features
+   (on macOS `brew install ffmpeg-full`: the plain formula lacks the `rubberband` filter).
 2. The only required secret is the Higgsfield key (`HF_API_KEY`, format `KEY_ID:KEY_SECRET`, from
    https://console.higgsfield.ai). `ELEVENLABS_API_KEY` is optional and only enables audio. **Ask the user for the
    keys; never invent, print or commit them.** They go in `.env` (created from `.env.example`, git-ignored).
@@ -43,7 +44,7 @@ owner's credits.
 ```bash
 uv run pytest -q                 # Higgsfield and ElevenLabs are mocked: never spends credits
 uv run ruff check src tests && uv run ruff format src tests
-cd web && pnpm lint && npx tsc --noEmit
+cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
 
 - Map: `api.py` (REST routes), `service.py` (generation logic), `worker.py` (queue and polling),

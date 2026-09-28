@@ -23,7 +23,7 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             Linux) sudo apt-get update && sudo apt-get install -y ffmpeg ;;
-            macOS) brew install ffmpeg ;;
+            macOS) brew install ffmpeg-full && echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH" ;;
             Windows) choco install ffmpeg -y --no-progress ;;
           esac
       - run: uv sync --locked
@@ -47,4 +47,5 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm exec next typegen  # tipos globales de rutas (RouteContext…) que tsc necesita
       - run: npx tsc --noEmit

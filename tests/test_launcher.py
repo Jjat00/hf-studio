@@ -87,6 +87,7 @@ def test_start_fails_cleanly_when_the_ui_cannot_start(monkeypatch, capsys):
         raise OSError("could not resume the web UI process 42")
 
     monkeypatch.setattr(launcher, "UI", broken)
+    monkeypatch.setattr(launcher, "check_ffmpeg", lambda: None)
     monkeypatch.setattr(launcher.shutil, "which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: type("R", (), {"returncode": 0}))
     assert launcher.start(api_only=False, setup_ok=lambda: 0) == 1
@@ -137,3 +138,38 @@ async def test_setup_starts_anyway_when_higgsfield_is_unreachable(monkeypatch, t
 
     monkeypatch.setattr(cli, "_check_credentials", invalid)
     assert await cli._setup(interactive=False) == 1
+
+
+def _fake_ffmpeg(folder, filters: str):
+    """ffmpeg y ffprobe de mentira que responden `-filters` con el texto dado."""
+    folder.mkdir(parents=True)
+    for name in ("ffmpeg", "ffprobe"):
+        exe = folder / name
+        exe.write_text(f"#!/bin/sh\necho '{filters}'\n")
+        exe.chmod(0o755)
+    return folder
+
+
+@pytest.mark.skipif(os.name == "nt", reason="ejecutables de shell")
+def test_macos_puts_homebrew_ffmpeg_full_first_even_if_it_is_already_in_path(monkeypatch, tmp_path, capsys):
+    plain = _fake_ffmpeg(tmp_path / "plain", " ..C volume  A->A")
+    full = _fake_ffmpeg(tmp_path / "full", " ..C rubberband  A->A")
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(launcher, "BREW_FFMPEG_FULL", (str(full),))
+    monkeypatch.setenv("PATH", os.pathsep.join([str(plain), str(full), "/usr/bin", "/bin"]))
+    launcher.check_ffmpeg()
+    assert launcher.shutil.which("ffmpeg") == str(full / "ffmpeg")
+    assert launcher.shutil.which("ffprobe") == str(full / "ffprobe")
+    assert os.environ["PATH"].split(os.pathsep).count(str(full)) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_warns_when_ffmpeg_has_no_rubberband(monkeypatch, capsys):
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(launcher, "BREW_FFMPEG_FULL", ())
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        launcher.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": " ... volume A->A"})
+    )
+    launcher.check_ffmpeg()
+    assert "brew install ffmpeg-full" in capsys.readouterr().out

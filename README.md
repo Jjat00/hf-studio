@@ -61,7 +61,10 @@ Runs natively on Windows, macOS and Linux (and in WSL). CI tests the backend on 
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - Node.js 20+ and [pnpm](https://pnpm.io/) (for the UI)
-- [ffmpeg](https://ffmpeg.org/) with `ffprobe` (voice change, original audio and isolation; also used by the tests)
+- [ffmpeg](https://ffmpeg.org/) with `ffprobe` (voice change, original audio and isolation; also used by the tests).
+  Linux: `sudo apt install ffmpeg`. Windows: `winget install ffmpeg`. macOS: `brew install ffmpeg-full`, because the
+  plain `ffmpeg` formula lacks the `rubberband` filter that the voice effects use (HF Studio finds `ffmpeg-full` on
+  its own and warns at startup if the filter is missing).
 - A Higgsfield API key ([console.higgsfield.ai](https://console.higgsfield.ai)). Generating spends your credits.
 - Optional: an ElevenLabs API key ([elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys))
   for voice, effects and music. Pay-as-you-go balance or a plan both work.
@@ -238,7 +241,7 @@ curl -X POST localhost:8787/v1/generations -H "Authorization: Bearer $HFS" -H 'C
 ```bash
 uv run pytest            # Higgsfield and ElevenLabs are mocked with httpx.MockTransport: no credits spent
 uv run ruff check src tests
-cd web && pnpm lint && npx tsc --noEmit
+cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
 
 The code went through 13 rounds of adversarial review with Codex; the reports are in

@@ -215,6 +215,9 @@ def main() -> int:
     if args.cmd == "serve":
         import uvicorn
 
+        from .launcher import check_ffmpeg
+
+        check_ffmpeg()
         # Un solo proceso: el worker vive dentro de la API (el reclamo atómico evita dobles envíos igualmente).
         uvicorn.run("hf_studio.main:app", host=args.host, port=args.port, reload=args.reload)
         return 0

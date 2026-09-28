@@ -15,6 +15,42 @@ API_PORT = 8787
 UI_PORT = 3000
 
 
+# En macOS, `brew install ffmpeg` no trae rubberband; `ffmpeg-full` sí, pero es keg-only (no entra al PATH).
+BREW_FFMPEG_FULL = ("/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin")
+
+
+def check_ffmpeg() -> None:
+    """Prefiere el ffmpeg-full de Homebrew si está y avisa si falta ffmpeg o su filtro rubberband.
+
+    Cambia el PATH de este proceso, que heredan la API y sus subprocesos de ffmpeg."""
+    if sys.platform == "darwin":
+        entries = os.environ.get("PATH", "").split(os.pathsep)
+        for folder in BREW_FFMPEG_FULL:
+            if os.path.isfile(os.path.join(folder, "ffmpeg")):
+                # Al principio aunque ya esté en el PATH: detrás de otro ffmpeg no se usaría.
+                os.environ["PATH"] = os.pathsep.join([folder, *(e for e in entries if e != folder)])
+                break
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not shutil.which("ffprobe"):
+        print(
+            "Note: ffmpeg is not installed; voice change, audio isolation and keeping the source audio need it."
+        )
+        return
+    try:
+        filters = subprocess.run(
+            [ffmpeg, "-hide_banner", "-filters"], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return
+    if " rubberband " not in filters.stdout:
+        hint = (
+            "brew install ffmpeg-full" if sys.platform == "darwin" else "an ffmpeg build with librubberband"
+        )
+        print(
+            f"Note: this ffmpeg has no rubberband filter; the deep, monster and ghost voice effects need it ({hint})."
+        )
+
+
 class _WindowsJob:
     """Job Object de Windows: todos los procesos que lance pnpm (next dev…) caen en él y se cierran juntos,
     aunque pnpm ya haya salido, e incluso si HF Studio muere sin limpiar (KILL_ON_JOB_CLOSE)."""
@@ -187,10 +223,7 @@ def start(api_only: bool, setup_ok) -> int:
             file=sys.stderr,
         )
         return 1
-    if not shutil.which("ffprobe"):
-        print(
-            "Note: ffmpeg is not installed; voice change, audio isolation and keeping the source audio need it."
-        )
+    check_ffmpeg()
     if setup_ok() != 0:
         return 1
     web = setup.ROOT / "web"
