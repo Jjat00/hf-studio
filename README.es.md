@@ -1,12 +1,17 @@
 # HF Studio
 
+[![CI](https://github.com/Jjat00/hf-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/Jjat00/hf-studio/actions/workflows/ci.yml)
+[![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![MCP](https://img.shields.io/badge/MCP-25%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+
+**Español** · [English](README.md)
+
 Tu propio estudio de video, imagen y audio con IA sobre la [API de Higgsfield](https://docs.higgsfield.ai) y la de
 [ElevenLabs](https://elevenlabs.io/docs): una **API** y un **servidor MCP** para que tus agentes (Claude Code, Codex,
 Claude Desktop, ChatGPT…) generen por ti, y una **interfaz web** para hacerlo a mano. Todo comparte la misma
 biblioteca.
-
-*Your own AI video, image and audio studio on top of the Higgsfield and ElevenLabs APIs: a REST API, an MCP server for
-agents and a web UI (Spanish by default, English available).*
 
 ![Estudio de video](docs/img/estudio-video.png)
 
@@ -21,8 +26,9 @@ agents and a web UI (Spanish by default, English available).*
   fantasma), texto a voz, efectos de sonido, música y aislamiento de voz.
 - **Conservar el audio original** en las ediciones de video: HF Studio le pone al resultado el sonido del video de
   entrada (gratis, con ffmpeg), útil cuando el modelo lo devuelve mudo.
-- **El costo siempre se ve antes de generar.** En la UI aparece junto al botón. Por MCP y API, generar exige una
-  cotización previa de esa misma petición, de un solo uso.
+- **El costo se ve antes de generar.** En la UI aparece junto al botón. Por MCP, generar exige una cotización previa
+  de esa misma petición, de un solo uso. En la API REST, las rutas de ElevenLabs exigen su propia cotización; las de
+  Higgsfield ofrecen `/v1/estimate` y `dry_run` y confían en quien tiene la clave `hfs_…`.
 - **Trabajos asíncronos y persistentes:** validación antes de gastar créditos, deduplicación, `Idempotency-Key`, cola
   local según la concurrencia de la cuenta, sondeo con backoff, webhooks opcionales y copia local de las salidas
   (Higgsfield solo las guarda 7 días).
@@ -42,6 +48,8 @@ agents and a web UI (Spanish by default, English available).*
 
 ## Requisitos
 
+Funciona nativo en Windows, macOS y Linux (y en WSL). El CI prueba el backend en los tres.
+
 - Python 3.12+ y [uv](https://docs.astral.sh/uv/)
 - Node.js 20+ y [pnpm](https://pnpm.io/) (para la UI)
 - [ffmpeg](https://ffmpeg.org/) con `ffprobe` (cambio de voz, audio original y aislamiento; también en las pruebas)
@@ -52,21 +60,38 @@ agents and a web UI (Spanish by default, English available).*
 ## Puesta en marcha
 
 ```bash
-git clone https://github.com/Jjat00/hf-studio.git && cd hf-studio
-uv sync
-cp .env.example .env                      # pega tu clave de Higgsfield en HF_API_KEY (y ELEVENLABS_API_KEY si la tienes)
-uv run hf-studio check-credentials        # valida la clave de Higgsfield sin gastar créditos
-uv run hf-studio create-key web-ui        # clave hfs_… para la UI (se muestra una sola vez)
-uv run hf-studio see-all web-ui           # la biblioteca de la UI muestra también lo que generan tus agentes
-cp web/.env.example web/.env.local        # pega esa clave en HF_STUDIO_TOKEN
-cd web && pnpm install && cd ..
-./dev.sh                                  # API en :8787 (docs en /docs) y UI en http://localhost:3000
+git clone https://github.com/Jjat00/hf-studio.git
+cd hf-studio
+./dev.sh        # macOS, Linux, WSL
+.\dev          # Windows (cmd o PowerShell)
 ```
+
+Los dos son atajos de `uv run hf-studio start`, que funciona igual en Windows, macOS y Linux.
+
+La primera vez pide tu clave de Higgsfield (y, si quieres, la de ElevenLabs), la valida sin gastar créditos, crea
+`.env` y la clave de la UI, instala las dependencias y arranca todo. Para añadir la de ElevenLabs más tarde, ponla en
+`ELEVENLABS_API_KEY` dentro de `.env` y reinicia.
+
+- UI web: http://localhost:3000
+- API y documentación interactiva: http://127.0.0.1:8787/docs
+
+¿Solo lo vas a usar desde tus agentes? `./dev.sh api` (en Windows `.\dev api`, o en cualquier sistema
+`uv run hf-studio start --api-only`) arranca solo la API, sin Node.js. Luego conecta tu agente con
+una línea (ver [Conectar agentes](#conectar-agentes-mcp)):
+
+```bash
+uv run hf-studio connect claude-code     # o: codex, claude-desktop, json
+```
+
+¿Lo instala un agente de IA? Pásale [AGENTS.md](AGENTS.md).
 
 ### Comandos
 
 | Comando | Uso |
 | --- | --- |
+| `hf-studio start [--api-only]` | Prepara todo la primera vez y arranca la API y la UI (o solo la API); `./dev.sh` y `dev.cmd` lo ejecutan |
+| `hf-studio setup [--no-input]` | Primera puesta en marcha: `.env`, validación de la clave y clave de la UI (la ejecuta `start`) |
+| `hf-studio connect CLIENTE [--print]` | Registra el MCP en `claude-code` o `codex`, o imprime la configuración (`claude-desktop`, `json`) |
 | `hf-studio serve` | Arranca la API y el worker |
 | `hf-studio mcp` | Servidor MCP por stdio |
 | `hf-studio create-key NOMBRE` · `list-keys` · `revoke-key NOMBRE` | Claves `hfs_…` por cliente (UI, Claude Code, Codex…) |
@@ -107,28 +132,27 @@ Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nom
 
 ## Conectar agentes (MCP)
 
-Claude Code:
+Con la API en marcha (`hf-studio start`, `./dev.sh` o `.\dev`), un comando crea la clave del agente y registra el servidor:
 
 ```bash
-claude mcp add hf-studio --scope user \
-  -e HF_STUDIO_URL=http://127.0.0.1:8787 -e HF_STUDIO_TOKEN=hfs_… \
-  -- uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp
+uv run hf-studio connect claude-code     # ejecuta `claude mcp add` por ti
+uv run hf-studio connect codex           # ejecuta `codex mcp add` por ti
+uv run hf-studio connect claude-desktop  # imprime el JSON para claude_desktop_config.json
+uv run hf-studio connect json            # imprime la configuración para otro cliente MCP por stdio
 ```
 
-Codex (`~/.codex/config.toml`):
+Con `--print` imprime el comando o la configuración (con una clave nueva) en vez de registrarlo. Si la CLI del agente
+no está instalada, no se registra nada: imprime el comando, con su clave nueva, para ejecutarlo donde esté esa CLI.
+Desde WSL, `claude-desktop` imprime una configuración que entra a WSL con `wsl.exe`, para cuando HF Studio corre en
+WSL y Claude Desktop en Windows. Reinicia el cliente después para que cargue las herramientas. Cada conexión
+tiene su propia clave `hfs_…` revocable (`codex`, `codex-2`…; ver `hf-studio list-keys`, `revoke-key NOMBRE`) y nunca
+se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se detiene: quítalo antes
+(`claude mcp remove hf-studio`). A
+mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
+`HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-```toml
-[mcp_servers.hf-studio]
-command = "uv"
-args = ["run", "--directory", "/ruta/absoluta/a/hf-studio", "hf-studio", "mcp"]
-env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }
-```
-
-Claude Desktop, ChatGPT desktop u otro cliente MCP por stdio usan el mismo comando (`hf-studio mcp`) con esas dos
-variables. Crea una clave por cliente (`hf-studio create-key claude-desktop`). Los clientes cargan la lista de
-herramientas al arrancar: tras actualizar HF Studio, reinícialos.
-
-Herramientas (25):
+Herramientas (25). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+`openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
 | --- | --- |
@@ -140,7 +164,7 @@ Herramientas (25):
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sonoteca | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 
-**Nada se genera sin cotizar antes esa misma petición.** `estimate_cost`, y `generate_batch` o `run_preset`
+**Ninguna herramienta MCP genera sin cotizar antes esa misma petición.** `estimate_cost`, y `generate_batch` o `run_preset`
 con `dry_run=True`, devuelven el costo y un `quote_id`. `generate`, y los lotes y presets con `dry_run=False`,
 exigen ese `quote_id` con los mismos parámetros. Las herramientas de ElevenLabs siguen el mismo patrón: sin
 `quote_id` devuelven el costo; con él, generan. Cada cotización vale para una sola ejecución y dura 15 min; un
@@ -149,7 +173,8 @@ reintento con la misma `idempotency_key` no vuelve a cobrar. Si el precio está 
 `confirm_unknown_cost=True`, solo cuando el usuario acepta explícitamente un costo desconocido. `get_model` devuelve
 también `studio_notes`, avisos de HF Studio como que `generate_audio=false` en una edición da un video mudo y cómo
 conservar el audio original (`generate` con `keep_source_audio=true`). El MCP no conoce las credenciales de
-Higgsfield ni de ElevenLabs, solo su propia clave `hfs_…`.
+Higgsfield ni de ElevenLabs, solo su propia clave `hfs_…`. Tampoco puede comprobar que una persona vio el precio:
+mostrarlo y esperar el OK le toca al agente, como piden las instrucciones del servidor.
 
 ## API REST
 
@@ -225,6 +250,10 @@ cd web && pnpm lint && npx tsc --noEmit
 
 El código pasó por 13 rondas de revisión adversarial con Codex (gpt-6-sol), con veredicto de aprobado en las rondas
 5, 8 y 12, y la 13 corregida después. Están en [`docs/revisiones/`](docs/revisiones/).
+
+## Licencia
+
+[MIT](LICENSE).
 
 ## Aviso
 
