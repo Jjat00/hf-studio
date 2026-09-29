@@ -3,6 +3,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .env
+.env.*
+!.env.example
+*.swp
+*.swo
 data/
 .smoke/
 .smoke.log

@@ -1,20 +1,9 @@
+import path from "node:path";
 import Link from "next/link";
 import { CopyBlock } from "@/components/copy-block";
 import { getDict } from "@/lib/i18n/server";
 
 export const metadata = { title: "MCP · HF Studio" };
-
-const claude = (comment: string) => `uv run hf-studio create-key claude-code   ${comment}
-
-claude mcp add hf-studio --scope user \\
-  -e HF_STUDIO_URL=http://127.0.0.1:8787 -e HF_STUDIO_TOKEN=hfs_… \\
-  -- uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp`;
-
-const CODEX = `# ~/.codex/config.toml
-[mcp_servers.hf-studio]
-command = "uv"
-args = ["run", "--directory", "/ruta/absoluta/a/hf-studio", "hf-studio", "mcp"]
-env = { HF_STUDIO_URL = "http://127.0.0.1:8787", HF_STUDIO_TOKEN = "hfs_…" }`;
 
 const TOOLS = [
   "find_models",
@@ -46,6 +35,21 @@ const TOOLS = [
 
 export default async function McpPage() {
   const t = await getDict();
+  // La UI corre en web/: el repo es la carpeta de arriba. Va en el prompt para que el agente no la adivine.
+  const root = path.resolve(process.cwd(), "..");
+  const windows = process.platform === "win32";
+  // Comillas simples literales: PowerShell en Windows ('' escapa la comilla), POSIX en el resto.
+  const dir = windows ? `'${root.replaceAll("'", "''")}'` : `'${root.replaceAll("'", "'\\''")}'`;
+  // UI en Windows y agente en WSL: la misma carpeta es /mnt/<unidad>/…
+  const drive = windows ? /^([A-Za-z]):\\(.*)$/.exec(root) : null;
+  const wsl = drive ? `/mnt/${drive[1].toLowerCase()}/${drive[2].replaceAll("\\", "/")}` : null;
+  const run = `uv run --directory ${dir} hf-studio connect`;
+  const byHand = [
+    { title: "Claude Code", code: `${run} claude-code` },
+    { title: "Codex", code: `${run} codex` },
+    { title: "Claude Desktop", code: `${run} claude-desktop   ${t.mcp.byHandComments.claudeDesktop}` },
+    { title: t.mcp.otherClient, code: `${run} json   ${t.mcp.byHandComments.other}` },
+  ];
   return (
     <div className="flex flex-col gap-10 px-4 pb-16">
       <section className="grain relative mt-2 overflow-hidden rounded-[28px] px-6 py-24 text-center">
@@ -62,9 +66,21 @@ export default async function McpPage() {
           </p>
         </div>
       </section>
-      <section className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-4 lg:grid-cols-2">
-        <CopyBlock title="Claude Code" code={claude(t.mcp.saveKey)} />
-        <CopyBlock title="Codex" code={CODEX} />
+      <section className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+        <div>
+          <h2 className="headline text-[32px]">{t.mcp.askTitle}</h2>
+          <p className="mt-1 text-[15px] text-fg-3">{t.mcp.askBody}</p>
+        </div>
+        <CopyBlock title="Prompt" code={t.mcp.askPrompt(root, dir, wsl ? t.mcp.askWsl(wsl) : "")} wrap />
+        <h3 className="mt-2 text-lg font-semibold">
+          {t.mcp.byHand}
+          {windows ? " · PowerShell" : ""}
+        </h3>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {byHand.map((b) => (
+            <CopyBlock key={b.title} title={b.title} code={b.code} wrap />
+          ))}
+        </div>
       </section>
       <Link
         href="/use-cases"

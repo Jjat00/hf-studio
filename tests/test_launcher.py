@@ -119,13 +119,13 @@ def test_a_ui_that_cannot_be_resumed_is_killed(monkeypatch):
     assert procs[0].poll() is not None  # no quedó suspendido
 
 
-async def test_setup_starts_anyway_when_higgsfield_is_unreachable(monkeypatch, tmp_path):
+def test_setup_starts_anyway_when_higgsfield_is_unreachable(monkeypatch, tmp_path):
     from hf_studio import setup
 
     monkeypatch.setattr(setup, "ROOT", tmp_path)
-    monkeypatch.setattr(setup, "ensure_env", lambda interactive: True)
+    monkeypatch.setattr(setup, "ensure_env", lambda interactive, validate: True)
 
-    async def unreachable():
+    async def unreachable(key=None):
         return cli.UNREACHABLE
 
     monkeypatch.setattr(cli, "_check_credentials", unreachable)
@@ -136,13 +136,38 @@ async def test_setup_starts_anyway_when_higgsfield_is_unreachable(monkeypatch, t
 
     monkeypatch.setattr(cli, "_with_session", fake_session)
     monkeypatch.chdir(tmp_path)
-    assert await cli._setup(interactive=False) == 0 and done == [setup.ensure_ui_key]
+    assert cli._setup(interactive=False) == 0 and done == [setup.ensure_ui_key]
 
-    async def invalid():
+    async def invalid(key=None):
         return 1
 
     monkeypatch.setattr(cli, "_check_credentials", invalid)
-    assert await cli._setup(interactive=False) == 1
+    assert cli._setup(interactive=False) == 1
+
+
+def test_a_rejected_saved_key_is_asked_again_in_a_terminal(monkeypatch, tmp_path):
+    from hf_studio import setup
+
+    monkeypatch.setattr(setup, "ROOT", tmp_path)
+    monkeypatch.setattr(setup, "ENV", tmp_path / ".env")
+    (tmp_path / ".env").write_text("HF_API_KEY=wrong:key\n")
+    monkeypatch.delenv("HF_API_KEY", raising=False)
+    monkeypatch.setattr(setup, "ensure_env", lambda interactive, validate: True)
+
+    async def check(key=None):
+        current = key or setup.read_env(tmp_path / ".env")["HF_API_KEY"]
+        return 0 if current == "good:key" else 1
+
+    monkeypatch.setattr(cli, "_check_credentials", check)
+    monkeypatch.setattr(setup, "masked_input", lambda prompt: "good:key")
+
+    async def fake_session(fn):
+        return None
+
+    monkeypatch.setattr(cli, "_with_session", fake_session)
+    monkeypatch.chdir(tmp_path)
+    assert cli._setup(interactive=True) == 0
+    assert setup.read_env(tmp_path / ".env")["HF_API_KEY"] == "good:key"
 
 
 def _fake_ffmpeg(folder, filters: str):

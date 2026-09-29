@@ -123,7 +123,23 @@ and ElevenLabs credentials.
 
 ## Connect your agents (MCP)
 
-With the API running (`hf-studio start`, `./dev.sh` or `.\dev`), one command creates a key for the agent and registers the server:
+With the API running (`hf-studio start`, `./dev.sh` or `.\dev`), the easiest way is to **ask your agent to connect
+itself**. Paste this into Claude Code, Codex or any other agent (the UI's MCP page has it with your real path filled in):
+
+```text
+Connect yourself (this agent) to the HF Studio MCP server. It is installed at: /absolute/path/to/hf-studio
+
+1. Check that its API is running: GET http://127.0.0.1:8787/health must answer {"ok": true, ...}. If it does not, ask me to start it with `uv run hf-studio start` in that folder and wait.
+2. Register it with the command for your client:
+   - Claude Code: uv run --directory '/absolute/path/to/hf-studio' hf-studio connect claude-code
+   - Codex: uv run --directory '/absolute/path/to/hf-studio' hf-studio connect codex
+   - Any other MCP client: uv run --directory '/absolute/path/to/hf-studio' hf-studio connect json, and add the config it prints to your MCP configuration.
+   The command creates a key just for you. If it says hf-studio is already registered, ask me before removing the old one. If your sandbox does not let you run it, show me the command so I can run it.
+3. Tell me to restart you so you load the tools.
+4. Read the "Use it through MCP" section of the AGENTS.md in that folder. Key rule: before generating, quote the cost, tell me and wait for my OK.
+```
+
+Or do it yourself: one command creates a key for the agent and registers the server:
 
 ```bash
 uv run hf-studio connect claude-code     # runs `claude mcp add` for you

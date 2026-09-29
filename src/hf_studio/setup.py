@@ -55,42 +55,183 @@ def copy_private(source: Path, target: Path) -> None:
         fh.write(source.read_text())
 
 
-def ensure_env(interactive: bool) -> bool:
+HF_KEY_HELP = "https://console.higgsfield.ai -> API keys. Paste it whole (format KEY_ID:KEY_SECRET)."
+
+
+def masked_input(prompt: str) -> str:
+    """Como `getpass`, pero cada carácter se ve como `*`: al pegar se nota que entró algo."""
+    if not sys.stdin.isatty():
+        return getpass.getpass(prompt)
+    chars: list[str] = []
+    escape = ""  # secuencia de escape a medias: "", "\x1b" o "\x1b[" + parámetros
+
+    def show_prompt() -> None:
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+
+    def feed(text: str) -> bool:
+        """Procesa lo leído, sea un carácter (Windows) o un bloque (POSIX); True al llegar Enter.
+
+        Las secuencias de escape (flechas, marcadores de pegado 200~/201~) se descartan aunque lleguen
+        partidas entre lecturas: por eso el estado vive fuera de esta función."""
+        nonlocal escape
+        for ch in text:
+            if escape:
+                if escape == "\x1b" and ch in "[O":
+                    escape += ch  # CSI (ESC [ …) o SS3 (ESC O x, flechas en algunas terminales)
+                elif escape == "\x1b" or escape == "\x1bO":
+                    escape = ""  # ESC + una tecla, o la tecla final de SS3: se descarta
+                elif "@" <= ch <= "~":
+                    escape = ""  # fin de la secuencia CSI
+                else:
+                    escape += ch
+                continue
+            if ch == "\x1b":
+                escape = ch
+            elif ch in "\r\n":
+                sys.stdout.flush()
+                return True
+            elif ch == "\x03":
+                raise KeyboardInterrupt
+            elif ch in "\x08\x7f":
+                if chars:
+                    chars.pop()
+                    sys.stdout.write("\b \b")
+            elif ch >= " ":
+                chars.append(ch)
+                sys.stdout.write("*")
+        sys.stdout.flush()
+        return False
+
+    if os.name == "nt":
+        import msvcrt
+
+        show_prompt()  # getwch lee sin eco desde el primer momento
+        while True:
+            ch = msvcrt.getwch()
+            if ch in "\x00\xe0":  # tecla especial: su segundo código no es texto
+                msvcrt.getwch()
+            elif feed(ch):
+                break
+    else:
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            # Sin eco y carácter a carácter ANTES del prompt, y sin descartar lo ya tecleado (TCSANOW):
+            # si no, lo pegado en ese instante se perdería o se vería en claro. Ctrl+C sigue funcionando.
+            tty.setcbreak(fd, termios.TCSANOW)
+            show_prompt()
+            while not feed(os.read(fd, 4096).decode(errors="ignore")):
+                pass
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return "".join(chars)
+
+
+def clean_key(raw: str) -> str:
+    """Quita lo que se suele pegar de más: espacios, comillas o la línea entera `HF_API_KEY=…`."""
+    key = raw.strip().strip("\"'").strip()
+    key = re.sub(r"^[A-Z_]+=", "", key).strip().strip("\"'")
+    return key
+
+
+def preview(key: str) -> str:
+    """Vista parcial para confirmar lo pegado sin mostrar la clave."""
+    shown = f"{key[:4]}…{key[-4:]}" if len(key) > 12 else "*" * len(key)
+    return f"{shown} ({len(key)} characters)"
+
+
+def ask_hf_key(validate, attempts: int = 3) -> str:
+    """Pide la clave de Higgsfield hasta que Higgsfield la acepte. `validate(key)` devuelve 0 si es válida,
+    1 si la rechaza u otro valor si no se pudo comprobar (se acepta con aviso). Devuelve "" si se rinde."""
+    for attempt in range(attempts):
+        key = clean_key(masked_input("HF_API_KEY: "))
+        if not key:
+            return ""
+        print(f"  Got {preview(key)}. Checking it with Higgsfield (no credits spent)...")
+        result = validate(key)
+        if result == 0:
+            print("  Valid key.")
+            return key
+        if result != 1:
+            print("  Could not reach Higgsfield to check it; saving it anyway.")
+            return key
+        left = attempts - attempt - 1
+        print(
+            "  Higgsfield rejected this key (401). Copy it again from "
+            + HF_KEY_HELP
+            + (f" Try again ({left} left, Enter to cancel):" if left else "")
+        )
+    return ""
+
+
+def ensure_env_file() -> bool:
+    """Crea `.env` desde el ejemplo si no existe. True si lo creó."""
+    if ENV.is_file():
+        return False
+    copy_private(ENV_EXAMPLE, ENV)
+    print("Created .env from .env.example")
+    return True
+
+
+def env_values() -> dict[str, str]:
+    """`.env` más las variables del proceso, que tienen prioridad (como en config.Settings)."""
+    from_env = {
+        k: v for k, v in os.environ.items() if k.startswith(("HF_API_KEY", "ELEVENLABS_API_KEY")) and v
+    }
+    return {**read_env(ENV), **from_env}
+
+
+def has_hf_key() -> bool:
+    values = env_values()
+    return bool(values.get("HF_API_KEY") or (values.get("HF_API_KEY_ID") and values.get("HF_API_KEY_SECRET")))
+
+
+def ensure_env(interactive: bool, validate=lambda key: 0) -> bool:
     """Crea `.env` desde el ejemplo y, en una terminal, pide las claves la primera vez.
 
     Devuelve True si hay clave de Higgsfield en `.env` o en el entorno. ElevenLabs (opcional) solo se pide al
     crear `.env` o cuando falta Higgsfield, para no preguntar en cada arranque a quien no la quiere."""
-    created = not ENV.is_file()
-    if created:
-        copy_private(ENV_EXAMPLE, ENV)
-        print("Created .env from .env.example")
-    from_env = {
-        k: v for k, v in os.environ.items() if k.startswith(("HF_API_KEY", "ELEVENLABS_API_KEY")) and v
-    }
-    values = {**read_env(ENV), **from_env}
-    has_hf = bool(
-        values.get("HF_API_KEY") or (values.get("HF_API_KEY_ID") and values.get("HF_API_KEY_SECRET"))
-    )
+    created = ensure_env_file()
+    has_hf = has_hf_key()
     if not interactive or (has_hf and not created):
         return has_hf
     if not has_hf:
-        print(
-            "\nHiggsfield API key (required): https://console.higgsfield.ai -> API keys, format KEY_ID:KEY_SECRET"
-        )
-        key = getpass.getpass("HF_API_KEY: ").strip()
+        print(f"\nHiggsfield API key (required): {HF_KEY_HELP}")
+        print("Characters show as * while you paste or type; press Enter when done.")
+        key = ask_hf_key(validate)
         if key:
             set_env(ENV, "HF_API_KEY", key)
             has_hf = True
-    if has_hf and not values.get("ELEVENLABS_API_KEY"):
+    if has_hf and not env_values().get("ELEVENLABS_API_KEY"):
         print(
             "\nElevenLabs API key (optional, only for voice, sound effects and music):"
             " https://elevenlabs.io/app/settings/api-keys. Press Enter to skip;"
             " you can add ELEVENLABS_API_KEY to .env later."
         )
-        eleven = getpass.getpass("ELEVENLABS_API_KEY: ").strip()
+        eleven = clean_key(masked_input("ELEVENLABS_API_KEY: "))
         if eleven:
+            print(f"  Got {preview(eleven)}.")
             set_env(ENV, "ELEVENLABS_API_KEY", eleven)
     return has_hf
+
+
+def replace_hf_key(validate) -> bool:
+    """La clave guardada fue rechazada: pide otra y la guarda si Higgsfield la acepta."""
+    if os.environ.get("HF_API_KEY"):
+        print("HF_API_KEY is set in your environment and overrides .env; fix it there.", file=sys.stderr)
+        return False
+    print(f"\nThe Higgsfield key in .env was rejected (401). Paste the right one: {HF_KEY_HELP}")
+    print("Characters show as * while you paste or type; press Enter when done (Enter alone cancels).")
+    key = ask_hf_key(validate)
+    if key:
+        set_env(ENV, "HF_API_KEY", key)
+    return bool(key)
 
 
 async def rotate_key(session, name: str, sees_all: bool | None = None) -> str:

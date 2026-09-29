@@ -92,51 +92,61 @@ async def _keep_source_audio(session, job_id: str) -> int:
 UNREACHABLE = 2  # Higgsfield no respondió (red o 5xx): no dice nada de la clave
 
 
-async def _check_credentials() -> int:
-    """0 si la clave es válida, 1 si falta o es inválida, UNREACHABLE si no se pudo comprobar."""
+async def _check_credentials(key: str | None = None) -> int:
+    """0 si la clave es válida, 1 si falta o es inválida, UNREACHABLE si no se pudo comprobar.
+
+    Sin `key` comprueba la configurada (.env o entorno)."""
     import httpx
 
+    from .config import Settings
     from .higgsfield import HiggsfieldClient, HiggsfieldError
 
-    settings = get_settings()
+    settings = get_settings() if key is None else Settings(hf_api_key=key)
     if not settings.hf_configured:
-        print("Falta HF_API_KEY en .env", file=sys.stderr)
+        print("Missing HF_API_KEY in .env", file=sys.stderr)
         return 1
     client = HiggsfieldClient(settings)
     try:
         ok = await client.check_credentials()
     except httpx.TransportError as exc:
-        print(f"No se pudo contactar a Higgsfield ({exc!r}); la clave no se comprobó.", file=sys.stderr)
+        print(f"Could not reach Higgsfield ({exc!r}); the key was not checked.", file=sys.stderr)
         return UNREACHABLE
     except HiggsfieldError as exc:
-        print(f"Respuesta inesperada de Higgsfield ({exc.status}): {exc.message}", file=sys.stderr)
+        print(f"Unexpected answer from Higgsfield ({exc.status}): {exc.message}", file=sys.stderr)
         return UNREACHABLE if exc.status >= 500 else 1
     finally:
         await client.aclose()
+    if key is not None:
+        return 0 if ok else 1  # quien pregunta (ask_hf_key) explica el resultado
     if ok:
-        print("Credenciales válidas: Higgsfield aceptó la clave (sin gastar créditos).")
+        print("Valid Higgsfield key (checked without spending credits).")
         return 0
-    print("Credenciales inválidas (401). Revisa HF_API_KEY: debe ser `KEY_ID:KEY_SECRET`.", file=sys.stderr)
+    print("Invalid Higgsfield key (401). HF_API_KEY must be `KEY_ID:KEY_SECRET`.", file=sys.stderr)
     return 1
 
 
-async def _setup(interactive: bool) -> int:
+def _setup(interactive: bool) -> int:
+    """Prepara `.env` (pidiendo y validando la clave en una terminal) y la clave de la UI."""
     from . import setup
 
     os.chdir(setup.ROOT)  # .env y la base SQLite son relativos a la raíz del repo
-    if not setup.ensure_env(interactive):
-        print(
-            "Missing HF_API_KEY in .env. Get one at https://console.higgsfield.ai (API keys) and paste it there.",
-            file=sys.stderr,
-        )
+
+    def validate(key: str) -> int:
+        return asyncio.run(_check_credentials(key))
+
+    if not setup.ensure_env(interactive, validate):
+        print(f"Missing HF_API_KEY in .env. Get one at {setup.HF_KEY_HELP}", file=sys.stderr)
         return 1
     get_settings.cache_clear()
-    checked = await _check_credentials()
+    checked = asyncio.run(_check_credentials())
+    if checked == 1 and interactive and setup.replace_hf_key(validate):
+        get_settings.cache_clear()
+        checked = asyncio.run(_check_credentials())
     if checked == 1:
         return 1
     if checked == UNREACHABLE:  # sin red o Higgsfield caído: la biblioteca local sigue sirviendo
         print("Starting anyway; generating will fail until Higgsfield is reachable.", file=sys.stderr)
-    await _with_session(setup.ensure_ui_key)
+    asyncio.run(_with_session(setup.ensure_ui_key))
     return 0
 
 
@@ -207,9 +217,9 @@ def main() -> int:
         from .launcher import start as launch
 
         interactive = sys.stdin.isatty()
-        return launch(args.api_only, lambda: asyncio.run(_setup(interactive)))
+        return launch(args.api_only, lambda: _setup(interactive))
     if args.cmd == "setup":
-        return asyncio.run(_setup(interactive=not args.no_input and sys.stdin.isatty()))
+        return _setup(interactive=not args.no_input and sys.stdin.isatty())
     if args.cmd == "connect":
         return asyncio.run(_connect(args.client, args.name, install=not args.print))
     if args.cmd == "serve":

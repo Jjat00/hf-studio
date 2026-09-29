@@ -253,3 +253,114 @@ async def test_a_failed_connect_revokes_its_new_key(repo, monkeypatch, tmp_path)
         assert client.revoked_at is not None
     finally:
         cli.get_settings.cache_clear()
+
+
+def test_pasted_keys_are_cleaned():
+    assert setup.clean_key('  "id:secret"\n') == "id:secret"
+    assert setup.clean_key("HF_API_KEY=id:secret") == "id:secret"
+    assert setup.clean_key("HF_API_KEY='id:secret' ") == "id:secret"
+
+
+def test_preview_never_shows_the_whole_key():
+    key = "abcd1234:efgh5678ijkl9012"
+    shown = setup.preview(key)
+    assert shown.startswith("abcd…9012") and f"({len(key)} characters)" in shown and "efgh" not in shown
+    assert setup.preview("short") == "***** (5 characters)"
+
+
+def test_a_rejected_key_is_asked_again(monkeypatch, capsys):
+    answers = iter(["id:twice-pasted", "id:secret"])
+    monkeypatch.setattr(setup, "masked_input", lambda prompt: next(answers))
+    key = setup.ask_hf_key(lambda k: 0 if k == "id:secret" else 1)
+    out = capsys.readouterr().out
+    assert key == "id:secret" and "rejected" in out and "Valid key" in out
+
+
+def test_giving_up_saves_nothing(repo, monkeypatch):
+    answers = iter(["bad:1", ""])
+    monkeypatch.setattr(setup, "masked_input", lambda prompt: next(answers))
+    assert not setup.ensure_env(interactive=True, validate=lambda k: 1)
+    assert setup.read_env(repo / ".env")["HF_API_KEY"] == ""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="pty POSIX")
+def test_masked_input_echoes_stars_and_handles_backspace():
+    """Un proceso real en una terminal de mentira: se ven `*`, nunca la clave, y el retroceso borra."""
+    import pty
+    import subprocess
+    import sys
+
+    main, secondary = pty.openpty()
+    code = "from hf_studio import setup; v = setup.masked_input('KEY: '); raise SystemExit(0 if v == 'ab:cd' else 1)"
+    proc = subprocess.Popen([sys.executable, "-c", code], stdin=secondary, stdout=secondary, stderr=secondary)
+    os.close(secondary)
+    out = b""
+    while b"KEY: " not in out:
+        out += os.read(main, 1024)
+    os.write(main, b"ab:cdX\x7f\r")  # pega, borra la X y Enter
+    assert proc.wait(10) == 0
+    while True:
+        try:
+            chunk = os.read(main, 1024)
+        except OSError:  # el proceso cerró la terminal
+            break
+        if not chunk:
+            break
+        out += chunk
+    os.close(main)
+    assert b"******" in out and b"ab:cd" not in out
+
+
+def test_masked_input_on_windows_reads_keys_and_ignores_arrows(monkeypatch, capsys):
+    import sys
+    import types
+
+    keys = iter(["a", "b", "\xe0", "K", ":", "c", "X", "\x08", "d", "\r"])  # "\xe0K" = flecha izquierda
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(getwch=lambda: next(keys)))
+    monkeypatch.setattr(setup.os, "name", "nt")
+    monkeypatch.setattr(setup.sys.stdin, "isatty", lambda: True)
+    assert setup.masked_input("KEY: ") == "ab:cd"
+    out = capsys.readouterr().out
+    assert out.startswith("KEY: ") and out.count("*") == 6 and "ab" not in out
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        ["\x1b[200~id:secret\x1b[201~\r"],  # todo junto
+        list("\x1b[200~id:secret\x1b[201~\r"),  # un carácter por lectura (Windows)
+        ["\x1b[Did:secret\x1bOA\r"],  # flecha izquierda y una secuencia SS3
+    ],
+)
+def test_paste_markers_and_arrows_never_reach_the_key(monkeypatch, capsys, chunks):
+    import sys
+    import types
+
+    keys = iter("".join(chunks))
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(getwch=lambda: next(keys)))
+    monkeypatch.setattr(setup.os, "name", "nt")
+    monkeypatch.setattr(setup.sys.stdin, "isatty", lambda: True)
+    value = setup.masked_input("KEY: ")
+    assert value.endswith("id:secret") and "[" not in value and "~" not in value
+
+
+@pytest.mark.skipif(os.name == "nt", reason="pty POSIX")
+def test_paste_markers_split_across_posix_reads_never_reach_the_key():
+    """Los marcadores de pegado llegan partidos en varias lecturas de os.read: el estado debe sobrevivir."""
+    import pty
+    import subprocess
+    import sys
+    import time
+
+    main, secondary = pty.openpty()
+    code = "from hf_studio import setup; v = setup.masked_input('KEY: '); raise SystemExit(0 if v == 'id:secret' else 1)"
+    proc = subprocess.Popen([sys.executable, "-c", code], stdin=secondary, stdout=secondary, stderr=secondary)
+    os.close(secondary)
+    out = b""
+    while b"KEY: " not in out:
+        out += os.read(main, 1024)
+    for chunk in (b"\x1b[20", b"0~id:sec", b"ret\x1b", b"[201~", b"\r"):
+        os.write(main, chunk)
+        time.sleep(0.15)  # lecturas separadas en el proceso hijo
+    assert proc.wait(10) == 0
+    os.close(main)

@@ -344,7 +344,27 @@ const es = {
   },
   copy: { copy: "Copiar", copied: "Copiado" },
   mcp: {
-    saveKey: "# guarda la clave hfs_…",
+    askTitle: "Pídeselo a tu agente",
+    askBody:
+      "Copia este prompt y pégalo en Claude Code, Codex u otro agente: él mismo comprueba la API, se conecta con su propia clave y te dice cuándo reiniciarlo.",
+    askPrompt: (root: string, dir: string, alt: string) => `Conecta a ti mismo (este agente) el servidor MCP de HF Studio. Está instalado en: ${root}${alt}
+
+1. Comprueba que su API está en marcha: GET http://127.0.0.1:8787/health debe responder {"ok": true, ...}. Si no responde, pídeme que la arranque con \`uv run hf-studio start\` en esa carpeta y espera.
+2. Regístralo con el comando de tu cliente:
+   - Claude Code: uv run --directory ${dir} hf-studio connect claude-code
+   - Codex: uv run --directory ${dir} hf-studio connect codex
+   - Otro cliente MCP: uv run --directory ${dir} hf-studio connect json, y añade la configuración que imprime a tu configuración de MCP.
+   El comando crea una clave solo para ti. Si dice que hf-studio ya está registrado, pregúntame antes de quitar el registro anterior. Si tu sandbox no te deja ejecutarlo, muéstrame el comando para que lo ejecute yo.
+3. Dime que te reinicie para que cargues las herramientas.
+4. Lee la sección "Use it through MCP" del AGENTS.md de esa carpeta. Regla clave: antes de generar, cotiza, dime el costo y espera mi OK.`,
+    askWsl: (wsl: string) =>
+      `\n(Si corres dentro de WSL, no uses esta instalación de Windows: la red de WSL no llega a su API y ${wsl} es la carpeta de Windows. Pídeme que clone y arranque HF Studio dentro de WSL y usa esa copia.)`,
+    byHand: "O conéctalo tú desde una terminal (copia solo el de tu cliente)",
+    otherClient: "Otro cliente MCP",
+    byHandComments: {
+      claudeDesktop: "# imprime el JSON para claude_desktop_config.json",
+      other: "# imprime la configuración para cualquier otro cliente MCP",
+    },
     heroLead: "Usa el MCP de HF Studio con",
     heroBody: "Genera imágenes y videos desde tus agentes de código, con la misma API e historial que esta interfaz.",
     notSure: "¿No sabes qué pedir?",
@@ -747,7 +767,27 @@ const en: Dict = {
   },
   copy: { copy: "Copy", copied: "Copied" },
   mcp: {
-    saveKey: "# save the hfs_… key",
+    askTitle: "Ask your agent",
+    askBody:
+      "Copy this prompt into Claude Code, Codex or any other agent: it checks the API, connects itself with its own key and tells you when to restart it.",
+    askPrompt: (root, dir, alt) => `Connect yourself (this agent) to the HF Studio MCP server. It is installed at: ${root}${alt}
+
+1. Check that its API is running: GET http://127.0.0.1:8787/health must answer {"ok": true, ...}. If it does not, ask me to start it with \`uv run hf-studio start\` in that folder and wait.
+2. Register it with the command for your client:
+   - Claude Code: uv run --directory ${dir} hf-studio connect claude-code
+   - Codex: uv run --directory ${dir} hf-studio connect codex
+   - Any other MCP client: uv run --directory ${dir} hf-studio connect json, and add the config it prints to your MCP configuration.
+   The command creates a key just for you. If it says hf-studio is already registered, ask me before removing the old one. If your sandbox does not let you run it, show me the command so I can run it.
+3. Tell me to restart you so you load the tools.
+4. Read the "Use it through MCP" section of the AGENTS.md in that folder. Key rule: before generating, quote the cost, tell me and wait for my OK.`,
+    askWsl: (wsl) =>
+      `\n(If you run inside WSL, do not use this Windows installation: WSL's network cannot reach its API and ${wsl} is the Windows folder. Ask me to clone and start HF Studio inside WSL and use that copy.)`,
+    byHand: "Or connect it yourself from a terminal (copy only your client's)",
+    otherClient: "Other MCP client",
+    byHandComments: {
+      claudeDesktop: "# prints the JSON for claude_desktop_config.json",
+      other: "# prints the config for any other MCP client",
+    },
     heroLead: "Use HF Studio MCP with",
     heroBody: "Generate images and videos from your coding agents, with the same API and history as this interface.",
     notSure: "Not sure what to ask?",

@@ -135,7 +135,23 @@ Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nom
 
 ## Conectar agentes (MCP)
 
-Con la API en marcha (`hf-studio start`, `./dev.sh` o `.\dev`), un comando crea la clave del agente y registra el servidor:
+Con la API en marcha (`hf-studio start`, `./dev.sh` o `.\dev`), lo más fácil es **pedirle a tu agente que se conecte
+solo**. Pega esto en Claude Code, Codex u otro agente (la página MCP de la UI lo trae con tu ruta real ya puesta):
+
+```text
+Conecta a ti mismo (este agente) el servidor MCP de HF Studio. Está instalado en: /ruta/absoluta/a/hf-studio
+
+1. Comprueba que su API está en marcha: GET http://127.0.0.1:8787/health debe responder {"ok": true, ...}. Si no responde, pídeme que la arranque con `uv run hf-studio start` en esa carpeta y espera.
+2. Regístralo con el comando de tu cliente:
+   - Claude Code: uv run --directory '/ruta/absoluta/a/hf-studio' hf-studio connect claude-code
+   - Codex: uv run --directory '/ruta/absoluta/a/hf-studio' hf-studio connect codex
+   - Otro cliente MCP: uv run --directory '/ruta/absoluta/a/hf-studio' hf-studio connect json, y añade la configuración que imprime a tu configuración de MCP.
+   El comando crea una clave solo para ti. Si dice que hf-studio ya está registrado, pregúntame antes de quitar el registro anterior. Si tu sandbox no te deja ejecutarlo, muéstrame el comando para que lo ejecute yo.
+3. Dime que te reinicie para que cargues las herramientas.
+4. Lee la sección "Use it through MCP" del AGENTS.md de esa carpeta. Regla clave: antes de generar, cotiza, dime el costo y espera mi OK.
+```
+
+O hazlo tú: un comando crea la clave del agente y registra el servidor:
 
 ```bash
 uv run hf-studio connect claude-code     # ejecuta `claude mcp add` por ti

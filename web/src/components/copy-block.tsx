@@ -4,7 +4,7 @@ import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 
-export function CopyBlock({ title, code }: { title: string; code: string }) {
+export function CopyBlock({ title, code, wrap = false }: { title: string; code: string; wrap?: boolean }) {
   const { t } = useI18n();
   const [done, setDone] = useState(false);
   return (
@@ -24,7 +24,11 @@ export function CopyBlock({ title, code }: { title: string; code: string }) {
           {done ? t.copy.copied : t.copy.copy}
         </button>
       </div>
-      <pre className="thin-scrollbar overflow-x-auto p-4 font-mono text-[13px] leading-relaxed text-fg-2">{code}</pre>
+      <pre
+        className={`thin-scrollbar overflow-x-auto p-4 font-mono text-[13px] leading-relaxed text-fg-2 ${wrap ? "whitespace-pre-wrap" : ""}`}
+      >
+        {code}
+      </pre>
     </div>
   );
 }
