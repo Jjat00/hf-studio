@@ -113,6 +113,17 @@ export type Voice = {
   library: boolean;
 };
 
+/** Voz gratis de edge-tts (voces neuronales de Microsoft Edge). */
+export type FreeVoice = {
+  voice_id: string;
+  name: string;
+  locale: string;
+  country: string;
+  gender: string;
+  personalities: string[];
+  multilingual: boolean;
+};
+
 export type VoiceStatus = {
   configured: boolean;
   tier?: string | null;

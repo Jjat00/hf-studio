@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Generation, ModelDetail, ModelSummary, Preset, Sound, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, Sound, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -79,6 +79,14 @@ export const studio = {
       body: JSON.stringify({ model, input, keep_source_audio: keepSourceAudio }),
     }),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
+  freeVoices: () => call<{ voices: FreeVoice[] }>("/v1/voice/free-voices?lang=es"),
+  /** URL del MP3 de una voz gratis diciendo el texto (gratis, se guarda en caché en el servidor). */
+  freeSampleUrl: (voice: string, text: string, rate = "+0%") =>
+    `${BASE}/v1/voice/free-sample?${new URLSearchParams({ voice, text, rate })}`,
+  libraryVoices: (filters: { language?: string; accent?: string; gender?: string; search?: string }) =>
+    call<{ voices: Voice[] }>(
+      `/v1/voice/voices?${new URLSearchParams({ library: "true", limit: "60", ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) })}`,
+    ),
   voices: (search: string, library: boolean) =>
     call<{ voices: Voice[] }>(
       `/v1/voice/voices?library=${library}&limit=40${search ? `&search=${encodeURIComponent(search)}` : ""}`,

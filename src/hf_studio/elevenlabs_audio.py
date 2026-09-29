@@ -29,13 +29,19 @@ MUSIC_MODEL = "elevenlabs/music"
 ISOLATE_MODEL = "elevenlabs/voice-isolator"
 AUDIO_MODELS = (TTS_MODEL, SFX_MODEL, MUSIC_MODEL, ISOLATE_MODEL)
 
+# Precios de lista. eleven_v4 (28-09-2026) tiene 72 % de descuento hasta el 12-10-2026: se cotiza a precio de
+# lista para no quedarse corto.
 TTS_USD_PER_1K = {
+    "eleven_v4": 0.10,
+    "eleven_v4_turbo": 0.05,
     "eleven_flash_v2_5": 0.05,
     "eleven_turbo_v2_5": 0.05,
     "eleven_v3": 0.10,
     "eleven_multilingual_v2": 0.10,
 }
 TTS_MAX_CHARS = {
+    "eleven_v4": 10000,
+    "eleven_v4_turbo": 10000,
     "eleven_flash_v2_5": 40000,
     "eleven_turbo_v2_5": 40000,
     "eleven_v3": 5000,
@@ -49,15 +55,25 @@ MAX_ISOLATE_SECONDS = 3600.0
 
 class TextToSpeechIn(BaseModel):
     text: str = Field(
-        min_length=1, description="Texto a leer; con eleven_v3 admite etiquetas como [whispers] o [laughs]"
+        min_length=1,
+        description="Texto a leer; con eleven_v4 y eleven_v3 admite etiquetas como [excited] o [whispers]",
     )
     voice_id: str = Field(description="Voz (voice_id de list_voices)")
     voice_name: str | None = Field(None, description="Nombre de la voz, solo para mostrarlo")
     public_owner_id: str | None = Field(
         None, description="Solo voces de la biblioteca pública (ocupan un hueco)"
     )
-    model_id: Literal["eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_turbo_v2_5"] = (
-        Field("eleven_multilingual_v2", description="eleven_v3 = más expresivo; flash = más barato y rápido")
+    model_id: Literal[
+        "eleven_v4",
+        "eleven_v4_turbo",
+        "eleven_v3",
+        "eleven_multilingual_v2",
+        "eleven_flash_v2_5",
+        "eleven_turbo_v2_5",
+    ] = Field(
+        "eleven_v4",
+        description="eleven_v4 = el más natural (mejor acento en español); v4_turbo = rápido; v3 = expresivo; "
+        "flash = más barato",
     )
     language_code: str | None = Field(
         None, max_length=5, description="ISO 639-1, p. ej. es (no en multilingual_v2)"

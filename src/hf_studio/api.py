@@ -46,6 +46,7 @@ from .elevenlabs_audio import (
 from .elevenlabs_audio import SERVICES as AUDIO_SERVICES
 from .elevenlabs_audio import estimate as audio_estimate
 from .elevenlabs_audio import run as run_audio_service
+from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
@@ -772,8 +773,40 @@ def create_app(
         search: str | None = Query(None, max_length=100),
         library: bool = Query(False, description="Buscar en la biblioteca pública de ElevenLabs"),
         limit: int = Query(30, ge=1, le=100),
+        language: str | None = Query(
+            None, max_length=10, description="Solo biblioteca: código ISO, p. ej. es"
+        ),
+        accent: str | None = Query(None, max_length=40, description="Solo biblioteca: p. ej. colombian"),
+        gender: str | None = Query(None, max_length=20, description="Solo biblioteca: male o female"),
     ) -> dict:
-        return {"voices": await request.app.state.eleven.voices(search, library, limit)}
+        filters = {k: v for k, v in {"language": language, "accent": accent, "gender": gender}.items() if v}
+        return {"voices": await request.app.state.eleven.voices(search, library, limit, filters)}
+
+    @app.get("/v1/voice/free-voices", tags=["voz"])
+    async def free_voice_list(_: Owner, lang: str = Query("es", pattern=r"^[a-z]{2}$")) -> dict:
+        """Voces gratis de edge-tts (Microsoft Edge) de un idioma. No gasta créditos ni necesita clave."""
+        try:
+            return {"voices": await free_voices(lang)}
+        except Exception as exc:
+            raise ServiceError(
+                502, "free_voices_unavailable", f"Could not list the free voices: {exc}"
+            ) from exc
+
+    @app.get("/v1/voice/free-sample", tags=["voz"])
+    async def free_voice_sample(
+        _: Owner,
+        voice: str = Query(..., max_length=80),
+        text: str = Query(..., max_length=600),
+        rate: str = Query("+0%", max_length=5),
+    ) -> FileResponse:
+        """MP3 de una voz gratis diciendo el texto (hasta 300 caracteres). Gratis; se guarda en caché."""
+        try:
+            path = await free_sample(voice, text, rate, settings.storage_dir)
+        except FreeVoiceError as exc:
+            raise ServiceError(exc.status, exc.code, exc.message) from exc
+        return FileResponse(
+            path, media_type="audio/mpeg", filename=path.name, content_disposition_type="inline"
+        )
 
     @app.post("/v1/voice/estimate", tags=["voz"])
     async def voice_estimate_route(

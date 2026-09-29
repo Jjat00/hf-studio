@@ -289,7 +289,7 @@ def _audio(service: str, body: dict, quote_id: str | None, idempotency_key: str 
 def text_to_speech(
     text: str,
     voice_id: str,
-    model_id: str = "eleven_multilingual_v2",
+    model_id: str = "eleven_v4",
     language_code: str | None = None,
     public_owner_id: str | None = None,
     voice_name: str | None = None,
@@ -303,8 +303,9 @@ def text_to_speech(
     idempotency_key: str | None = None,
 ) -> dict:
     """Texto a voz con ElevenLabs (MP3 en la biblioteca). voice_id de list_voices. model_id:
-    eleven_v3 (el más expresivo; admite etiquetas como [whispers], [laughs], [screams]; hasta 5.000
-    caracteres), eleven_multilingual_v2 (estable, 10.000) o eleven_flash_v2_5 (mitad de precio, 40.000).
+    eleven_v4 (por defecto, el más natural y con mejor acento en español; admite etiquetas como [excited],
+    [whispers]; hasta 10.000 caracteres), eleven_v4_turbo (baja latencia, mitad de precio), eleven_v3 (expresivo,
+    5.000), eleven_multilingual_v2 (estable, 10.000) o eleven_flash_v2_5 (mitad de precio, 40.000).
     language_code ISO 639-1 (p. ej. "es"; no en multilingual_v2). Precio por caracteres: sin quote_id
     devuelve el costo; con el OK del usuario, llama igual con ese quote_id."""
     return _audio("text-to-speech", {"text": text, "voice_id": voice_id, "model_id": model_id,

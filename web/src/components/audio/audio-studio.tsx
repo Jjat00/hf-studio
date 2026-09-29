@@ -22,8 +22,14 @@ import {
 import type { Generation, Voice, VoiceStatus } from "@/lib/types";
 
 const SERVICES = Object.keys(AUDIO_SERVICES) as AudioService[];
-const TTS_MODELS = ["eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"] as const;
-const TTS_MAX: Record<string, number> = { eleven_v3: 5000, eleven_multilingual_v2: 10000, eleven_flash_v2_5: 40000 };
+const TTS_MODELS = ["eleven_v4", "eleven_v4_turbo", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"] as const;
+const TTS_MAX: Record<string, number> = {
+  eleven_v4: 10000,
+  eleven_v4_turbo: 10000,
+  eleven_v3: 5000,
+  eleven_multilingual_v2: 10000,
+  eleven_flash_v2_5: 40000,
+};
 const LANGUAGES = ["es", "en", "pt", "fr", "it", "de"];
 type Source = { generationId?: string; url: string; label: string };
 
@@ -49,7 +55,7 @@ export function AudioStudio() {
   // Texto a voz
   const [text, setText] = useState("");
   const [voice, setVoice] = useState<Voice | null>(null);
-  const [ttsModel, setTtsModel] = useState<(typeof TTS_MODELS)[number]>("eleven_multilingual_v2");
+  const [ttsModel, setTtsModel] = useState<(typeof TTS_MODELS)[number]>("eleven_v4");
   const [language, setLanguage] = useState<string | null>(null);
   // Efectos
   const [sfx, setSfx] = useState("");

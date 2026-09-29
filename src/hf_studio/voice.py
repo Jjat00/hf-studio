@@ -126,10 +126,13 @@ class ElevenLabsClient:
             raise VoiceError(response.status_code if response.status_code < 500 else 502, code, str(detail))
         return response
 
-    async def voices(self, search: str | None = None, library: bool = False, limit: int = 30) -> list[dict]:
-        """Voces de la cuenta (incluidas las predefinidas) o de la biblioteca pública."""
+    async def voices(
+        self, search: str | None = None, library: bool = False, limit: int = 30, filters: dict | None = None
+    ) -> list[dict]:
+        """Voces de la cuenta (incluidas las predefinidas) o de la biblioteca pública. En la biblioteca, `filters`
+        acota por language (ISO, p. ej. es), accent (p. ej. colombian) y gender."""
         if library:
-            params = {"page_size": limit, **({"search": search} if search else {})}
+            params = {"page_size": limit, **({"search": search} if search else {}), **(filters or {})}
             data = (await self._request("GET", "/v1/shared-voices", params=params)).json()
             return [
                 {
