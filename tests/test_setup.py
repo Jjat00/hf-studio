@@ -283,31 +283,60 @@ def test_giving_up_saves_nothing(repo, monkeypatch):
     assert setup.read_env(repo / ".env")["HF_API_KEY"] == ""
 
 
+def _in_terminal(expected: str, chunks: list[bytes]) -> tuple[int, bytes]:
+    """Ejecuta masked_input en un proceso nuevo cuya terminal de control es un pty, como en una terminal
+    de verdad (pty.fork crea la sesión; exec evita heredar la captura de pytest). Escribe los trozos por
+    separado y devuelve (código de salida, todo lo que se vio). Con límites de tiempo: nunca se cuelga."""
+    import pty
+    import select
+    import signal
+    import sys
+    import time
+
+    code = f"from hf_studio import setup; raise SystemExit(0 if setup.masked_input('KEY: ') == {expected!r} else 3)"
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv(sys.executable, [sys.executable, "-c", code])
+
+    def read_for(seconds: float) -> bytes:
+        got, end = b"", time.time() + seconds
+        while time.time() < end and select.select([fd], [], [], 0.1)[0]:
+            try:
+                chunk = os.read(fd, 1024)
+            except OSError:  # el hijo cerró la terminal
+                break
+            if not chunk:
+                break
+            got += chunk
+        return got
+
+    out, end = b"", time.time() + 20
+    while b"KEY: " not in out and time.time() < end:
+        out += read_for(0.2)
+    for chunk in chunks:
+        os.write(fd, chunk)
+        time.sleep(0.15)  # lecturas separadas en el hijo
+    code_out = None
+    for _ in range(100):
+        out += read_for(0.1)
+        done, status = os.waitpid(pid, os.WNOHANG)
+        if done:
+            code_out = os.waitstatus_to_exitcode(status)
+            break
+    if code_out is None:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        code_out = -1
+    out += read_for(0.2)
+    os.close(fd)
+    return code_out, out
+
+
 @pytest.mark.skipif(os.name == "nt", reason="pty POSIX")
 def test_masked_input_echoes_stars_and_handles_backspace():
-    """Un proceso real en una terminal de mentira: se ven `*`, nunca la clave, y el retroceso borra."""
-    import pty
-    import subprocess
-    import sys
-
-    main, secondary = pty.openpty()
-    code = "from hf_studio import setup; v = setup.masked_input('KEY: '); raise SystemExit(0 if v == 'ab:cd' else 1)"
-    proc = subprocess.Popen([sys.executable, "-c", code], stdin=secondary, stdout=secondary, stderr=secondary)
-    os.close(secondary)
-    out = b""
-    while b"KEY: " not in out:
-        out += os.read(main, 1024)
-    os.write(main, b"ab:cdX\x7f\r")  # pega, borra la X y Enter
-    assert proc.wait(10) == 0
-    while True:
-        try:
-            chunk = os.read(main, 1024)
-        except OSError:  # el proceso cerró la terminal
-            break
-        if not chunk:
-            break
-        out += chunk
-    os.close(main)
+    """Se ven `*`, nunca la clave, y el retroceso borra."""
+    code, out = _in_terminal("ab:cd", [b"ab:cdX\x7f\r"])  # pega, borra la X y Enter
+    assert code == 0, out
     assert b"******" in out and b"ab:cd" not in out
 
 
@@ -347,20 +376,5 @@ def test_paste_markers_and_arrows_never_reach_the_key(monkeypatch, capsys, chunk
 @pytest.mark.skipif(os.name == "nt", reason="pty POSIX")
 def test_paste_markers_split_across_posix_reads_never_reach_the_key():
     """Los marcadores de pegado llegan partidos en varias lecturas de os.read: el estado debe sobrevivir."""
-    import pty
-    import subprocess
-    import sys
-    import time
-
-    main, secondary = pty.openpty()
-    code = "from hf_studio import setup; v = setup.masked_input('KEY: '); raise SystemExit(0 if v == 'id:secret' else 1)"
-    proc = subprocess.Popen([sys.executable, "-c", code], stdin=secondary, stdout=secondary, stderr=secondary)
-    os.close(secondary)
-    out = b""
-    while b"KEY: " not in out:
-        out += os.read(main, 1024)
-    for chunk in (b"\x1b[20", b"0~id:sec", b"ret\x1b", b"[201~", b"\r"):
-        os.write(main, chunk)
-        time.sleep(0.15)  # lecturas separadas en el proceso hijo
-    assert proc.wait(10) == 0
-    os.close(main)
+    code, out = _in_terminal("id:secret", [b"\x1b[20", b"0~id:sec", b"ret\x1b", b"[201~", b"\r"])
+    assert code == 0, out
