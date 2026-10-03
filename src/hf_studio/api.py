@@ -47,9 +47,11 @@ from .elevenlabs_audio import SERVICES as AUDIO_SERVICES
 from .elevenlabs_audio import estimate as audio_estimate
 from .elevenlabs_audio import run as run_audio_service
 from .free_voices import FreeVoiceError, free_sample, free_voices
-from .higgsfield import UPLOAD_CONTENT_TYPES, HiggsfieldClient, HiggsfieldError
+from .higgsfield import UPLOAD_CONTENT_TYPES
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, normalize, quote, total
+from .providers import ProviderError
+from .providers import registry as provider_registry
 from .recommend import recommend
 from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
 from .sounds import LABELS as SOUND_LABELS
@@ -92,6 +94,7 @@ STAGES = {
 HF_ERROR_STATUS = {
     "auth": 502, "credits": 402, "not_found": 404, "validation": 422, "bad_request": 400,
     "concurrency": 429, "unavailable": 503, "server": 502, "network": 502, "too_late": 409,
+    "unsupported": 400, "moderation": 422, "ambiguous": 502,
 }  # fmt: skip
 
 
@@ -165,8 +168,10 @@ def create_app(
         engine = make_engine(settings.database_url)
         await init_db(engine)
         app.state.sessions = make_sessionmaker(engine)
-        app.state.hf = HiggsfieldClient(settings, transport)
-        app.state.worker = Worker(app.state.sessions, app.state.hf, settings)
+        app.state.providers = provider_registry.build(settings, transport)
+        # Higgsfield también guarda los medios de entrada y cotiza su catálogo.
+        app.state.hf = app.state.providers[provider_registry.DEFAULT_PROVIDER]
+        app.state.worker = Worker(app.state.sessions, app.state.providers, settings)
         app.state.tasks = set()
         app.state.eleven = ElevenLabsClient(settings, transport)
         app.state.voice_slots = asyncio.Semaphore(2)
@@ -186,7 +191,8 @@ def create_app(
             app.state.worker.start()
         yield
         await app.state.worker.stop()
-        await app.state.hf.aclose()
+        for provider in app.state.providers.values():
+            await provider.aclose()
         await app.state.eleven.aclose()
         await engine.dispose()
 
@@ -213,10 +219,12 @@ def create_app(
     async def _voice_error(_: Request, exc: VoiceError) -> JSONResponse:
         return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
 
-    @app.exception_handler(HiggsfieldError)
-    async def _hf_error(_: Request, exc: HiggsfieldError) -> JSONResponse:
-        message = "The server's Higgsfield credentials are invalid" if exc.kind == "auth" else exc.message
-        body = {"code": f"higgsfield_{exc.kind}", "message": message, "correlation_id": exc.correlation_id}
+    @app.exception_handler(ProviderError)
+    async def _provider_error(_: Request, exc: ProviderError) -> JSONResponse:
+        provider = exc.provider or provider_registry.DEFAULT_PROVIDER
+        title = getattr(provider_registry.PROVIDERS.get(provider), "title", provider)
+        message = f"The server's {title} credentials are invalid" if exc.kind == "auth" else exc.message
+        body = {"code": f"{provider}_{exc.kind}", "message": message, "correlation_id": exc.correlation_id}
         return JSONResponse({"error": body}, status_code=HF_ERROR_STATUS.get(exc.kind, 502))
 
     # --- Dependencias --------------------------------------------------------------------------
@@ -307,8 +315,23 @@ def create_app(
         return {
             "ok": True,
             "higgsfield_configured": settings.hf_configured,
+            "providers_configured": provider_registry.configured(settings),
             "catalog_synced_at": get_catalog().synced_at,
         }
+
+    @app.get("/v1/providers", tags=["sistema"])
+    async def providers(request: Request, _: Owner, check: bool = True) -> dict:
+        """Proveedores registrados con sus enlaces; con `check`, valida cada clave y lee el saldo (gratis)."""
+        items = []
+        for provider in request.app.state.providers.values():
+            item = provider.info()
+            if check and provider.configured:
+                result = await provider.check_key()
+                item.update(
+                    valid=result.valid, balance_usd=result.balance_usd, message=result.message or None
+                )
+            items.append(item)
+        return {"providers": items}
 
     @app.get("/v1/me", tags=["sistema"])
     async def me(owner: Owner) -> dict:
@@ -351,7 +374,7 @@ def create_app(
         check_input(catalog, model["id"], filled)
         try:
             raw = await request.app.state.hf.estimate(model["id"], filled)
-        except HiggsfieldError as exc:
+        except ProviderError as exc:
             if exc.kind == "auth":
                 raise
             reason = (
@@ -595,7 +618,7 @@ def create_app(
                 )
             return job_out(job)
         if job.status == "queued" and job.hf_request_id:
-            await request.app.state.hf.cancel(job.hf_request_id, job.cancel_url)
+            await request.app.state.worker.provider(job).cancel_job(job.hf_request_id, job.cancel_url)
             job.status, job.finished_at, job.next_check_at = "canceled", utcnow(), None
         else:
             raise ServiceError(409, "not_cancelable", f"Cannot cancel a generation in status {job.status}")
@@ -1263,24 +1286,33 @@ def create_app(
                 break
         return {"imported": imported, "skipped": skipped}
 
-    @app.post("/v1/webhooks/higgsfield/{job_id}", tags=["sistema"], include_in_schema=False)
-    async def webhook(job_id: str, request: Request, session: Session, token: str = "") -> dict:
+    @app.post("/v1/webhooks/{provider}/{job_id}", tags=["sistema"], include_in_schema=False)
+    @app.post("/v1/webhooks/{provider}/{job_id}/callback", tags=["sistema"], include_in_schema=False)
+    async def webhook(
+        provider: str, job_id: str, request: Request, session: Session, token: str = ""
+    ) -> dict:
+        """Aviso de un proveedor (APIMart añade `/callback` a la URL). El cuerpo no se usa como verdad:
+        solo dispara una consulta autoritativa al endpoint de estado del proveedor."""
         try:
             payload = await request.json()
         except ValueError:
             payload = None
-        if not (isinstance(payload, dict) and isinstance(payload.get("request_id"), str)
-                and payload.get("status") in ("completed", "failed", "nsfw", "canceled")):  # fmt: skip
+        if not isinstance(payload, dict):
+            raise ServiceError(400, "bad_envelope", "Unrecognized webhook body")
+        if provider == "higgsfield" and not (
+            isinstance(payload.get("request_id"), str)
+            and payload.get("status") in ("completed", "failed", "nsfw", "canceled")
+        ):
             raise ServiceError(400, "bad_envelope", "Unrecognized webhook body")
         job = await session.get(Job, job_id)
         if (
             not job
+            or job.provider != provider
             or not hmac.compare_digest(job.webhook_token, token)
-            or job.hf_request_id != payload["request_id"]
+            or (provider == "higgsfield" and job.hf_request_id != payload["request_id"])
         ):
             raise ServiceError(404, "not_found", "Unknown webhook")
         if job.status not in TERMINAL or job.status == "timed_out":
-            # El webhook no va firmado: solo dispara una consulta autoritativa al endpoint de estado.
             task = asyncio.create_task(refresh_job(request.app, job.id))
             request.app.state.tasks.add(task)
             task.add_done_callback(request.app.state.tasks.discard)

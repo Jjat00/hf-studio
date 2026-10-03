@@ -1,4 +1,4 @@
-"""hf-studio start [--api-only] | setup | connect CLIENT | serve | create-key NAME | list-keys | revoke-key NAME | check-credentials | sync-catalog | mcp"""
+"""hf-studio start [--api-only] | setup | connect CLIENT | serve | providers [--open|--add NAME] | create-key NAME | list-keys | revoke-key NAME | check-credentials | sync-catalog | mcp"""
 
 from __future__ import annotations
 
@@ -125,6 +125,61 @@ async def _check_credentials(key: str | None = None) -> int:
     return 1
 
 
+async def _check_provider(cls, key: str | None = None):
+    """KeyCheck de un proveedor con la clave configurada o con `key`."""
+    from .config import Settings
+
+    settings = get_settings() if key is None else Settings(provider_keys={cls.env_var: key}, hf_api_key=key)
+    provider = cls(settings)
+    try:
+        return await provider.check_key()
+    finally:
+        await provider.aclose()
+
+
+def _providers(open_name: str | None, add_name: str | None) -> int:
+    """Estado, saldo y enlaces de cada proveedor; `--open` abre la página de la clave y `--add` la pide."""
+    import webbrowser
+
+    from . import setup
+    from .providers.registry import PROVIDERS
+
+    os.chdir(setup.ROOT)
+    name = open_name or add_name
+    if name and name not in PROVIDERS:
+        print(f"Unknown provider {name!r}. Available: {', '.join(PROVIDERS)}", file=sys.stderr)
+        return 1
+    if open_name:
+        cls = PROVIDERS[open_name]
+        print(f"Opening {cls.key_url} (sign up first at {cls.signup_url} if you have no account)")
+        webbrowser.open(cls.key_url)
+        return 0
+    if add_name:
+        cls = PROVIDERS[add_name]
+        setup.ensure_env_file()
+        if not setup.ask_provider_key(cls, lambda c, k: asyncio.run(_check_provider(c, k)).valid):
+            return 1
+        get_settings.cache_clear()
+    settings = get_settings()
+    for cls in PROVIDERS.values():
+        if not cls.key_from(settings):
+            state = "required, missing" if cls.required else "not configured"
+        else:
+            check = asyncio.run(_check_provider(cls))
+            if check.valid is False:
+                state = f"INVALID KEY ({check.message})"
+            elif check.valid is None:
+                state = f"could not check ({check.message})"
+            else:
+                balance = f", balance {check.balance_usd:.2f} USD" if check.balance_usd is not None else ""
+                note = f" ({check.message})" if check.message else ""
+                state = f"ok{balance}{note}"
+        print(f"{cls.title:12} {cls.env_var:18} {state}")
+        print(f"{'':12} key: {cls.key_url}   billing: {cls.billing_url or cls.signup_url}")
+    print("\nAdd one: hf-studio providers --add NAME   Open its key page: hf-studio providers --open NAME")
+    return 0
+
+
 def _setup(interactive: bool) -> int:
     """Prepara `.env` (pidiendo y validando la clave en una terminal) y la clave de la UI."""
     from . import setup
@@ -197,6 +252,15 @@ def main() -> int:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8787)
     serve.add_argument("--reload", action="store_true")
+    providers = sub.add_parser(
+        "providers", help="Providers: status, balance and links; add or open a key page"
+    )
+    providers.add_argument(
+        "--open", metavar="NAME", help="Open the page where you create that provider's key"
+    )
+    providers.add_argument(
+        "--add", metavar="NAME", help="Paste a provider key; it is checked and saved in .env"
+    )
     sub.add_parser("create-key", help="Crea un cliente (agente, UI…) y muestra su clave").add_argument("name")
     sub.add_parser("list-keys", help="Lista los clientes")
     sub.add_parser("revoke-key", help="Revoca la clave de un cliente").add_argument("name")
@@ -231,6 +295,8 @@ def main() -> int:
         # Un solo proceso: el worker vive dentro de la API (el reclamo atómico evita dobles envíos igualmente).
         uvicorn.run("hf_studio.main:app", host=args.host, port=args.port, reload=args.reload)
         return 0
+    if args.cmd == "providers":
+        return _providers(args.open, args.add)
     if args.cmd == "create-key":
         return asyncio.run(_with_session(lambda s: _create_key(s, args.name)))
     if args.cmd == "list-keys":

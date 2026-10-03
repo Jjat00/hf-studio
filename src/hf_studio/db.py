@@ -89,6 +89,10 @@ class Job(Base):
     error: Mapped[str | None] = mapped_column(Text)
     error_kind: Mapped[str | None] = mapped_column(String(40))
 
+    # Proveedor que ejecuta (o ejecutó) el trabajo; `hf_request_id` es el id de la tarea en ese proveedor.
+    provider: Mapped[str] = mapped_column(
+        String(30), default="higgsfield", server_default=text("'higgsfield'")
+    )
     hf_request_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     status_url: Mapped[str | None] = mapped_column(Text)
     cancel_url: Mapped[str | None] = mapped_column(Text)
@@ -120,7 +124,10 @@ def make_engine(url: str) -> AsyncEngine:
 # Columnas añadidas después de crear la tabla: create_all no altera tablas existentes.
 ADDED_COLUMNS = {
     "api_clients": {"sees_all": "BOOLEAN NOT NULL DEFAULT 0"},
-    "jobs": {"keep_source_audio": "BOOLEAN NOT NULL DEFAULT 0"},
+    "jobs": {
+        "keep_source_audio": "BOOLEAN NOT NULL DEFAULT 0",
+        "provider": "VARCHAR(30) NOT NULL DEFAULT 'higgsfield'",
+    },
 }
 
 

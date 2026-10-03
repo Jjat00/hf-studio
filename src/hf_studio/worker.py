@@ -1,5 +1,6 @@
-"""Worker en proceso: envía trabajos respetando la concurrencia de la cuenta, sondea con backoff
-(https://docs.higgsfield.ai/docs/concepts/polling), aplica el timeout y guarda las salidas."""
+"""Worker en proceso: envía cada trabajo a su proveedor respetando la concurrencia de la cuenta, sondea
+con backoff (https://docs.higgsfield.ai/docs/concepts/polling), aplica el timeout y guarda las salidas.
+Solo habla con el contrato de `providers.base`."""
 
 from __future__ import annotations
 
@@ -19,10 +20,11 @@ from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
 from .db import Job, utcnow
 from .elevenlabs_audio import AUDIO_MODELS
-from .higgsfield import TERMINAL_STATUSES, HiggsfieldClient, HiggsfieldError, extract_outputs
+from .providers.base import TERMINAL_STATUSES, Polled, Provider, ProviderError
+from .providers.registry import DEFAULT_PROVIDER
 from .voice import VOICE_MODEL
 
-# Trabajos locales (ElevenLabs): no ocupan concurrencia de Higgsfield.
+# Trabajos locales (ElevenLabs): no ocupan concurrencia de los proveedores.
 LOCAL_MODELS = (VOICE_MODEL, *AUDIO_MODELS)
 
 log = logging.getLogger("hf_studio.worker")
@@ -32,13 +34,19 @@ POLL_BATCH = 25
 
 
 class Worker:
-    def __init__(self, sessions: async_sessionmaker, client: HiggsfieldClient, settings: Settings):
+    def __init__(self, sessions: async_sessionmaker, providers: dict[str, Provider], settings: Settings):
         self.sessions = sessions
-        self.client = client
+        self.providers = providers
         self.settings = settings
         self._wake = asyncio.Event()
         self._submit_paused_until = utcnow()
         self._task: asyncio.Task | None = None
+
+    def provider(self, job: Job) -> Provider:
+        name = job.provider or DEFAULT_PROVIDER
+        if name not in self.providers:
+            raise ProviderError("unsupported", f"Unknown provider {name!r}", provider=name)
+        return self.providers[name]
 
     def wake(self) -> None:
         self._wake.set()
@@ -65,7 +73,7 @@ class Worker:
             self._wake.clear()
 
     async def recover(self) -> None:
-        """Un envío interrumpido por un reinicio pudo llegar a Higgsfield: no se repite a ciegas."""
+        """Un envío interrumpido por un reinicio pudo llegar al proveedor: no se repite a ciegas."""
         async with self.sessions() as session:
             stuck = (await session.scalars(select(Job).where(Job.status == "submitting"))).all()
             for job in stuck:
@@ -73,7 +81,7 @@ class Worker:
                     job,
                     "failed",
                     "submission_ambiguous",
-                    "The server restarted during submission; check your Higgsfield history before retrying",
+                    "The server restarted during submission; check your provider history before retrying",
                 )
             await session.commit()
 
@@ -125,35 +133,41 @@ class Worker:
                 return True
             job = await session.get(Job, job_id)
             job.attempts += 1
-            webhook = None
-            if self.settings.public_base_url:
-                base = self.settings.public_base_url.rstrip("/")
-                webhook = f"{base}/v1/webhooks/higgsfield/{job.id}?token={quote(job.webhook_token)}"
+            webhook = self.webhook_url(job)
             try:
-                result = await self.client.submit(job.model, job.input, webhook)
-            except HiggsfieldError as exc:
+                result = await self.provider(job).submit_job(job.model, job.input, webhook)
+            except ProviderError as exc:
                 keep_going = self._handle_submit_error(job, exc)
                 await session.commit()
                 return keep_going
-            job.hf_request_id = result["request_id"]
-            job.status_url = result.get("status_url")
-            job.cancel_url = result.get("cancel_url")
-            job.correlation_id = result.get("_correlation_id")
-            job.status = (
-                result.get("status") if result.get("status") in ("queued", "in_progress") else "queued"
-            )
+            job.hf_request_id = result.request_id
+            job.status_url = result.status_url
+            job.cancel_url = result.cancel_url
+            job.correlation_id = result.correlation_id
+            job.status = result.status if result.status in ("queued", "in_progress") else "queued"
             job.submitted_at = utcnow()
             job.poll_delay = 2.0
             job.next_check_at = job.submitted_at + timedelta(seconds=2)
             job.error = job.error_kind = None
             await session.commit()
-            log.info("Trabajo %s enviado como %s", job.id, job.hf_request_id)
-            if result.get("status") in TERMINAL_STATUSES:
-                await self.apply_status(session, job, result)
+            log.info("Trabajo %s enviado a %s como %s", job.id, job.provider, job.hf_request_id)
+            if result.status in TERMINAL_STATUSES:
+                final = result.polled or await self.provider(job).poll_job(
+                    result.request_id, result.status_url
+                )
+                await self.apply_polled(session, job, final)
                 await session.commit()
             return True
 
-    def _handle_submit_error(self, job: Job, exc: HiggsfieldError) -> bool:
+    def webhook_url(self, job: Job) -> str | None:
+        if not self.settings.public_base_url:
+            return None
+        base = self.settings.public_base_url.rstrip("/")
+        return (
+            f"{base}/v1/webhooks/{job.provider or DEFAULT_PROVIDER}/{job.id}?token={quote(job.webhook_token)}"
+        )
+
+    def _handle_submit_error(self, job: Job, exc: ProviderError) -> bool:
         job.correlation_id = exc.correlation_id or job.correlation_id
         if exc.kind == "concurrency":
             # Límite de la cuenta: el trabajo vuelve a la cola y se pausan los envíos un rato.
@@ -172,9 +186,10 @@ class Worker:
         if exc.kind == "ambiguous":
             message += "; not retried automatically to avoid a duplicate generation and charge"
         elif exc.kind == "auth":
-            message = (
-                "Invalid Higgsfield credentials on the server (HF_API_KEY); run `hf-studio check-credentials`"
-            )
+            provider = self.providers.get(job.provider or DEFAULT_PROVIDER)
+            env_var = provider.env_var if provider else "the provider key"
+            title = provider.title if provider else job.provider
+            message = f"Invalid {title} credentials on the server ({env_var}); run `hf-studio providers`"
         self._finish(job, "failed", kind, message)
         return exc.kind != "auth"
 
@@ -195,15 +210,18 @@ class Worker:
                 await session.commit()
 
     async def refresh(self, session: AsyncSession, job: Job) -> None:
-        """Consulta el estado autoritativo en Higgsfield y lo aplica al trabajo."""
+        """Consulta el estado autoritativo en el proveedor y lo aplica al trabajo."""
         if not job.hf_request_id:
             return
         try:
-            result = await self.client.status(job.hf_request_id, job.status_url)
-        except HiggsfieldError as exc:
+            result = await self.provider(job).poll_job(job.hf_request_id, job.status_url)
+        except ProviderError as exc:
             if exc.kind == "not_found":
                 self._finish(
-                    job, "failed", "not_found", "Higgsfield does not recognize this request for this account"
+                    job,
+                    "failed",
+                    "not_found",
+                    f"{job.provider} does not recognize this request for this account",
                 )
             else:
                 # 5xx, red o credenciales: se sigue sondeando con backoff exponencial.
@@ -212,17 +230,15 @@ class Worker:
                 job.next_check_at = utcnow() + timedelta(seconds=wait + random.uniform(0, 1))
                 log.warning("Sondeo de %s falló (%s): %s", job.id, exc.kind, exc.message)
             return
-        await self.apply_status(session, job, result)
+        await self.apply_polled(session, job, result)
 
-    async def apply_status(self, session: AsyncSession, job: Job, result: dict) -> None:
-        status = result.get("status")
+    async def apply_polled(self, session: AsyncSession, job: Job, result: Polled) -> None:
+        status = result.status
         if status in TERMINAL_STATUSES:
             if job.status in TERMINAL_STATUSES and job.status != "timed_out":
                 return  # webhook duplicado o sondeo tardío
-            job.outputs = extract_outputs(result)
-            error = result.get("error")
-            if status == "nsfw":
-                error = error or "Content moderation rejected the input or output (not charged)"
+            job.outputs = result.outputs
+            error = result.error
             # Primero la copia local y después el estado final: quien vea `completed` ya tiene
             # `file_url`. Un fallo de descarga no bloquea (queda la URL remota).
             if status == "completed" and self.settings.download_outputs:
@@ -236,7 +252,7 @@ class Worker:
             job.poll_delay = min(job.poll_delay * 1.5, 10.0)
 
     async def store_outputs(self, job: Job) -> None:
-        """Copia las salidas a almacenamiento propio: Higgsfield las garantiza solo 7 días."""
+        """Copia las salidas a almacenamiento propio: los proveedores las guardan de 1 a 14 días."""
         files = []
         for i, out in enumerate(job.outputs):
             suffix = PurePosixPath(urlparse(out["url"]).path).suffix or (
@@ -245,7 +261,7 @@ class Worker:
             name = f"{i}-{out['kind']}{suffix}"
             dest = Path(self.settings.storage_dir) / "outputs" / job.id / name
             try:
-                size, content_type = await self.client.download(out["url"], dest)
+                size, content_type = await self.provider(job).download(out["url"], dest)
             except (
                 httpx.HTTPError,
                 OSError,
@@ -274,7 +290,7 @@ class Worker:
             ).all()
             for job in jobs:
                 remote = (
-                    " The request may still finish at Higgsfield; a late webhook will update it."
+                    f" The request may still finish at {job.provider}; a late webhook will update it."
                     if job.hf_request_id
                     else ""
                 )

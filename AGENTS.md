@@ -48,7 +48,8 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
 
 - Map: `api.py` (REST routes), `service.py` (generation logic), `worker.py` (queue and polling),
-  `higgsfield.py` (Higgsfield client), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
+  `higgsfield.py` (Higgsfield client), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
+  provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
   regenerated with `hf-studio sync-catalog`).
