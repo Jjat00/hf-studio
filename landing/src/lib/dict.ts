@@ -58,7 +58,7 @@ const es = {
       { title: "Nunca un sustituto", desc: "Si un proveedor no puede reproducir un ajuste (una semilla, un bitrate, un formato), queda fuera en vez de cambiar tu pedido." },
       { title: "Respaldo sin cobros dobles", desc: "Si el más barato falla sin cobrar, prueba el siguiente solo si no cuesta más de lo que aprobaste. Si cuesta más, te pregunta." },
       { title: "Precio comprobado antes de enviar", desc: "Recotiza antes de generar (APIMart y KIE siempre; Higgsfield si la cotización tiene más de 15 min). Si supera lo aprobado, espera tu OK." },
-      { title: "Añadir una clave, un comando", desc: "hf-studio providers --add apimart abre el enlace, valida la clave gratis y la guarda. Higgsfield es la única obligatoria." },
+      { title: "Añadir una clave, dos comandos", desc: "hf-studio providers --open apimart abre la página de la clave; --add apimart la pide, la valida gratis y la guarda. Higgsfield es la única obligatoria." },
     ],
   },
   audio: {
@@ -97,7 +97,7 @@ const es = {
     title1: "Tus agentes",
     title2: "generan por ti",
     body: "HF Studio también es un servidor MCP. Conéctalo a Claude Code, Codex, Claude Desktop o ChatGPT y tu agente busca el modelo, te dice cuánto cuesta, espera tu OK y genera.",
-    rule: "La regla: un agente no puede gastar créditos sin cotizar antes esa misma petición. Cada generación exige un quote_id de un solo uso, y si el precio sube, el agente vuelve a pedirte el OK.",
+    rule: "La regla: un agente no puede gastar créditos sin cotizar antes esa misma petición. Cada generación exige un quote_id de un solo uso. Si al enviar el precio supera tu tope, la generación espera y el agente te pide el OK otra vez.",
     connect: "Conecta tu agente con un comando",
     chat: {
       user: "Hazme un video de 5 s de tinta de colores en agua, en cámara lenta",
@@ -193,7 +193,7 @@ const en: Dict = {
       { title: "Never a substitute", desc: "If a provider cannot reproduce a setting (a seed, a bitrate, a format), it is left out instead of changing your request." },
       { title: "Fallback without double charges", desc: "If the cheapest fails without charging, the next one runs only if it costs no more than you approved. If it costs more, it asks you." },
       { title: "Price checked before sending", desc: "It re-quotes before generating (APIMart and KIE always; Higgsfield if the quote is over 15 min old). If it goes over what you approved, it waits for your OK." },
-      { title: "One command per key", desc: "hf-studio providers --add apimart opens the link, checks the key for free and saves it. Higgsfield is the only required one." },
+      { title: "Add a key in two commands", desc: "hf-studio providers --open apimart opens the key page; --add apimart asks for the key, checks it for free and saves it. Higgsfield is the only required one." },
     ],
   },
   audio: {
@@ -232,7 +232,7 @@ const en: Dict = {
     title1: "Your agents",
     title2: "generate for you",
     body: "HF Studio is also an MCP server. Connect it to Claude Code, Codex, Claude Desktop or ChatGPT and your agent finds the model, tells you the price, waits for your OK and generates.",
-    rule: "The rule: an agent cannot spend credits without first quoting that exact request. Every generation requires a single-use quote_id, and if the price goes up the agent asks for your OK again.",
+    rule: "The rule: an agent cannot spend credits without first quoting that exact request. Every generation requires a single-use quote_id. If at send time the price goes over your cap, the generation waits and the agent asks for your OK again.",
     connect: "Connect your agent with one command",
     chat: {
       user: "Make me a 5 s slow-motion video of colorful ink in water",
