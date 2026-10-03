@@ -8,13 +8,13 @@ el sondeo lo gobierna el worker con estado persistido y los webhooks se piden po
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from .config import Settings
+from .providers.base import KeyCheck, Polled, Provider, ProviderError, Submitted
 
 TERMINAL_STATUSES = {"completed", "failed", "nsfw", "canceled"}
 UPLOAD_CONTENT_TYPES = {
@@ -29,19 +29,11 @@ UPLOAD_CONTENT_TYPES = {
 }
 
 
-class HiggsfieldError(Exception):
+class HiggsfieldError(ProviderError):
     """Error de la API clasificado según https://docs.higgsfield.ai/docs/concepts/errors."""
 
     def __init__(self, kind: str, message: str, status: int | None = None, correlation_id: str | None = None):
-        super().__init__(message)
-        self.kind = kind
-        self.message = message
-        self.status = status
-        self.correlation_id = correlation_id
-
-    @property
-    def retryable(self) -> bool:
-        return self.kind in {"concurrency", "unavailable", "server", "network"}
+        super().__init__(kind, message, status, correlation_id, provider="higgsfield")
 
 
 def _detail(response: httpx.Response) -> str:
@@ -73,20 +65,83 @@ def _raise_for(response: httpx.Response) -> None:
     raise HiggsfieldError(kind, message, status, response.headers.get("x-correlation-id"))
 
 
-class HiggsfieldClient:
+class HiggsfieldClient(Provider):
+    """Proveedor Higgsfield. Es obligatorio: además de generar, guarda los medios de entrada
+    (subir no cobra créditos) y sus URLs públicas las leen los demás proveedores."""
+
+    name = "higgsfield"
+    title = "Higgsfield"
+    env_var = "HF_API_KEY"
+    base_url = "https://api.higgsfield.ai"
+    signup_url = "https://higgsfield.ai"
+    key_url = "https://console.higgsfield.ai"
+    billing_url = "https://console.higgsfield.ai"
+    docs_url = "https://docs.higgsfield.ai"
+    required = True
+    blurb = "Required: stores your input files (free) and generates every model, including its own (Soul…)."
+
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+        super().__init__(settings, transport)
         self.base_url = settings.hf_base_url.rstrip("/")
         auth = f"Key {settings.hf_credential}"
         timeout = httpx.Timeout(30.0, connect=10.0)
         self._api = httpx.AsyncClient(
             base_url=self.base_url, headers={"Authorization": auth}, timeout=timeout, transport=transport
         )
-        # Sin credenciales: sube a URLs prefirmadas y descarga salidas de la CDN.
-        self._plain = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0), transport=transport)
+
+    @classmethod
+    def key_from(cls, settings: Settings) -> str:
+        return settings.hf_credential
 
     async def aclose(self) -> None:
         await self._api.aclose()
-        await self._plain.aclose()
+        await super().aclose()
+
+    # --- Contrato de proveedor -----------------------------------------------------------------
+
+    async def check_key(self) -> KeyCheck:
+        if not self.configured:
+            return KeyCheck(False, message="Missing HF_API_KEY")
+        try:
+            ok = await self.check_credentials()
+        except httpx.TransportError as exc:
+            return KeyCheck(None, message=f"Could not reach Higgsfield ({type(exc).__name__})")
+        except HiggsfieldError as exc:
+            return KeyCheck(None, message=exc.message)
+        # La API no expone el saldo; cotizar y subir no lo necesitan.
+        return KeyCheck(ok, message="" if ok else "Invalid key (401)")
+
+    async def submit_job(
+        self, model: str, arguments: dict[str, Any], webhook_url: str | None = None
+    ) -> Submitted:
+        try:
+            result = await self.submit(model, arguments, webhook_url)
+        except HiggsfieldError as exc:
+            # Solo 423 (modelo bloqueado) dice explícitamente que no se procesó; un 5xx genérico, 503
+            # incluido, puede llegar después de aceptar la tarea (revisión 29).
+            if exc.kind == "server" or exc.status == 503:
+                exc.kind = "ambiguous"
+            raise
+        if not isinstance(result, dict) or not result.get("request_id"):
+            raise HiggsfieldError("ambiguous", "Higgsfield accepted the request without a request_id")
+        status = result.get("status")
+        return Submitted(
+            request_id=result["request_id"],
+            status=status if status in ("queued", "in_progress", *TERMINAL_STATUSES) else "queued",
+            status_url=result.get("status_url"),
+            cancel_url=result.get("cancel_url"),
+            correlation_id=result.get("_correlation_id"),
+            raw=result,
+            polled=polled(result) if status in TERMINAL_STATUSES else None,
+        )
+
+    async def poll_job(self, request_id: str, status_url: str | None = None) -> Polled:
+        return polled(await self.status(request_id, status_url))
+
+    async def cancel_job(self, request_id: str, cancel_url: str | None = None) -> None:
+        await self.cancel(request_id, cancel_url)
+
+    # --- API de Higgsfield ---------------------------------------------------------------------
 
     def _own_url(self, url: str | None, fallback: str) -> str:
         """Usa la URL que devolvió la API, pero solo si apunta a la API (no filtrar credenciales)."""
@@ -102,7 +157,15 @@ class HiggsfieldClient:
             # La petición pudo llegar: reintentarla podría duplicar la generación y el cobro.
             raise HiggsfieldError("ambiguous", f"Submission got no response ({type(exc).__name__})") from exc
         _raise_for(response)
-        return {**response.json(), "_correlation_id": response.headers.get("x-correlation-id")}
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise HiggsfieldError(
+                "ambiguous", "Higgsfield accepted the request with an unreadable answer"
+            ) from exc
+        if not isinstance(body, dict):
+            raise HiggsfieldError("ambiguous", "Higgsfield accepted the request with an unexpected answer")
+        return {**body, "_correlation_id": response.headers.get("x-correlation-id")}
 
     async def status(self, request_id: str, status_url: str | None = None) -> dict:
         url = self._own_url(status_url, f"/requests/{quote(request_id)}/status")
@@ -172,20 +235,6 @@ class HiggsfieldClient:
             )
         return ticket["public_url"]
 
-    async def download(self, url: str, dest: Path) -> tuple[int, str | None]:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_suffix(dest.suffix + ".part")
-        async with self._plain.stream("GET", url, follow_redirects=True) as response:
-            response.raise_for_status()
-            size = 0
-            with tmp.open("wb") as fh:
-                async for chunk in response.aiter_bytes():
-                    fh.write(chunk)
-                    size += len(chunk)
-            content_type = response.headers.get("content-type")
-        tmp.replace(dest)
-        return size, content_type
-
 
 def extract_outputs(result: dict) -> list[dict]:
     """Normaliza `images`, `video`, `audio`, `audios` y artefactos extra (zip, mov, fbx…) a una lista."""
@@ -201,3 +250,14 @@ def extract_outputs(result: dict) -> list[dict]:
                 seen.add(item["url"])
                 outputs.append({"kind": kind, "url": item["url"], "content_type": item.get("content_type")})
     return outputs
+
+
+def polled(result: dict) -> Polled:
+    """Normaliza una respuesta de estado de Higgsfield."""
+    status = result.get("status")
+    if status in TERMINAL_STATUSES:
+        error = result.get("error")
+        if status == "nsfw":
+            error = error or "Content moderation rejected the input or output (not charged)"
+        return Polled(status, extract_outputs(result), error, result)
+    return Polled(status if status in ("queued", "in_progress") else "queued", raw=result)

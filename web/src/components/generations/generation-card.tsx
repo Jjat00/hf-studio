@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { Locale } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
-import { modelLabel, outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
+import { formatUsd, modelLabel, outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const RATIO: Record<string, string> = {
@@ -53,6 +53,18 @@ export function AudioPlayer({ src }: { src: string }) {
       <audio src={src} controls preload="metadata" className="w-full" />
     </div>
   );
+}
+
+// Nombres de los proveedores (registry.py); uno nuevo se muestra con su id hasta añadirlo aquí.
+export const PROVIDER_TITLES: Record<string, string> = { higgsfield: "Higgsfield", apimart: "APIMart", kie: "KIE" };
+
+export function providerTitle(name: string | undefined) {
+  return name ? (PROVIDER_TITLES[name] ?? name) : "";
+}
+
+/** Opción actual del plan: en awaiting_approval, la que espera que se apruebe su precio. */
+export function currentOption(g: Generation) {
+  return (g.plan ?? []).find((o) => o.provider === g.provider);
 }
 
 // Nombres legibles de los clientes habituales; cualquier otro se muestra tal cual.
@@ -127,6 +139,8 @@ export function GenerationCard({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={outputSrc(main)} alt={prompt} className="block w-full" loading="lazy" />
         )
+      ) : g.status === "awaiting_approval" ? (
+        <ApprovalPanel g={g} />
       ) : failed ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
           {g.status === "nsfw" ? (
@@ -188,7 +202,7 @@ export function GenerationCard({
           <Trash2 className="size-4" />
         </IconButton>
       )}
-      {(g.status === "pending" || g.status === "queued") && (
+      {(g.status === "pending" || g.status === "queued" || g.status === "awaiting_approval") && (
         <IconButton
           label={t.generation.cancel}
           disabled={busy}
@@ -208,6 +222,12 @@ export function GenerationCard({
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-fg-3">
       <span className="rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, locale, models)}</span>
       {source && <span className="rounded-md bg-lime/10 px-1.5 py-0.5 font-medium text-lime">{source}</span>}
+      {g.provider && !LOCAL_MODELS[g.model] && (
+        <span className="rounded-md bg-glass px-1.5 py-0.5" title={g.attempts?.length ? g.attempts.map((a) => `${providerTitle(a.provider)}: ${a.error}`).join("\n") : undefined}>
+          {t.cost.via(providerTitle(g.provider))}
+          {g.cost_usd != null ? ` · ${formatUsd(g.cost_usd)}` : ""}
+        </span>
+      )}
       {["resolution", "duration", "aspect_ratio"].map((k) =>
         g.input[k] !== undefined ? (
           <span key={k} className="rounded-md bg-glass px-1.5 py-0.5">
@@ -249,6 +269,63 @@ export function GenerationCard({
         <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
       </div>
     </article>
+  );
+}
+
+/** El proveedor más barato falló sin cobrar y el siguiente cuesta más: aprobar ese precio o cancelar. */
+function ApprovalPanel({ g }: { g: Generation }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const next = currentOption(g);
+  const price = next?.usd != null ? `${next.kind === "approx" ? "~" : ""}${formatUsd(next.usd)}` : t.approval.unknownPrice;
+  async function act(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
+      <AlertTriangle className="size-7 text-warning" />
+      <p className="text-sm font-semibold">{t.approval.title}</p>
+      {g.error && <p className="line-clamp-3 max-w-sm text-xs text-fg-3">{g.error}</p>}
+      {next?.reserve_usd != null && <p className="max-w-sm text-xs text-warning">{t.cost.reserve(formatUsd(next.reserve_usd))}</p>}
+      <div className="mt-1 flex gap-2">
+        <button
+          type="button"
+          disabled={busy || !next}
+          onClick={() =>
+            next &&
+            act(() =>
+              // Sin precio, el botón dice explícitamente que se aprueba un costo desconocido (sin tope).
+              next.usd != null
+                ? studio.approve(g.id, next.usd, next.reserve_usd ?? null)
+                : studio.approve(g.id, null, next.reserve_usd ?? null, true),
+            )
+          }
+          className="rounded-lg bg-lime px-3 py-1.5 text-xs font-bold text-black disabled:opacity-50"
+        >
+          {next?.usd != null
+            ? t.approval.approve(`${price} · ${providerTitle(next?.provider)}`)
+            : t.approval.approveUnknown(providerTitle(next?.provider))}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => act(() => studio.cancel(g.id))}
+          className="rounded-lg bg-glass px-3 py-1.5 text-xs font-semibold text-fg-2 disabled:opacity-50"
+        >
+          {t.approval.cancel}
+        </button>
+      </div>
+      {error && <p className="text-xs text-danger">{error}</p>}
+    </div>
   );
 }
 

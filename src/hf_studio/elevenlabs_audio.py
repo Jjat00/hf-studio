@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from .audio import PROTOCOLS, duration, has_audio
+from .audio import duration, guarded, has_audio
 from .voice import ElevenLabsClient, VoiceError, _run
 
 # Categorías de la sonoteca (sounds.LABELS); el agente puede elegir una al generar.
@@ -221,7 +221,7 @@ async def run(client: ElevenLabsClient, body: BaseModel, out: Path, source: str 
         with tempfile.TemporaryDirectory(prefix="hfs-isolate-") as tmp:
             wav = Path(tmp) / "input.wav"
             code, err = await _run(
-                "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-i", source,
+                "ffmpeg", "-y", "-v", "error", *guarded(source),
                 "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", str(wav),
             )  # fmt: skip
             if code != 0:

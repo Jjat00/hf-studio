@@ -11,7 +11,8 @@ owner's credits.
 1. Prerequisites: `uv`, and for the UI also Node.js 20+ and `pnpm`. `ffmpeg` is needed for the audio features
    (on macOS `brew install ffmpeg-full`: the plain formula lacks the `rubberband` filter).
 2. The only required secret is the Higgsfield key (`HF_API_KEY`, format `KEY_ID:KEY_SECRET`, from
-   https://console.higgsfield.ai). `ELEVENLABS_API_KEY` is optional and only enables audio. **Ask the user for the
+   https://console.higgsfield.ai). `ELEVENLABS_API_KEY` is optional and only enables audio.
+   `APIMART_API_KEY` and `KIE_API_KEY` are optional and make videos cheaper (`uv run hf-studio providers` shows them). **Ask the user for the
    keys; never invent, print or commit them.** They go in `.env` (created from `.env.example`, git-ignored).
 3. Run `uv run hf-studio setup --no-input` once `.env` has the key. It validates the key without spending credits and
    writes the UI key to `web/.env.local`. A human can just run `./dev.sh` (Windows: `.\dev`), which asks for the
@@ -28,10 +29,15 @@ owner's credits.
 
 ## Use it through MCP
 
+- Generations go to the cheapest provider with a key (Higgsfield, APIMart, KIE). `estimate_cost` returns every
+  option; a generation in `awaiting_approval` needs the user's OK on its new price (`cost_usd`, and `reserve_usd` if
+  the provider holds more upfront). Approving is separate and takes no `quote_id`: `approve_fallback` with `max_usd`
+  and `max_reserve_usd`, or `accept_unknown_cost=True` only if the user accepts an unknown cost (no cap without
+  `max_usd`). `providers_status` shows keys, balances and the links to sign up or top up.
 - Flow: `recommend_models` or `find_models` → `get_model` (read `input_schema` and `studio_notes`) → `upload_media`
   for local files → `estimate_cost` → **tell the user the cost and wait for their OK** → `generate` with that
   `quote_id` → `get_generation` until `terminal` is true → `download_outputs`.
-- Every paid tool needs a single-use `quote_id` (15 min) from quoting the exact same request. Paid tools say
+- Every tool that starts a paid run needs a single-use `quote_id` (15 min) from quoting the exact same request. Paid tools say
   "spends credits" in their title. Never pass `confirm_unknown_cost=True` unless the user explicitly accepts an
   unknown price.
 - After an ambiguous error, check `list_generations` before calling `generate` again, and reuse the same
@@ -48,7 +54,8 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
 
 - Map: `api.py` (REST routes), `service.py` (generation logic), `worker.py` (queue and polling),
-  `higgsfield.py` (Higgsfield client), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
+  `higgsfield.py` (Higgsfield client), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
+  provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
   regenerated with `hf-studio sync-catalog`).

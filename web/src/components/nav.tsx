@@ -30,6 +30,7 @@ const SECONDARY: Item[] = [
   { href: "/audio", label: "audio", match: (p) => p.startsWith("/audio") },
   { href: "/sounds", label: "sounds", match: (p) => p.startsWith("/sounds") },
   { href: "/history", label: "history", match: (p) => p.startsWith("/history") },
+  { href: "/providers", label: "providers", match: (p) => p.startsWith("/providers") },
 ];
 
 function NavLinks() {

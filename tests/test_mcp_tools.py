@@ -36,6 +36,8 @@ TOOLS = {
     "list_sounds": (False, False, True, False),  # registra en la sonoteca los audios que falten
     "label_sound": (False, True, True, False),
     "import_elevenlabs_history": (False, False, True, True),
+    "approve_fallback": SPEND,
+    "providers_status": READ_EXT,
 }
 
 

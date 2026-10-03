@@ -22,7 +22,14 @@ def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(setup, "ENV_EXAMPLE", tmp_path / ".env.example")
     monkeypatch.setattr(setup, "WEB_ENV", tmp_path / "web" / ".env.local")
     monkeypatch.setattr(setup, "WEB_ENV_EXAMPLE", tmp_path / "web" / ".env.example")
-    for var in ("HF_API_KEY", "HF_API_KEY_ID", "HF_API_KEY_SECRET", "ELEVENLABS_API_KEY"):
+    for var in (
+        "HF_API_KEY",
+        "HF_API_KEY_ID",
+        "HF_API_KEY_SECRET",
+        "ELEVENLABS_API_KEY",
+        "APIMART_API_KEY",
+        "KIE_API_KEY",
+    ):
         monkeypatch.delenv(var, raising=False)
     return tmp_path
 
@@ -47,11 +54,12 @@ def test_set_env_replaces_active_or_commented_lines_and_appends_new_ones(tmp_pat
 
 
 def test_first_run_copies_the_example_and_asks_for_the_keys(repo, monkeypatch):
-    answers = iter(["id:secret", ""])  # Higgsfield sí, ElevenLabs no
+    answers = iter(["id:secret", "", "am-key", ""])  # Higgsfield sí, ElevenLabs no, APIMart sí, KIE no
     monkeypatch.setattr(setup.getpass, "getpass", lambda prompt: next(answers))
     assert setup.ensure_env(interactive=True)
     values = setup.read_env(repo / ".env")
     assert values["HF_API_KEY"] == "id:secret" and values["ELEVENLABS_API_KEY"] == ""
+    assert values["APIMART_API_KEY"] == "am-key" and "KIE_API_KEY" not in values
 
 
 def test_without_a_terminal_it_never_prompts(repo, monkeypatch):
@@ -222,7 +230,8 @@ def test_elevenlabs_is_offered_on_the_first_run_only(repo, monkeypatch):
     )  # .env ya existía: no se pregunta en cada arranque
     (repo / ".env").unlink()
     monkeypatch.setenv("HF_API_KEY", "id:secret")
-    assert setup.ensure_env(interactive=True) and asked == ["ELEVENLABS_API_KEY: "]
+    assert setup.ensure_env(interactive=True)
+    assert asked == ["ELEVENLABS_API_KEY: ", "APIMART_API_KEY: ", "KIE_API_KEY: "]
 
 
 def test_launching_the_agent_cli_can_fail_without_a_traceback(monkeypatch):

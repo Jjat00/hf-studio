@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,7 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Configuración leída del entorno o de `.env`. Las credenciales de Higgsfield nunca salen del servidor."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # `extra="allow"` guarda las variables de `.env` sin campo propio (claves de proveedores, ver `secret`).
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     # La consola de Higgsfield entrega la credencial como una sola cadena `KEY_ID:KEY_SECRET`
     # (el SDK oficial la lee así). También se aceptan las dos partes por separado.
@@ -43,6 +45,10 @@ class Settings(BaseSettings):
     cors_origins: str = ""
     worker_enabled: bool = True
 
+    # Claves de otros proveedores por nombre de variable (APIMART_API_KEY, KIE_API_KEY…). Vacío: se leen
+    # del entorno o de `.env` con `secret()`, así un proveedor nuevo no necesita un campo aquí.
+    provider_keys: dict[str, str] = {}
+
     @property
     def hf_configured(self) -> bool:
         return bool(self.hf_credential)
@@ -55,6 +61,16 @@ class Settings(BaseSettings):
             return single.removeprefix("Key ").strip()
         secret = self.hf_api_key_secret.get_secret_value()
         return f"{self.hf_api_key_id}:{secret}" if self.hf_api_key_id and secret else ""
+
+    def secret(self, env_var: str) -> str:
+        """Valor de una variable de proveedor: `provider_keys`, luego el entorno, luego `.env`."""
+        if env_var in self.provider_keys:
+            return self.provider_keys[env_var]
+        if env_var in os.environ:
+            return os.environ[env_var]
+        extra = self.model_extra or {}
+        value = extra.get(env_var.lower(), extra.get(env_var))
+        return value if isinstance(value, str) else ""
 
     @property
     def cors_origin_list(self) -> list[str]:

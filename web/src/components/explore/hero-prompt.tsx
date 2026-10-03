@@ -42,7 +42,13 @@ export function HeroPrompt() {
     setError(null);
     key.current ??= crypto.randomUUID();
     try {
-      await studio.generate(MODEL, { prompt, duration, aspect_ratio: ratio, generate_audio: audio, resolution: "720p" }, key.current);
+      await studio.generate(
+        MODEL,
+        { prompt, duration, aspect_ratio: ratio, generate_audio: audio, resolution: "720p" },
+        key.current,
+        false,
+        cost?.value?.usd ?? null,
+      );
       router.push("/video?tab=create&mode=text");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

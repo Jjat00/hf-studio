@@ -89,7 +89,7 @@ def test_concurrent_redeems_accept_a_single_key(monkeypatch):
 
     call, _ = _fake({"usd": 1.2, "complete": True, "missing": []})
     monkeypatch.setattr(mcp_server, "_call", call)
-    payload = {"model": "m", "input": {"prompt": "x"}, "hints": {}}
+    payload = {"model": "m", "input": {"prompt": "x"}, "hints": {}, "provider": None}
     q = mcp_server.estimate_cost("m", {"prompt": "x"})["quote_id"]
     start, accepted = threading.Barrier(8), []
 
@@ -171,3 +171,67 @@ def test_audio_tools_quote_then_run_with_the_api_quote(monkeypatch):
                          "model_id": "eleven_v3", "audio_quote": "aq_1"})  # fmt: skip
     with pytest.raises(ToolError):  # otra petición no puede usar esa cotización
         mcp_server.sound_effect("scream", quote_id=q["quote_id"])
+
+
+def test_generate_sends_the_quoted_price_as_the_ceiling(monkeypatch):
+    sent = []
+
+    def call(method, path, **kw):
+        if path == "/v1/estimate":
+            return {"usd": 0.71, "complete": True, "missing": [], "provider": "apimart"}
+        sent.append(kw["json"])
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.estimate_cost("m", {"prompt": "x"}, provider="kie")["quote_id"]
+    with pytest.raises(ToolError, match="mismatched"):  # el proveedor forma parte de la cotización
+        mcp_server.generate("m", {"prompt": "x"}, quote_id=q)
+    mcp_server.generate("m", {"prompt": "x"}, quote_id=q, provider="kie")
+    assert sent[0]["max_usd"] == 0.71 and sent[0]["provider"] == "kie"
+
+
+def test_the_approved_ceiling_survives_a_concurrent_quote_cleanup(monkeypatch):
+    """Revisión 29: el tope se copia al canjear; si la cotización desaparece después, se envía igual."""
+    sent = []
+
+    def call(method, path, **kw):
+        if path == "/v1/estimate":
+            return {"usd": 0.71, "complete": True, "missing": [], "reserve_usd": 4.9}
+        mcp_server._quotes.clear()  # limpieza concurrente justo antes de enviar
+        sent.append(kw["json"])
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.estimate_cost("m", {"prompt": "x"})["quote_id"]
+    mcp_server.generate("m", {"prompt": "x"}, quote_id=q)
+    assert sent[0]["max_usd"] == 0.71 and sent[0]["max_reserve_usd"] == 4.9
+
+
+def test_accepting_an_unknown_batch_total_sends_no_ceiling(monkeypatch):
+    """Revisión 29: un subtotal incompleto no se convierte en presupuesto."""
+    sent = []
+
+    def call(method, path, **kw):
+        if kw["json"].get("dry_run"):
+            return {"total": {"usd": 0.0, "complete": False}, "items": []}
+        sent.append(kw["json"])
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.generate_batch(ITEMS, dry_run=True)["quote_id"]
+    mcp_server.generate_batch(ITEMS, dry_run=False, quote_id=q, confirm_unknown_cost=True)
+    assert sent[0]["max_total_usd"] is None and sent[0]["accept_unknown_cost"] is True
+
+
+def test_approve_fallback_can_accept_an_unknown_cost(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        mcp_server, "_call", lambda method, path, **kw: sent.append((path, kw["json"])) or {"ok": True}
+    )
+    mcp_server.approve_fallback("g1", accept_unknown_cost=True)
+    mcp_server.approve_fallback("g2", max_usd=1.0, max_reserve_usd=4.9)
+    assert sent[0] == (
+        "/v1/generations/g1/approve",
+        {"max_usd": None, "max_reserve_usd": None, "accept_unknown_cost": True},
+    )
+    assert sent[1][1] == {"max_usd": 1.0, "max_reserve_usd": 4.9, "accept_unknown_cost": False}

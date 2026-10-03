@@ -25,7 +25,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
-import { costShort, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
+import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { Masonry } from "@/components/masonry";
@@ -251,14 +251,30 @@ export function Studio({ output }: { output: "video" | "image" }) {
     setFormError(null);
     idempotency.current ??= crypto.randomUUID();
     try {
-      const g = await studio.generate(detail.id, cleanInput(values), idempotency.current, canKeepAudio && keepAudio);
+      const g = await studio.generate(
+        detail.id,
+        cleanInput(values),
+        idempotency.current,
+        canKeepAudio && keepAudio,
+        current?.value?.usd ?? null,
+        JSON.parse(hintsKey) as Record<string, number>,
+        current?.value?.reserve_usd ?? null,
+        // Llegar aquí sin precio completo significa que el usuario confirmó un costo desconocido.
+        !costAllowsDirectSubmit(current?.value ?? null),
+      );
       add(g);
       setView("history");
       idempotency.current = null;
     } catch (e) {
-      if (e instanceof StudioError && e.details) {
+      const fields = fieldErrors(e);
+      if (e instanceof StudioError && e.code === "cost_changed") {
+        // Otro precio que el que se mostró: se vuelve a cotizar y el usuario decide de nuevo.
+        const fresh = await studio.estimate(detail.id, cleanInput(values), JSON.parse(hintsKey)).catch(() => null);
+        setEstimated({ key: estimateKey, value: fresh });
+        setFormError(fresh?.usd != null ? t.cost.priceChanged(formatUsd(fresh.usd)) : e.message);
+      } else if (fields) {
         const map: Record<string, string> = {};
-        for (const d of e.details) map[d.path.split("/")[0]] = d.message;
+        for (const d of fields) map[d.path.split("/")[0]] = d.message;
         setErrors(map);
         setFormError(map["(root)"] ?? t.studio.checkFields);
       } else {

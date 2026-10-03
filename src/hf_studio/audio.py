@@ -63,13 +63,22 @@ async def _run(*args: str) -> tuple[int, str]:
     return proc.returncode or 0, (out or err).decode(errors="replace").strip()
 
 
-# ffmpeg solo abre archivos locales y HTTPS (nada de concat:, data:, subfile: ni http plano).
-PROTOCOLS = "file,https,tls,tcp,crypto"
+# ffmpeg y ffprobe solo leen archivos locales y solo con demuxers de contenedores de audio y video: nada de
+# red, manifiestos (DASH/HLS), listas (concat) ni secuencias de imágenes (revisiones 28 y 29 de Codex). Las
+# fuentes remotas se descargan antes con media.cached_source. Las opciones van antes de CADA -i: en ffmpeg
+# solo afectan a la entrada que las sigue.
+FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,wav,mp3,ogg,flac,aac"
+PROBE_GUARD = ("-protocol_whitelist", "file", "-format_whitelist", FORMATS)
+
+
+def guarded(path: str) -> list[str]:
+    """Entrada de ffmpeg con las restricciones aplicadas a ella."""
+    return [*PROBE_GUARD, "-i", path]
 
 
 async def has_audio(source: str, ffprobe: str = "ffprobe") -> bool:
     code, out = await _run(
-        ffprobe, "-v", "error", "-protocol_whitelist", PROTOCOLS, "-select_streams", "a",
+        ffprobe, "-v", "error", *PROBE_GUARD, "-select_streams", "a",
         "-show_entries", "stream=index", "-of", "csv=p=0", source,
     )  # fmt: skip
     return code == 0 and bool(out)
@@ -77,7 +86,7 @@ async def has_audio(source: str, ffprobe: str = "ffprobe") -> bool:
 
 async def duration(source: str, ffprobe: str = "ffprobe") -> float | None:
     code, out = await _run(
-        ffprobe, "-v", "error", "-protocol_whitelist", PROTOCOLS, "-show_entries", "format=duration",
+        ffprobe, "-v", "error", *PROBE_GUARD, "-show_entries", "format=duration",
         "-of", "csv=p=0", source,
     )  # fmt: skip
     try:
@@ -98,7 +107,7 @@ async def mux_source_audio(video: Path, source: str, ffmpeg: str = "ffmpeg", ffp
         before = await duration(str(video), ffprobe)
         tmp = video.with_name(f"{video.stem}.mux{video.suffix}")
         code, out = await _run(
-            ffmpeg, "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-i", str(video), "-i", source,
+            ffmpeg, "-y", "-v", "error", *guarded(str(video)), *guarded(source),
             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-af", "apad", "-c:a", "aac", "-b:a", "192k",
             "-shortest", "-movflags", "+faststart", str(tmp),
         )  # fmt: skip

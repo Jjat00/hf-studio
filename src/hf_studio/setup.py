@@ -182,9 +182,17 @@ def ensure_env_file() -> bool:
 def env_values() -> dict[str, str]:
     """`.env` más las variables del proceso, que tienen prioridad (como en config.Settings)."""
     from_env = {
-        k: v for k, v in os.environ.items() if k.startswith(("HF_API_KEY", "ELEVENLABS_API_KEY")) and v
+        k: v
+        for k, v in os.environ.items()
+        if (k.startswith(("HF_API_KEY", "ELEVENLABS_API_KEY")) or k in _provider_vars()) and v
     }
     return {**read_env(ENV), **from_env}
+
+
+def _provider_vars() -> set[str]:
+    from .providers.registry import PROVIDERS
+
+    return {cls.env_var for cls in PROVIDERS.values()}
 
 
 def has_hf_key() -> bool:
@@ -218,7 +226,45 @@ def ensure_env(interactive: bool, validate=lambda key: 0) -> bool:
         if eleven:
             print(f"  Got {preview(eleven)}.")
             set_env(ENV, "ELEVENLABS_API_KEY", eleven)
+    if has_hf:
+        ask_optional_providers()
     return has_hf
+
+
+def ask_optional_providers(validate=None) -> None:
+    """Ofrece los proveedores opcionales sin clave (APIMart, KIE…), con el enlace de registro y el de la
+    clave. Con más proveedores, cada video sale por el más barato y hay respaldo si uno falla."""
+    from .providers.registry import PROVIDERS
+
+    missing = [cls for cls in PROVIDERS.values() if not cls.required and not env_values().get(cls.env_var)]
+    if not missing:
+        return
+    print(
+        "\nOptional providers: each one you add can make videos cheaper (HF Studio sends every video to the"
+        " cheapest provider with a key) and backs up the others. Press Enter to skip any of them;"
+        " later: `hf-studio providers --add NAME`."
+    )
+    for cls in missing:
+        ask_provider_key(cls, validate)
+
+
+def ask_provider_key(cls, validate=None) -> bool:
+    """Pide y guarda la clave de un proveedor. `validate(cls, key)` devuelve True, False o None (no se pudo
+    comprobar, se guarda igual)."""
+    print(f"\n{cls.title}: {cls.blurb}\n  Sign up: {cls.signup_url}\n  Create the key: {cls.key_url}")
+    key = clean_key(masked_input(f"{cls.env_var}: "))
+    if not key:
+        return False
+    print(f"  Got {preview(key)}.")
+    if validate is not None:
+        valid = validate(cls, key)
+        if valid is False:
+            print(f"  {cls.title} rejected this key; not saved.")
+            return False
+        if valid is None:
+            print(f"  Could not check it with {cls.title}; saving it anyway.")
+    set_env(ENV, cls.env_var, key)
+    return True
 
 
 def replace_hf_key(validate) -> bool:

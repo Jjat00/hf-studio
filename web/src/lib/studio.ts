@@ -1,4 +1,4 @@
-import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, Sound, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -39,10 +39,15 @@ export class StudioError extends Error {
     message: string,
     public status: number,
     public code?: string,
-    public details?: { path: string; message: string }[],
+    public details?: { path: string; message: string }[] | Record<string, unknown>,
   ) {
     super(message);
   }
+}
+
+/** Errores por campo (422 invalid_input); otros errores traen detalles que no son una lista. */
+export function fieldErrors(e: unknown): { path: string; message: string }[] | null {
+  return e instanceof StudioError && Array.isArray(e.details) ? e.details : null;
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -72,12 +77,43 @@ export const studio = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model, input, hints }),
     }),
-  generate: (model: string, input: Record<string, unknown>, idempotencyKey: string, keepSourceAudio = false) =>
+  /** `maxUsd`: el precio que vio el usuario; si la opción más barata subió, la API responde 409 cost_changed. */
+  generate: (
+    model: string,
+    input: Record<string, unknown>,
+    idempotencyKey: string,
+    keepSourceAudio = false,
+    maxUsd?: number | null,
+    hints: Record<string, number> = {},
+    maxReserveUsd?: number | null,
+    acceptUnknownCost = false,
+  ) =>
     call<Generation>("/v1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ model, input, keep_source_audio: keepSourceAudio }),
+      body: JSON.stringify({
+        model,
+        input,
+        keep_source_audio: keepSourceAudio,
+        hints,
+        ...(maxUsd != null ? { max_usd: maxUsd } : {}),
+        ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+        ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
+      }),
     }),
+  /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
+  /** `acceptUnknown`: el usuario aceptó explícitamente un precio desconocido (sin `maxUsd`, sin tope). */
+  approve: (id: string, maxUsd: number | null, maxReserveUsd?: number | null, acceptUnknown = false) =>
+    call<Generation>(`/v1/generations/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(maxUsd != null ? { max_usd: maxUsd } : {}),
+        ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+        ...(acceptUnknown ? { accept_unknown_cost: true } : {}),
+      }),
+    }),
+  providers: () => call<{ providers: ProviderInfo[] }>("/v1/providers"),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
   freeVoices: () => call<{ voices: FreeVoice[] }>("/v1/voice/free-voices?lang=es"),
   /** URL del MP3 de una voz gratis diciendo el texto (gratis, se guarda en caché en el servidor). */
@@ -132,11 +168,24 @@ export const studio = {
       `/v1/presets/${slug}/run`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ variables, dry_run: true, hints }) },
     ),
-  runPreset: (slug: string, variables: Record<string, unknown>, idempotencyKey: string) =>
+  /** `maxUsd`: el precio que se mostró (dry_run); si subió, la API responde 409 cost_changed. */
+  runPreset: (
+    slug: string,
+    variables: Record<string, unknown>,
+    idempotencyKey: string,
+    maxUsd?: number | null,
+    maxReserveUsd?: number | null,
+    acceptUnknownCost = false,
+  ) =>
     call<Generation>(`/v1/presets/${slug}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ variables }),
+      body: JSON.stringify({
+        variables,
+        ...(maxUsd != null ? { max_usd: maxUsd } : {}),
+        ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+        ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
+      }),
     }),
   savePreset: (generationId: string, slug: string, title: string) =>
     call<Preset>(`/v1/presets/from-generation/${generationId}`, {
@@ -166,10 +215,28 @@ export type Estimate = {
   basis: string;
   missing: string[];
   description: string | null;
+  /** Proveedor elegido (el más barato) y el resto de opciones. */
+  provider?: string | null;
+  /** Retención inicial del elegido, mayor que su costo final (se devuelve la diferencia). */
+  reserve_usd?: number | null;
+  options?: EstimateOption[];
+  excluded?: { provider: string; title: string; reason: string; usd?: number | null; key_url?: string; billing_url?: string }[];
+  savings_vs_higgsfield?: { usd: number; pct: number } | null;
+};
+
+export type EstimateOption = Omit<Estimate, "options" | "excluded" | "savings_vs_higgsfield" | "provider"> & {
+  provider: string;
+  title: string;
+  model: string;
+  official: boolean;
+  notes: string[];
+  /** Débito inicial mayor que el costo final (el proveedor devuelve la diferencia). */
+  reserve_usd?: number | null;
 };
 
 /** Un costo positivo nunca se muestra como cero: por debajo de una milésima sale «<$0.001». */
 export function formatUsd(usd: number) {
+  if (usd === 0) return "$0.00";
   if (usd > 0 && usd < 0.001) return "<$0.001";
   return usd < 0.01 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`;
 }
@@ -184,6 +251,8 @@ export function approxUsd(usd: number) {
 export function costShort(e: Estimate | null): string | null {
   if (!e) return null;
   if (e.kind === "exact" && e.credits !== null) return `${+e.credits.toFixed(3)}`;
+  // Precio exacto de otro proveedor (APIMart, KIE): viene en USD, sin créditos de Higgsfield.
+  if (e.kind === "exact" && e.usd !== null) return formatUsd(e.usd);
   if (e.kind === "approx" && e.usd !== null) return approxUsd(e.usd);
   return null;
 }

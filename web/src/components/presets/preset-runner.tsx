@@ -12,7 +12,7 @@ import { CostPanel, costAllowsDirectSubmit } from "@/components/studio/cost-pane
 import { MediaSlot } from "@/components/studio/media-slot";
 import { localizePreset, presetOption } from "@/lib/i18n/presets";
 import { probeDuration } from "@/lib/media";
-import { costShort, studio, StudioError, type Estimate } from "@/lib/studio";
+import { costShort, fieldErrors, studio, type Estimate } from "@/lib/studio";
 import type { Preset } from "@/lib/types";
 
 const FALLBACK = { video: "/art/text-to-video.webp", image: "/art/text-to-image.webp" };
@@ -92,12 +92,21 @@ export function PresetRunner({ slug }: { slug: string }) {
     setFormError(null);
     idempotency.current ??= crypto.randomUUID();
     try {
-      add(await studio.runPreset(preset.slug, values, idempotency.current));
+      add(
+        await studio.runPreset(
+          preset.slug,
+          values,
+          idempotency.current,
+          current?.estimate?.usd ?? null,
+          current?.estimate?.reserve_usd ?? null,
+          // Llegar aquí sin precio completo significa que el usuario confirmó un costo desconocido.
+          !costAllowsDirectSubmit(current?.estimate ?? null),
+        ),
+      );
       idempotency.current = null;
     } catch (e) {
-      if (e instanceof StudioError && e.details) {
-        setErrors(Object.fromEntries(e.details.map((d) => [d.path.split("/")[0], d.message])));
-      }
+      const fields = fieldErrors(e);
+      if (fields) setErrors(Object.fromEntries(fields.map((d) => [d.path.split("/")[0], d.message])));
       setFormError(e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);

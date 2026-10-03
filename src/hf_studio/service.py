@@ -13,6 +13,9 @@ from .catalog import Catalog
 from .config import Settings
 from .db import ACTIVE, ApiClient, Job, Upload, utcnow
 
+# «No se indicó» frente a None explícito («sin tope», revisión 32).
+UNSET: object = object()
+
 
 class ServiceError(Exception):
     def __init__(self, status: int, code: str, message: str, details: object = None):
@@ -68,8 +71,15 @@ async def create_generation(
     idempotency_key: str | None = None,
     allow_duplicate: bool = False,
     keep_source_audio: bool = False,
+    plan: list[dict] | None = None,
+    max_usd: float | None | object = UNSET,
+    max_reserve_usd: float | None | object = UNSET,
+    provider: str | None = None,
 ) -> tuple[Job, bool]:
-    """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente."""
+    """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente.
+
+    `plan` (routing.Plan.stored) dice por qué proveedores probar y en qué orden; sin él va a Higgsfield.
+    `max_usd` es lo aprobado: un respaldo que cueste más pedirá una nueva aprobación."""
     model = check_input(catalog, model_id, arguments)
     if keep_source_audio and not supports_source_audio(model):
         raise ServiceError(
@@ -82,9 +92,11 @@ async def create_generation(
             "keep_source_audio needs a video_url from /v1/uploads (upload_media) or from one of your generations",
         )
     # La opción cambia el resultado, así que forma parte de la huella (deduplicado e idempotencia).
-    digest = input_hash(
-        model["id"], {**arguments, "__keep_source_audio": True} if keep_source_audio else arguments
-    )
+    marked = {**arguments, "__keep_source_audio": True} if keep_source_audio else dict(arguments)
+    if provider:
+        # Forzar un proveedor es otra petición: no se deduplica con la misma entrada en otro proveedor.
+        marked["__provider"] = provider
+    digest = input_hash(model["id"], marked)
 
     if idempotency_key:
         existing = await session.scalar(
@@ -130,6 +142,15 @@ async def create_generation(
         input_hash=digest,
         idempotency_key=idempotency_key,
         keep_source_audio=keep_source_audio,
+        plan=plan or [],
+        provider=plan[0]["provider"] if plan else "higgsfield",
+        # Sin indicar, se aprueba lo que cuesta ahora; None explícito es «sin tope» (precio desconocido
+        # aceptado). Las retenciones se tratan igual.
+        max_usd=(plan[0].get("usd") if plan else None) if max_usd is UNSET else max_usd,
+        max_reserve_usd=(plan[0].get("reserve_usd") if plan else None)
+        if max_reserve_usd is UNSET
+        else max_reserve_usd,
+        attempts_log=[],
     )
     session.add(job)
     try:
