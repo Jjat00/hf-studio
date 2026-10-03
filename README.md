@@ -20,6 +20,8 @@ so it always has a price to show you before it generates.
 
 ## Why
 
+- **The cheapest provider for each video:** the same model through Higgsfield, APIMart or KIE, quoted on all of
+  them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - **One place for 82 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
   (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand.
 - **Agents that quote before they spend.** Every paid MCP tool requires a single-use `quote_id` from a prior quote of
@@ -28,6 +30,35 @@ so it always has a price to show you before it generates.
   `Idempotency-Key`, a local queue that respects your account's concurrency, and local copies of every output
   (Higgsfield only keeps them for 7 days). Higgsfield jobs keep being tracked after a restart; audio jobs cut off by a
   restart are marked as failed, not resumed.
+
+## Cheaper with more providers
+
+The same model is often sold by several providers at very different prices. HF Studio can send each generation to
+the cheapest provider that offers **the exact same model and settings**:
+
+| Provider | Key | What it adds |
+| --- | --- | --- |
+| [Higgsfield](https://higgsfield.ai) | `HF_API_KEY`, required | Every catalog model, and it stores your input files (uploading is free) |
+| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance and Wan |
+| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo and MiniMax |
+
+- **Quote every provider, run the cheapest.** `/v1/estimate`, the UI and `estimate_cost` show every option, the
+  savings against Higgsfield and why a provider was left out (no key, no balance, or no exact equivalent for your
+  settings). Prices come from each reseller's public price list, refreshed daily. On 2026-10-03, Seedance 2.0 at
+  720p for 5 s cost 0.71 USD on APIMart, 1.025 on KIE and 1.51 on Higgsfield.
+- **Same model, never a substitute.** A setting a provider cannot reproduce (a fixed seed, a bitrate, an aspect
+  ratio…) leaves that provider out instead of being dropped.
+- **Fallback without double charges.** If a provider rejects the request or the task fails without charging, the
+  next one is tried on its own only if it costs the same or less than what you approved; otherwise the generation
+  waits for your approval. A submission that may have reached the provider (timeout, unclear answer) is never
+  retried anywhere. Before sending, the price is quoted again, and a higher price or a new upfront hold (some
+  providers hold more than they charge and refund the difference) needs your approval.
+- **Add a key:** `uv run hf-studio providers --add apimart` (or `kie`) asks for it, checks it for free and saves it;
+  `--open NAME` opens the page where you create it, and `hf-studio providers` shows status and balances. The UI has a
+  **Providers** page with the same links.
+- **Add a provider (developers):** write a `Provider` subclass in `src/hf_studio/providers/` (key check, submit,
+  poll, optional price list) plus its model table, and list it in `registry.py`. Setup, the UI, the MCP and the
+  worker pick it up from there.
 
 ## Features
 
@@ -66,6 +97,7 @@ Runs natively on Windows, macOS and Linux (and in WSL). CI tests the backend on 
   plain `ffmpeg` formula lacks the `rubberband` filter that the voice effects use (HF Studio finds `ffmpeg-full` on
   its own and warns at startup if the filter is missing).
 - A Higgsfield API key ([console.higgsfield.ai](https://console.higgsfield.ai)). Generating spends your credits.
+- Optional: APIMart and KIE API keys, to make videos cheaper (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - Optional: an ElevenLabs API key ([elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys))
   for voice, effects and music. Pay-as-you-go balance or a plan both work.
 
@@ -109,6 +141,7 @@ Setting it up with an AI agent? Point it to [AGENTS.md](AGENTS.md).
 | `hf-studio create-key NAME` · `list-keys` · `revoke-key NAME` | One `hfs_…` key per client (UI, Claude Code, Codex…) |
 | `hf-studio see-all NAME [--off]` | Lets a client see and manage everyone's generations (meant for the UI) |
 | `hf-studio keep-source-audio ID` | Puts the source video's audio on an existing edit |
+| `hf-studio providers [--add NAME \| --open NAME]` | Providers' status and balance; adds a key or opens the page to create it |
 | `hf-studio check-credentials` | Validates the Higgsfield key without spending |
 | `hf-studio sync-catalog` | Regenerates `catalog.json` from docs.higgsfield.ai |
 

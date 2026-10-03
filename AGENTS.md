@@ -11,7 +11,8 @@ owner's credits.
 1. Prerequisites: `uv`, and for the UI also Node.js 20+ and `pnpm`. `ffmpeg` is needed for the audio features
    (on macOS `brew install ffmpeg-full`: the plain formula lacks the `rubberband` filter).
 2. The only required secret is the Higgsfield key (`HF_API_KEY`, format `KEY_ID:KEY_SECRET`, from
-   https://console.higgsfield.ai). `ELEVENLABS_API_KEY` is optional and only enables audio. **Ask the user for the
+   https://console.higgsfield.ai). `ELEVENLABS_API_KEY` is optional and only enables audio.
+   `APIMART_API_KEY` and `KIE_API_KEY` are optional and make videos cheaper (`uv run hf-studio providers` shows them). **Ask the user for the
    keys; never invent, print or commit them.** They go in `.env` (created from `.env.example`, git-ignored).
 3. Run `uv run hf-studio setup --no-input` once `.env` has the key. It validates the key without spending credits and
    writes the UI key to `web/.env.local`. A human can just run `./dev.sh` (Windows: `.\dev`), which asks for the
@@ -28,6 +29,8 @@ owner's credits.
 
 ## Use it through MCP
 
+- Generations go to the cheapest provider with a key (Higgsfield, APIMart, KIE). `estimate_cost` returns every
+  option; a generation in `awaiting_approval` needs the user's OK on its new price (`approve_fallback`).
 - Flow: `recommend_models` or `find_models` → `get_model` (read `input_schema` and `studio_notes`) → `upload_media`
   for local files → `estimate_cost` → **tell the user the cost and wait for their OK** → `generate` with that
   `quote_id` → `get_generation` until `terminal` is true → `download_outputs`.

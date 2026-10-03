@@ -15,6 +15,35 @@ biblioteca.
 
 ![Estudio de video](docs/img/estudio-video.png)
 
+## Más barato con varios proveedores
+
+El mismo modelo suele venderse en varios proveedores a precios muy distintos. HF Studio puede enviar cada generación
+al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma configuración**:
+
+| Proveedor | Clave | Qué aporta |
+| --- | --- | --- |
+| [Higgsfield](https://higgsfield.ai) | `HF_API_KEY`, obligatoria | Todos los modelos del catálogo; además guarda tus archivos de entrada (subir es gratis) |
+| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, opcional | Suele ser el más barato en Seedance y Wan |
+| [KIE](https://kie.ai) | `KIE_API_KEY`, opcional | Suele ser el más barato en Hailuo y MiniMax |
+
+- **Cotiza en todos y genera en el más barato.** `/v1/estimate`, la UI y `estimate_cost` muestran cada opción, el
+  ahorro frente a Higgsfield y por qué se descartó un proveedor (sin clave, sin saldo o sin equivalente exacto para
+  tu configuración). Los precios salen de la tabla pública de cada revendedor, actualizada a diario. El 2026-10-03,
+  Seedance 2.0 a 720p y 5 s costaba 0,71 USD en APIMart, 1,025 en KIE y 1,51 en Higgsfield.
+- **El mismo modelo, nunca un sustituto.** Un ajuste que un proveedor no puede reproducir (una semilla fija, un
+  bitrate, una relación de aspecto…) deja fuera a ese proveedor en vez de descartarse.
+- **Respaldo sin cobros dobles.** Si un proveedor rechaza el pedido o la tarea falla sin cobrar, el siguiente se
+  prueba solo si cuesta lo mismo o menos que lo aprobado; si no, la generación espera tu aprobación. Un envío que pudo
+  llegar al proveedor (timeout, respuesta dudosa) nunca se reintenta en ninguno. Antes de enviar se vuelve a cotizar,
+  y un precio mayor o una retención inicial nueva (algunos proveedores retienen más de lo que cobran y devuelven la
+  diferencia) necesitan tu aprobación.
+- **Añadir una clave:** `uv run hf-studio providers --add apimart` (o `kie`) la pide, la valida gratis y la guarda;
+  `--open NOMBRE` abre la página donde se crea y `hf-studio providers` muestra estado y saldos. La UI tiene la página
+  **Proveedores** con los mismos enlaces.
+- **Añadir un proveedor (desarrollo):** una subclase de `Provider` en `src/hf_studio/providers/` (comprobar clave,
+  enviar, consultar, tabla de precios opcional) con su tabla de modelos, listada en `registry.py`. Setup, la UI, el
+  MCP y el worker la recogen de ahí.
+
 ## Qué incluye
 
 - **82 endpoints de Higgsfield** (66 de video, 15 de imagen y 1 de referencias personalizadas), cada uno con su JSON
@@ -57,6 +86,7 @@ Funciona nativo en Windows, macOS y Linux (y en WSL). El CI prueba el backend en
   fórmula `ffmpeg` normal no trae el filtro `rubberband` de los efectos de voz (HF Studio encuentra `ffmpeg-full` solo
   y avisa al arrancar si falta el filtro).
 - Una clave de API de Higgsfield ([console.higgsfield.ai](https://console.higgsfield.ai)). Generar consume tus créditos.
+- Opcional: claves de APIMart y KIE, para abaratar los videos (ver [Más barato con varios proveedores](#más-barato-con-varios-proveedores)).
 - Opcional: una clave de API de ElevenLabs ([elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys))
   para voz, efectos y música. Vale con saldo de pago por uso o con un plan.
 
@@ -100,6 +130,7 @@ uv run hf-studio connect claude-code     # o: codex, claude-desktop, json
 | `hf-studio create-key NOMBRE` · `list-keys` · `revoke-key NOMBRE` | Claves `hfs_…` por cliente (UI, Claude Code, Codex…) |
 | `hf-studio see-all NOMBRE [--off]` | Deja que un cliente vea y gestione las generaciones de todos (pensado para la UI) |
 | `hf-studio keep-source-audio ID` | Pone a una edición ya hecha el audio de su video de origen |
+| `hf-studio providers [--add NOMBRE \| --open NOMBRE]` | Estado y saldo de los proveedores; añade una clave o abre la página para crearla |
 | `hf-studio check-credentials` | Valida la clave de Higgsfield sin gastar |
 | `hf-studio sync-catalog` | Regenera `catalog.json` desde docs.higgsfield.ai |
 
