@@ -49,10 +49,12 @@ from .elevenlabs_audio import run as run_audio_service
 from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES
 from .presets import BUILTIN, render, resolve_values, variables_in
-from .pricing import fill_placeholders, normalize, quote, total
+from .pricing import fill_placeholders, total
 from .providers import ProviderError
 from .providers import registry as provider_registry
+from .providers.prices import PriceBook
 from .recommend import recommend
+from .routing import Plan, Router, video_urls
 from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
 from .sounds import LABELS as SOUND_LABELS
 from .sounds import as_dict as sound_dict
@@ -82,8 +84,9 @@ log = logging.getLogger("hf_studio.api")
 
 STAGES = {
     "pending": "Waiting for a free concurrency slot",
-    "submitting": "Submitting to Higgsfield",
-    "queued": "Queued at Higgsfield",
+    "submitting": "Submitting to the provider",
+    "queued": "Queued at the provider",
+    "awaiting_approval": "The cheaper provider failed; approve the next one or cancel",
     "in_progress": "Generating",
     "completed": "Ready",
     "failed": "Failed",
@@ -105,6 +108,18 @@ Hint = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 class GenerationIn(BaseModel):
     model: str = Field(description="ID del endpoint, p. ej. bytedance/seedance-2.0/text-to-video")
     input: dict[str, Any] = Field(description="Argumentos según el input_schema del modelo")
+    max_usd: float | None = Field(
+        None,
+        ge=0,
+        description="Precio aprobado (el de /v1/estimate). Si la opción más barata cuesta más, responde 409; "
+        "un proveedor de respaldo que cueste más pedirá aprobación",
+    )
+    provider: str | None = Field(
+        None, description="Fuerza un proveedor (sin respaldo). Por defecto, el más barato"
+    )
+    hints: dict[str, Hint] = Field(
+        default_factory=dict, description="Datos de cotización, p. ej. input_video_seconds"
+    )
     allow_duplicate: bool = Field(False, description="Permite repetir una petición idéntica aún activa")
     keep_source_audio: bool = Field(
         False,
@@ -156,6 +171,26 @@ class EstimateIn(BaseModel):
     hints: dict[str, Hint] = Field(
         default_factory=dict, description="Datos que la API no puede medir, p. ej. input_video_seconds"
     )
+    provider: str | None = Field(None, description="Cotiza solo este proveedor")
+
+
+class ApproveIn(BaseModel):
+    max_usd: float | None = Field(
+        None, ge=0, description="Precio que se aprueba; si el respaldo cuesta más, 409"
+    )
+
+
+PRICE_REFRESH_SECONDS = 3600
+COST_TOLERANCE_USD = 0.005
+
+
+async def refresh_prices(app: FastAPI) -> None:
+    """Mantiene al día las tablas públicas de precios (una descarga al día por proveedor)."""
+    while True:
+        results = await app.state.prices.refresh(app.state.providers)
+        if results:
+            log.info("Tablas de precios: %s", results)
+        await asyncio.sleep(PRICE_REFRESH_SECONDS)
 
 
 def create_app(
@@ -172,6 +207,8 @@ def create_app(
         # Higgsfield también guarda los medios de entrada y cotiza su catálogo.
         app.state.hf = app.state.providers[provider_registry.DEFAULT_PROVIDER]
         app.state.worker = Worker(app.state.sessions, app.state.providers, settings)
+        app.state.prices = PriceBook(Path(settings.storage_dir) / "prices")
+        app.state.router = Router(app.state.providers, app.state.prices, get_catalog)
         app.state.tasks = set()
         app.state.eleven = ElevenLabsClient(settings, transport)
         app.state.voice_slots = asyncio.Semaphore(2)
@@ -189,6 +226,9 @@ def create_app(
             log.warning("Falta HF_API_KEY (o HF_API_KEY_ID + HF_API_KEY_SECRET): los envíos fallarán")
         if settings.worker_enabled:
             app.state.worker.start()
+            refresher = asyncio.create_task(refresh_prices(app), name="hf-studio-prices")
+            app.state.tasks.add(refresher)
+            refresher.add_done_callback(app.state.tasks.discard)
         yield
         await app.state.worker.stop()
         for provider in app.state.providers.values():
@@ -282,6 +322,11 @@ def create_app(
             "error_kind": job.error_kind,
             "request_id": job.hf_request_id,
             "correlation_id": job.correlation_id,
+            "provider": job.provider,
+            "cost_usd": (job.plan[job.plan_index].get("usd") if job.plan else None),
+            "max_usd": job.max_usd,
+            "plan": [{"provider": o["provider"], "usd": o.get("usd")} for o in job.plan or []],
+            "attempts": job.attempts_log or [],
             "created_at": iso(job.created_at),
             "submitted_at": iso(job.submitted_at),
             "finished_at": iso(job.finished_at),
@@ -364,27 +409,59 @@ def create_app(
             raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
         return model_out(model, full=True)
 
+    async def complete_hints(session: AsyncSession, owner: ApiClient, arguments: dict, hints: dict) -> dict:
+        """Mide la duración de los videos de entrada (si no viene en `hints`): varios proveedores cobran
+        por ella. Solo medios propios: ffprobe nunca abre URLs arbitrarias (SSRF)."""
+        hints = dict(hints or {})
+        urls = video_urls(arguments)
+        if "input_video_seconds" in hints or not urls:
+            return hints
+        seconds = 0.0
+        for url in urls:
+            if not await trusted_media(session, owner, url):
+                return hints
+            measured = await probe_duration(url)
+            if not measured:
+                return hints
+            seconds += measured
+        hints["input_video_seconds"] = round(seconds, 2)
+        return hints
+
+    async def make_plan(
+        request: Request, session: AsyncSession, owner: ApiClient, model: dict, arguments: dict, hints: dict,
+        provider: str | None = None,
+    ) -> Plan:  # fmt: skip
+        hints = await complete_hints(session, owner, arguments, hints)
+        if provider and provider not in provider_registry.PROVIDERS:
+            raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
+        return await request.app.state.router.plan(model, arguments, hints, only=provider)
+
+    def estimate_body(plan: Plan) -> dict:
+        """Costo de la opción elegida con los campos de siempre, más todas las opciones y el ahorro."""
+        best = plan.best
+        if best is None:
+            reasons = "; ".join(f"{e['title']}: {e['reason']}" for e in plan.excluded) or "no provider"
+            base = {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
+                    "basis": f"No provider can run this request ({reasons})", "missing": [], "description": None}  # fmt: skip
+        else:
+            keys = ("kind", "credits", "usd", "discount_pct", "basis", "missing", "description")
+            base = {k: getattr(best, k) for k in keys}
+            if best.provider != provider_registry.DEFAULT_PROVIDER:
+                base["basis"] = f"{best.title}: {best.basis}"
+        return {**base, **plan.public()}
+
     @app.post("/v1/estimate", tags=["generaciones"])
-    async def estimate(body: EstimateIn, request: Request, _: Owner, catalog: CatalogDep) -> dict:
-        """Costo antes de generar: exacto, aproximado por fórmula o no disponible (con el motivo)."""
+    async def estimate(
+        body: EstimateIn, request: Request, session: Session, owner: Owner, catalog: CatalogDep
+    ) -> dict:
+        """Costo antes de generar en cada proveedor, con el más barato primero (y el motivo de los excluidos)."""
         model = catalog.get(body.model)
         if not model:
             raise ServiceError(404, "unknown_model", f"Unknown model: {body.model}")
-        filled, placeholders = fill_placeholders(model["input_schema"], body.input)
+        filled, _ = fill_placeholders(model["input_schema"], body.input)
         check_input(catalog, model["id"], filled)
-        try:
-            raw = await request.app.state.hf.estimate(model["id"], filled)
-        except ProviderError as exc:
-            if exc.kind == "auth":
-                raise
-            reason = (
-                "Higgsfield needs the real media to price this model; upload it first"
-                if placeholders
-                else f"Higgsfield could not price this request ({exc.message})"
-            )
-            return {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
-                    "basis": reason, "missing": placeholders, "description": None}  # fmt: skip
-        return normalize(raw, filled, body.hints, placeholders)
+        plan = await make_plan(request, session, owner, model, body.input, body.hints, body.provider)
+        return estimate_body(plan)
 
     @app.get("/v1/recommend", tags=["modelos"])
     async def recommend_models(
@@ -456,6 +533,17 @@ def create_app(
         catalog: CatalogDep,
         idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
     ) -> JSONResponse:
+        model = check_input(catalog, body.model, body.input)
+        plan = await make_plan(request, session, owner, model, body.input, body.hints, body.provider)
+        best = plan.best
+        if best is None:
+            raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
+        if body.max_usd is not None and best.usd is not None and best.usd > body.max_usd + COST_TOLERANCE_USD:
+            raise ServiceError(
+                409, "cost_changed",
+                f"The cheapest option now costs {best.usd:.2f} USD (approved {body.max_usd:.2f}); quote again",
+                plan.public(),
+            )  # fmt: skip
         job, created = await create_generation(
             session,
             settings,
@@ -466,6 +554,8 @@ def create_app(
             idempotency_key,
             body.allow_duplicate,
             keep_source_audio=body.keep_source_audio,
+            plan=plan.stored(),
+            max_usd=body.max_usd if body.max_usd is not None else best.usd,
         )
         if created:
             request.app.state.worker.wake()
@@ -515,18 +605,13 @@ def create_app(
             if not catalog.get(item.model):
                 raise ServiceError(404, "unknown_model", f"Unknown model: {item.model}")
         if body.dry_run:
-            quotes = await asyncio.gather(
-                *(
-                    quote(
-                        request.app.state.hf,
-                        catalog,
-                        catalog.get(i.model),
-                        i.input,
-                        {**body.hints, **i.hints},
-                    )
-                    for i in body.items
+            plans = [
+                await make_plan(
+                    request, session, owner, catalog.get(i.model), i.input, {**body.hints, **i.hints}
                 )
-            )
+                for i in body.items
+            ]
+            quotes = [estimate_body(p) for p in plans]
             counts = [i.count for i in body.items]
             items = [
                 {"model": i.model, "count": i.count, "estimate": q}
@@ -559,11 +644,17 @@ def create_app(
         jobs, created_any = [], False
         n = 0
         for item in body.items:
+            plan = await make_plan(
+                request, session, owner, catalog.get(item.model), item.input, {**body.hints, **item.hints}
+            )
+            if plan.best is None:
+                raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
             for _ in range(item.count):
                 key = f"{idempotency_key}:{n}" if idempotency_key else None
                 job, created = await create_generation(
-                    session, settings, catalog, owner, item.model, item.input, key, allow_duplicate=True
-                )
+                    session, settings, catalog, owner, item.model, item.input, key, allow_duplicate=True,
+                    plan=plan.stored(),
+                )  # fmt: skip
                 jobs.append(job)
                 created_any |= created
                 n += 1
@@ -600,14 +691,43 @@ def create_app(
         await session.commit()
         shutil.rmtree(Path(settings.storage_dir) / "outputs" / job_id, ignore_errors=True)
 
+    @app.post("/v1/generations/{job_id}/approve", tags=["generaciones"])
+    async def approve(job_id: str, body: ApproveIn, request: Request, session: Session, owner: Owner) -> dict:
+        """Aprueba el proveedor de respaldo más caro que espera un trabajo (`awaiting_approval`)."""
+        job = await get_owned_job(session, owner, job_id)
+        if job.status != "awaiting_approval" or job.plan_index + 1 >= len(job.plan or []):
+            raise ServiceError(
+                409, "not_awaiting_approval", f"Generation is {job.status}; nothing to approve"
+            )
+        option = job.plan[job.plan_index + 1]
+        usd = option.get("usd")
+        if body.max_usd is not None and (usd is None or usd > body.max_usd + COST_TOLERANCE_USD):
+            price = f"{usd:.2f} USD" if usd is not None else "an unknown price"
+            raise ServiceError(
+                409, "cost_changed", f"The fallback costs {price}, more than {body.max_usd:.2f}"
+            )
+        done = await session.execute(
+            update(Job)
+            .where(Job.id == job.id, Job.status == "awaiting_approval")
+            .values(status="pending", plan_index=job.plan_index + 1, provider=option["provider"],
+                    max_usd=max(job.max_usd or 0, usd) if usd is not None else job.max_usd,
+                    error=None, error_kind=None, next_check_at=None)
+        )  # fmt: skip
+        await session.commit()
+        if done.rowcount != 1:
+            raise ServiceError(409, "not_awaiting_approval", "Generation changed; nothing to approve")
+        await session.refresh(job)
+        request.app.state.worker.wake()
+        return job_out(job)
+
     @app.post("/v1/generations/{job_id}/cancel", tags=["generaciones"])
     async def cancel(job_id: str, request: Request, session: Session, owner: Owner) -> dict:
         job = await get_owned_job(session, owner, job_id)
-        if job.status == "pending":
+        if job.status in ("pending", "awaiting_approval"):
             # Atómico frente al worker, que reclama los pendientes con la misma condición.
             done = await session.execute(
                 update(Job)
-                .where(Job.id == job.id, Job.status == "pending")
+                .where(Job.id == job.id, Job.status.in_(("pending", "awaiting_approval")))
                 .values(status="canceled", finished_at=utcnow(), next_check_at=None)
             )
             await session.commit()
@@ -728,8 +848,10 @@ def create_app(
         values, missing = resolve_values(preset, body.variables)
         model_input = render(preset["template"], values)
         if body.dry_run:
-            q = await quote(
-                request.app.state.hf, catalog, catalog.get(preset["model"]), model_input, body.hints
+            q = estimate_body(
+                await make_plan(
+                    request, session, owner, catalog.get(preset["model"]), model_input, body.hints
+                )
             )
             return JSONResponse(
                 {"model": preset["model"], "input": model_input, "missing_variables": missing, "estimate": q}
@@ -741,8 +863,19 @@ def create_app(
                 "Fill the required fields",
                 [{"path": k, "message": "required"} for k in missing],
             )
+        model = check_input(catalog, preset["model"], model_input)
+        plan = await make_plan(request, session, owner, model, model_input, body.hints)
+        if plan.best is None:
+            raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
         job, created = await create_generation(
-            session, settings, catalog, owner, preset["model"], model_input, idempotency_key
+            session,
+            settings,
+            catalog,
+            owner,
+            preset["model"],
+            model_input,
+            idempotency_key,
+            plan=plan.stored(),
         )
         if created:
             request.app.state.worker.wake()

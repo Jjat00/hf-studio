@@ -1,0 +1,203 @@
+"""Plan de una generación: qué proveedores pueden hacerla, con qué entrada y a qué precio.
+
+El plan ordena las opciones de la más barata a la más cara (a igual precio gana la oficial y, después,
+el orden del registro, con Higgsfield primero). El worker envía la primera y, si falla sin cobrar, salta a
+la siguiente: sola si cuesta lo mismo o menos que lo aprobado, y con una nueva aprobación si cuesta más.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+from .catalog import Catalog
+from .pricing import fill_placeholders, quote
+from .providers.base import Provider, ProviderError
+from .providers.prices import PriceBook
+from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
+from .providers.routes import with_defaults
+
+BALANCE_TTL = 60.0
+VIDEO_FIELDS = ("video_url", "video_urls")
+
+
+@dataclass
+class Option:
+    provider: str
+    title: str
+    model: str  # id en el proveedor
+    input: dict[str, Any]  # entrada traducida al proveedor
+    usd: float | None
+    kind: str  # exact | approx | formula | unavailable (como pricing.normalize)
+    basis: str = ""
+    official: bool = True
+    notes: list[str] = field(default_factory=list)
+    credits: float | None = None
+    discount_pct: float | None = None
+    missing: list[str] = field(default_factory=list)
+    description: str | None = None
+
+    def public(self) -> dict[str, Any]:
+        """Sin la entrada traducida: lo que ven la UI, el MCP y el usuario."""
+        data = asdict(self)
+        data.pop("input")
+        return data
+
+
+@dataclass
+class Plan:
+    model: str
+    options: list[Option]  # utilizables, de la más barata a la más cara
+    excluded: list[dict[str, Any]]  # {provider, title, reason, usd?, key_url?}
+
+    @property
+    def best(self) -> Option | None:
+        return self.options[0] if self.options else None
+
+    def public(self) -> dict[str, Any]:
+        best = self.best
+        higgsfield = next((o for o in self.options if o.provider == DEFAULT_PROVIDER), None)
+        savings = None
+        if (
+            best
+            and higgsfield
+            and best.usd is not None
+            and higgsfield.usd
+            and best.provider != DEFAULT_PROVIDER
+        ):
+            savings = {
+                "usd": round(higgsfield.usd - best.usd, 4),
+                "pct": round(100 * (1 - best.usd / higgsfield.usd)),
+            }
+        return {
+            "provider": best.provider if best else None,
+            "options": [o.public() for o in self.options],
+            "excluded": self.excluded,
+            "savings_vs_higgsfield": savings,
+        }
+
+    def stored(self) -> list[dict[str, Any]]:
+        """Lo que se guarda en el trabajo para el worker."""
+        return [{"provider": o.provider, "model": o.model, "input": o.input, "usd": o.usd, "kind": o.kind}
+                for o in self.options]  # fmt: skip
+
+
+class Router:
+    def __init__(self, providers: dict[str, Provider], prices: PriceBook, catalog_getter):
+        self.providers = providers
+        self.prices = prices
+        self.catalog_getter = catalog_getter
+        self._balances: dict[str, tuple[float, float | None, bool | None]] = {}
+
+    @property
+    def catalog(self) -> Catalog:
+        return self.catalog_getter()
+
+    async def balance(self, name: str) -> tuple[float | None, bool | None]:
+        """(saldo en USD o None si no se sabe, clave válida o None). En caché un minuto."""
+        cached = self._balances.get(name)
+        if cached and time.monotonic() - cached[0] < BALANCE_TTL:
+            return cached[1], cached[2]
+        check = await self.providers[name].check_key()
+        self._balances[name] = (time.monotonic(), check.balance_usd, check.valid)
+        return check.balance_usd, check.valid
+
+    def forget_balance(self, name: str) -> None:
+        self._balances.pop(name, None)
+
+    async def plan(
+        self,
+        model: dict,
+        arguments: dict,
+        hints: dict | None = None,
+        only: str | None = None,
+        check_balance: bool = True,
+    ) -> Plan:
+        hints = dict(hints or {})
+        logical = with_defaults(model["input_schema"], arguments)
+        options: list[Option] = []
+        excluded: list[dict[str, Any]] = []
+        names = [only] if only else list(PROVIDERS)
+        for name in names:
+            provider = self.providers.get(name)
+            if provider is None:
+                raise ProviderError("unsupported", f"Unknown provider {name!r}", provider=name)
+            info = {"provider": name, "title": provider.title}
+            option = await self._option(provider, model, arguments, logical, hints, info, excluded)
+            if option is None:
+                continue
+            if not provider.configured:
+                excluded.append({**info, "reason": f"no key ({provider.env_var})", "usd": option.usd,
+                                 "key_url": provider.key_url, "signup_url": provider.signup_url})  # fmt: skip
+                continue
+            if check_balance and option.usd is not None and provider.has_price_table:
+                balance, valid = await self.balance(name)
+                if valid is False:
+                    excluded.append(
+                        {**info, "reason": "invalid key", "usd": option.usd, "key_url": provider.key_url}
+                    )
+                    continue
+                if balance is not None and balance < option.usd:
+                    excluded.append({**info, "reason": f"insufficient balance ({balance:.2f} USD)", "usd": option.usd,
+                                     "billing_url": provider.billing_url})  # fmt: skip
+                    continue
+            options.append(option)
+        order = {name: i for i, name in enumerate(PROVIDERS)}
+        options.sort(key=lambda o: (o.usd is None, o.usd or 0, not o.official, order.get(o.provider, 99)))
+        return Plan(model["id"], options, excluded)
+
+    async def _option(
+        self,
+        provider: Provider,
+        model: dict,
+        arguments: dict,
+        logical: dict,
+        hints: dict,
+        info: dict,
+        excluded: list,
+    ) -> Option | None:
+        if provider.name == DEFAULT_PROVIDER:
+            priced = await quote(provider, self.catalog, model, arguments, hints)
+            if priced["kind"] == "unavailable" and priced.get("errors"):
+                excluded.append({**info, "reason": priced["basis"]})
+                return None
+            return Option(
+                provider.name, provider.title, model["id"], arguments, priced["usd"], priced["kind"],
+                priced["basis"], credits=priced.get("credits"), discount_pct=priced.get("discount_pct"),
+                missing=priced.get("missing") or [], description=priced.get("description"),
+            )  # fmt: skip
+        route = provider.routes().get(model["id"])
+        if route is None:
+            return None
+        filled, placeholders = fill_placeholders(model["input_schema"], arguments)
+        try:
+            translated = route.translate(with_defaults(model["input_schema"], filled))
+        except ProviderError as exc:
+            excluded.append({**info, "reason": exc.message})
+            return None
+        usd = route.price(logical, hints, self.prices.prices(provider.name)) if route.price else None
+        missing = [] if usd is not None or not _has_video(logical) else ["input_video_seconds"]
+        synced = self.prices.synced_at(provider.name)
+        basis = f"{provider.title} price list" + (
+            f" ({time.strftime('%Y-%m-%d', time.gmtime(synced))})" if synced else ""
+        )
+        if usd is None and not missing:
+            basis = f"{provider.title} has no price for this request in its list"
+        return Option(
+            provider.name, provider.title, route.model, translated if not placeholders else {},
+            usd, "exact" if usd is not None else ("formula" if missing else "unavailable"), basis,
+            official=route.official, notes=list(route.notes), missing=missing,
+        )  # fmt: skip
+
+
+def _has_video(arguments: dict) -> bool:
+    return any(arguments.get(k) for k in VIDEO_FIELDS)
+
+
+def video_urls(arguments: dict) -> list[str]:
+    urls = []
+    for key in VIDEO_FIELDS:
+        value = arguments.get(key)
+        urls.extend(value if isinstance(value, list) else [value] if value else [])
+    return [u for u in urls if isinstance(u, str)]

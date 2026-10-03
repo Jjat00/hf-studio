@@ -68,8 +68,13 @@ async def create_generation(
     idempotency_key: str | None = None,
     allow_duplicate: bool = False,
     keep_source_audio: bool = False,
+    plan: list[dict] | None = None,
+    max_usd: float | None = None,
 ) -> tuple[Job, bool]:
-    """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente."""
+    """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente.
+
+    `plan` (routing.Plan.stored) dice por qué proveedores probar y en qué orden; sin él va a Higgsfield.
+    `max_usd` es lo aprobado: un respaldo que cueste más pedirá una nueva aprobación."""
     model = check_input(catalog, model_id, arguments)
     if keep_source_audio and not supports_source_audio(model):
         raise ServiceError(
@@ -130,6 +135,10 @@ async def create_generation(
         input_hash=digest,
         idempotency_key=idempotency_key,
         keep_source_audio=keep_source_audio,
+        plan=plan or [],
+        provider=plan[0]["provider"] if plan else "higgsfield",
+        max_usd=max_usd if max_usd is not None else (plan[0].get("usd") if plan else None),
+        attempts_log=[],
     )
     session.add(job)
     try:

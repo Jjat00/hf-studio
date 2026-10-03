@@ -30,6 +30,7 @@ LOCAL_MODELS = (VOICE_MODEL, *AUDIO_MODELS)
 log = logging.getLogger("hf_studio.worker")
 
 MAX_SUBMIT_ATTEMPTS = 5
+FALLBACK_AFTER_ATTEMPTS = 2  # con otro proveedor disponible, reintentos de un error transitorio
 POLL_BATCH = 25
 
 
@@ -93,33 +94,39 @@ class Worker:
     # --- Envío ---------------------------------------------------------------------------------
 
     async def submit_pending(self) -> None:
-        if utcnow() < self._submit_paused_until:
-            return
+        """Envía los pendientes. La concurrencia de la cuenta solo limita a Higgsfield; APIMart y KIE
+        aceptan muchas tareas a la vez y su límite llega como error `concurrency` (se reintenta)."""
         async with self.sessions() as session:
             in_flight = await session.scalar(
                 select(func.count())
                 .select_from(Job)
                 .where(
-                    Job.status.in_(("submitting", "queued", "in_progress")), Job.model.not_in(LOCAL_MODELS)
+                    Job.status.in_(("submitting", "queued", "in_progress")),
+                    Job.model.not_in(LOCAL_MODELS),
+                    Job.provider == DEFAULT_PROVIDER,
                 )
             )
-            slots = self.settings.hf_max_concurrency - (in_flight or 0)
-            if slots <= 0:
-                return
+            hf_slots = self.settings.hf_max_concurrency - (in_flight or 0)
             now = utcnow()
-            ids = (
-                await session.scalars(
-                    select(Job.id)
+            rows = (
+                await session.execute(
+                    select(Job.id, Job.provider)
                     .where(
                         Job.status == "pending", (Job.next_check_at.is_(None)) | (Job.next_check_at <= now)
                     )
                     .order_by(Job.created_at)
-                    .limit(slots)
+                    .limit(POLL_BATCH)
                 )
             ).all()
-        for job_id in ids:
-            if not await self.submit(job_id):
-                break
+        hf_paused = utcnow() < self._submit_paused_until
+        for job_id, provider in rows:
+            on_hf = (provider or DEFAULT_PROVIDER) == DEFAULT_PROVIDER
+            if on_hf:
+                if hf_paused or hf_slots <= 0:
+                    continue
+                hf_slots -= 1
+            if not await self.submit(job_id) and on_hf:
+                hf_paused = True
 
     async def submit(self, job_id: str) -> bool:
         """Envía un trabajo. Devuelve False si hay que dejar de enviar en este ciclo."""
@@ -134,8 +141,9 @@ class Worker:
             job = await session.get(Job, job_id)
             job.attempts += 1
             webhook = self.webhook_url(job)
+            model, arguments = self.target(job)
             try:
-                result = await self.provider(job).submit_job(job.model, job.input, webhook)
+                result = await self.provider(job).submit_job(model, arguments, webhook)
             except ProviderError as exc:
                 keep_going = self._handle_submit_error(job, exc)
                 await session.commit()
@@ -167,20 +175,34 @@ class Worker:
             f"{base}/v1/webhooks/{job.provider or DEFAULT_PROVIDER}/{job.id}?token={quote(job.webhook_token)}"
         )
 
+    @staticmethod
+    def target(job: Job) -> tuple[str, dict]:
+        """Modelo y entrada para el proveedor actual: los del plan o, sin plan, los lógicos (Higgsfield)."""
+        if job.plan:
+            option = job.plan[job.plan_index]
+            return option["model"], option["input"]
+        return job.model, job.input
+
     def _handle_submit_error(self, job: Job, exc: ProviderError) -> bool:
         job.correlation_id = exc.correlation_id or job.correlation_id
-        if exc.kind == "concurrency":
+        on_hf = (job.provider or DEFAULT_PROVIDER) == DEFAULT_PROVIDER
+        if exc.kind == "concurrency" and on_hf:
             # Límite de la cuenta: el trabajo vuelve a la cola y se pausan los envíos un rato.
             job.status, job.attempts = "pending", job.attempts - 1
             self._submit_paused_until = utcnow() + timedelta(seconds=10 + random.uniform(0, 5))
             return False
-        if exc.retryable and job.attempts < MAX_SUBMIT_ATTEMPTS:
+        # Con respaldo disponible se reintenta menos: es mejor otro proveedor que esperar minutos.
+        limit = MAX_SUBMIT_ATTEMPTS if not self.has_fallback(job) else FALLBACK_AFTER_ATTEMPTS
+        if exc.retryable and job.attempts < limit:
             job.status = "pending"
             job.error, job.error_kind = exc.message, exc.kind
             job.next_check_at = utcnow() + timedelta(
                 seconds=min(2**job.attempts * 2, 60) + random.uniform(0, 1)
             )
             return exc.kind != "unavailable"
+        if exc.fallback_safe and self.has_fallback(job):
+            self.fallback(job, exc.kind, exc.message)
+            return True
         kind = "submission_ambiguous" if exc.kind == "ambiguous" else exc.kind
         message = exc.message
         if exc.kind == "ambiguous":
@@ -190,8 +212,52 @@ class Worker:
             env_var = provider.env_var if provider else "the provider key"
             title = provider.title if provider else job.provider
             message = f"Invalid {title} credentials on the server ({env_var}); run `hf-studio providers`"
-        self._finish(job, "failed", kind, message)
+        self._finish(job, "failed", kind, self._with_attempts(job, message))
         return exc.kind != "auth"
+
+    # --- Respaldo entre proveedores --------------------------------------------------------------
+
+    @staticmethod
+    def has_fallback(job: Job) -> bool:
+        return bool(job.plan) and job.plan_index + 1 < len(job.plan)
+
+    def _title(self, name: str | None) -> str:
+        provider = self.providers.get(name or DEFAULT_PROVIDER)
+        return provider.title if provider else str(name)
+
+    def fallback(self, job: Job, kind: str | None, message: str | None) -> None:
+        """El proveedor actual falló sin cobrar: pasa al siguiente del plan. Corre solo si cuesta lo mismo
+        o menos que lo aprobado (`max_usd`); si cuesta más o no tiene precio, espera aprobación."""
+        failed = self._title(job.provider)
+        job.attempts_log = [
+            *(job.attempts_log or []),
+            {"provider": job.provider, "request_id": job.hf_request_id, "error_kind": kind, "error": message,
+             "at": utcnow().isoformat()},
+        ]  # fmt: skip
+        option = job.plan[job.plan_index + 1]
+        job.hf_request_id = job.status_url = job.cancel_url = None
+        job.outputs, job.attempts, job.next_check_at = [], 0, None
+        title, usd = self._title(option["provider"]), option.get("usd")
+        if usd is not None and job.max_usd is not None and usd <= job.max_usd + 1e-9:
+            job.plan_index += 1
+            job.provider = option["provider"]
+            job.status, job.error_kind = "pending", None
+            job.error = f"{failed} failed ({message}); trying {title}"
+            log.info("Trabajo %s: %s falló (%s), pasa a %s", job.id, failed, kind, option["provider"])
+            return
+        price = f"{usd:.2f} USD" if usd is not None else "an unknown price"
+        approved = f"{job.max_usd:.2f} USD" if job.max_usd is not None else "no price"
+        job.status, job.error_kind = "awaiting_approval", "needs_approval"
+        job.error = (
+            f"{failed} failed ({message}). {title} can do it for {price} (you approved {approved}). "
+            f"Approve with POST /v1/generations/{job.id}/approve or cancel it."
+        )
+
+    def _with_attempts(self, job: Job, message: str | None) -> str | None:
+        if not job.attempts_log:
+            return message
+        tried = ", ".join(f"{self._title(a['provider'])} ({a.get('error_kind')})" for a in job.attempts_log)
+        return f"{message} (also tried: {tried})"
 
     # --- Sondeo --------------------------------------------------------------------------------
 
@@ -237,12 +303,18 @@ class Worker:
         if status in TERMINAL_STATUSES:
             if job.status in TERMINAL_STATUSES and job.status != "timed_out":
                 return  # webhook duplicado o sondeo tardío
+            if status in ("failed", "nsfw") and self.has_fallback(job):
+                # Los tres proveedores devuelven lo cobrado por una tarea fallida: se prueba el siguiente.
+                self.fallback(job, status, result.error)
+                return
             job.outputs = result.outputs
             error = result.error
             # Primero la copia local y después el estado final: quien vea `completed` ya tiene
             # `file_url`. Un fallo de descarga no bloquea (queda la URL remota).
             if status == "completed" and self.settings.download_outputs:
                 await self.store_outputs(job)
+            if status != "completed":
+                error = self._with_attempts(job, error)
             self._finish(job, status, None if status == "completed" else status, error)
             return
         if status in ("queued", "in_progress"):

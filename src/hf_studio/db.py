@@ -20,9 +20,10 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-# Estados propios: `pending` (cola local) y `submitting` (envío en curso) preceden a los de Higgsfield;
-# `timed_out` es el límite de la aplicación, no un estado remoto.
-ACTIVE = ("pending", "submitting", "queued", "in_progress")
+# Estados propios: `pending` (cola local) y `submitting` (envío en curso) preceden a los del proveedor;
+# `awaiting_approval` espera que se apruebe un proveedor de respaldo más caro; `timed_out` es el límite de
+# la aplicación, no un estado remoto.
+ACTIVE = ("pending", "submitting", "queued", "in_progress", "awaiting_approval")
 TERMINAL = ("completed", "failed", "nsfw", "canceled", "timed_out")
 
 
@@ -94,6 +95,14 @@ class Job(Base):
         String(30), default="higgsfield", server_default=text("'higgsfield'")
     )
     hf_request_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # Plan de proveedores (routing.Plan.stored): opciones de la más barata a la más cara, cada una con su
+    # modelo y entrada ya traducidos. Vacío en trabajos anteriores: van a Higgsfield con `model` e `input`.
+    plan: Mapped[list] = mapped_column(JSON, default=list)
+    plan_index: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    # Lo máximo aprobado en USD: el respaldo que cueste lo mismo o menos corre sin preguntar.
+    max_usd: Mapped[float | None] = mapped_column(Float)
+    # Intentos fallidos en otros proveedores: [{provider, request_id, error_kind, error, at}].
+    attempts_log: Mapped[list] = mapped_column(JSON, default=list)
     status_url: Mapped[str | None] = mapped_column(Text)
     cancel_url: Mapped[str | None] = mapped_column(Text)
     correlation_id: Mapped[str | None] = mapped_column(String(100))
@@ -127,6 +136,10 @@ ADDED_COLUMNS = {
     "jobs": {
         "keep_source_audio": "BOOLEAN NOT NULL DEFAULT 0",
         "provider": "VARCHAR(30) NOT NULL DEFAULT 'higgsfield'",
+        "plan": "JSON",
+        "plan_index": "INTEGER NOT NULL DEFAULT 0",
+        "max_usd": "FLOAT",
+        "attempts_log": "JSON",
     },
 }
 
