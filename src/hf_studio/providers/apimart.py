@@ -44,6 +44,8 @@ class APIMartProvider(Provider):
     billing_url = "https://apimart.ai/billing"
     docs_url = "https://docs.apimart.ai/en"
     blurb = "Optional: usually the cheapest for Seedance and Wan. Failed tasks are refunded."
+    has_price_table = True
+    pricing_url = "https://apimart.ai/api/pricing/models/all"
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         super().__init__(settings, transport)
@@ -125,6 +127,20 @@ class APIMartProvider(Provider):
             )
         return Submitted(task_id, STATUS.get(str(task.get("status")), "queued"), raw=response.json())
 
+    @classmethod
+    def routes(cls):
+        from .apimart_routes import apimart_routes
+
+        return apimart_routes()
+
+    async def fetch_prices(self) -> dict[str, float]:
+        """Precio de pago por uso (`after_discount`, nivel Gold) por `modelo|clave`. También los
+        recargos por medio de entrada (`modelo|input:image`, `modelo|input:video:clave`) y el precio por
+        millón de tokens (`modelo|token:clave`)."""
+        response = await self._plain.get(self.pricing_url, headers={"User-Agent": "hf-studio"})
+        response.raise_for_status()
+        return parse_prices(response.json())
+
     async def poll_job(self, request_id: str, status_url: str | None = None) -> Polled:
         try:
             response = await self._api.get(f"/v1/tasks/{request_id}")
@@ -163,3 +179,26 @@ def extract_outputs(result: dict) -> list[dict]:
                     seen.add(url)
                     outputs.append({"kind": media_kind(url, kind), "url": url, "content_type": None})
     return outputs
+
+
+def parse_prices(body: dict) -> dict[str, float]:
+    prices: dict[str, float] = {}
+
+    def put(key: str, item: dict) -> None:
+        value = item.get("after_discount", item.get("original_price"))
+        if isinstance(value, int | float):
+            prices[key] = float(value)
+
+    for model in (body.get("data") or {}).get("models", {}).get("video", []):
+        mid = model["id"]
+        for item in (model.get("fixed_prices") or {}).get("items") or []:
+            put(f"{mid}|{item['key']}", item)
+        extra = model.get("input_material_prices") or {}
+        if isinstance(extra.get("image"), dict):
+            put(f"{mid}|input:image", extra["image"])
+        video = extra.get("video") or {}
+        for item in video.get("items") or ([video] if "original_price" in video else []):
+            put(f"{mid}|input:video:{item.get('key', 'default')}", item)
+        for item in (model.get("token_settlement_prices") or {}).get("items") or []:
+            put(f"{mid}|token:{item['key']}", item)
+    return prices

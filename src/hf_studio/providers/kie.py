@@ -55,6 +55,8 @@ class KIEProvider(Provider):
     billing_url = "https://kie.ai/billing"
     docs_url = "https://docs.kie.ai"
     blurb = "Optional: usually the cheapest for Hailuo, MiniMax and Wan Animate. New accounts get 80 free credits."
+    has_price_table = True
+    pricing_url = "https://api.kie.ai/client/v1/model-pricing/page"
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         super().__init__(settings, transport)
@@ -113,6 +115,35 @@ class KIEProvider(Provider):
             raise ProviderError("server", "KIE returned no taskId", provider=self.name)
         return Submitted(task_id, "queued", raw=data)
 
+    @classmethod
+    def routes(cls):
+        from .kie_routes import kie_routes
+
+        return kie_routes()
+
+    async def fetch_prices(self) -> dict[str, float]:
+        """Tabla pública (sin clave), paginada: `{modelDescription normalizado: usd por unidad}`. La
+        unidad (por segundo o por video) la conoce la ruta de cada modelo."""
+        prices: dict[str, float] = {}
+        page, pages = 1, 1
+        while page <= pages:
+            response = await self._plain.post(self.pricing_url, json={"pageNum": page, "pageSize": 100})
+            response.raise_for_status()
+            data = response.json().get("data") or {}
+            pages = int(data.get("pages") or 1)
+            for row in data.get("records") or []:
+                # Créditos × 0,005: la columna usdPrice tiene erratas (Wan 3.0 720p decía 0,09 por 0,08).
+                credits = parse_usd(row.get("creditPrice"))
+                usd = (
+                    round(credits * USD_PER_CREDIT, 6)
+                    if credits is not None
+                    else parse_usd(row.get("usdPrice"))
+                )
+                if usd is not None and row.get("modelDescription"):
+                    prices[price_key(row["modelDescription"])] = usd
+            page += 1
+        return prices
+
     async def poll_job(self, request_id: str, status_url: str | None = None) -> Polled:
         try:
             response = await self._api.get("/api/v1/jobs/recordInfo", params={"taskId": request_id})
@@ -151,3 +182,21 @@ def extract_outputs(data: dict) -> list[dict]:
             result = {}
     urls = result.get("resultUrls") or []
     return [{"kind": media_kind(u), "url": u, "content_type": None} for u in urls if isinstance(u, str)]
+
+
+def price_key(description: str) -> str:
+    """Normaliza `modelDescription` (espacios, mayúsculas y paréntesis varían entre filas)."""
+    return re.sub(r"\s+", " ", description.replace("（", "(").replace("）", ")")).strip().lower()
+
+
+def parse_usd(value) -> float | None:
+    """`"0,325"`, `"$0.30"`, `0.3` → float."""
+    if isinstance(value, int | float):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    cleaned = value.replace("$", "").replace(",", ".").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None

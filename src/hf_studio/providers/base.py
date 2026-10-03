@@ -11,11 +11,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
 from ..config import Settings
+
+if TYPE_CHECKING:
+    from .routes import Route
 
 # Estados normalizados que devuelve `poll`. Los activos son los de la cola remota.
 ACTIVE_STATUSES = ("queued", "in_progress")
@@ -112,6 +115,8 @@ class Provider(ABC):
     required: ClassVar[bool] = False
     # Línea breve para setup: para qué sirve y si cobra.
     blurb: ClassVar[str] = ""
+    # True si el proveedor publica una tabla de precios que `fetch_prices` sabe leer (ver prices.py).
+    has_price_table: ClassVar[bool] = False
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         self.settings = settings
@@ -156,6 +161,15 @@ class Provider(ABC):
     @abstractmethod
     async def poll_job(self, request_id: str, status_url: str | None = None) -> Polled:
         """Estado autoritativo de una tarea, normalizado."""
+
+    @classmethod
+    def routes(cls) -> dict[str, Route]:
+        """Modelos lógicos que ofrece este proveedor: `{id del catálogo: Route}` (ver routes.py)."""
+        return {}
+
+    async def fetch_prices(self) -> dict[str, float]:
+        """Tabla pública de precios en USD, `{clave: usd}`; las claves las definen sus `Route.price`."""
+        return {}
 
     async def cancel_job(self, request_id: str, cancel_url: str | None = None) -> None:
         raise ProviderError("unsupported", f"{self.title} does not support canceling", provider=self.name)
