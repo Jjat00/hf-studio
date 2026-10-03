@@ -22,6 +22,12 @@ def _upper_p(value: str) -> str:
     return value.upper() if value.endswith("p") else value
 
 
+def _no_seed(value):
+    """Semilla fija sin equivalente: el resultado no se puede reproducir. -1 (aleatoria) sí."""
+    if value not in (None, -1):
+        raise unsupported(P, "a fixed seed cannot be reproduced on KIE for this model")
+
+
 def _no_list(field_name: str):
     def check(value):
         if value:
@@ -58,15 +64,6 @@ def _seedance_price(row: str, with_video: str):
     return price
 
 
-def _edit_build(source: dict, out: dict) -> dict:
-    out["reference_video_urls"] = [source["video_url"], *(source.get("video_urls") or [])]
-    out.pop("video_url", None)
-    out.pop("video_urls", None)
-    if len(out["reference_video_urls"]) > 10:
-        raise unsupported(P, "KIE accepts at most 10 reference videos")
-    return out
-
-
 def seedance() -> dict[str, Route]:
     routes = {}
     keep = ("prompt", "duration", "resolution", "aspect_ratio", "generate_audio")
@@ -86,22 +83,8 @@ def seedance() -> dict[str, Route]:
         routes[f"{base}/reference-to-video"] = Route(
             P, model, Spec(P, model, keep=keep, rename=SEEDANCE_REFS, drop=drop), price, notes=notes
         )
-    edit_keep = ("prompt", "resolution", "generate_audio", "video_url")
-    edit_refs = {"image_urls": "reference_image_urls", "audio_urls": "reference_audio_urls"}
-    routes["bytedance/seedance-2.5/video-edit"] = Route(
-        P, "bytedance/seedance-2-5",
-        Spec(P, "bytedance/seedance-2-5", keep=(*edit_keep, "video_urls"), rename=edit_refs,
-             drop={"bitrate_mode"}, fixed={"duration": -1}, build=_edit_build),
-        _seedance_price("bytedance/seedance-2-5", "with video"),
-        notes=("KIE has no explicit edit mode: the clip goes as reference video 1 and the prompt says what to change",),
-    )  # fmt: skip
-    routes["bytedance/seedance-2.5/video-extend"] = Route(
-        P, "bytedance/seedance-2-5",
-        Spec(P, "bytedance/seedance-2-5", keep=(*edit_keep, "video_urls", "duration"), rename=edit_refs,
-             drop={"bitrate_mode"}, build=_edit_build),
-        _seedance_price("bytedance/seedance-2-5", "with video"),
-        notes=("KIE has no explicit extend mode: the clip goes as reference video 1",),
-    )  # fmt: skip
+    # Edición y extensión no se ofrecen: KIE no tiene ese modo y mandar el clip como referencia es otra
+    # operación (revisión 28 de Codex). Se quedan en Higgsfield y APIMart.
     return routes
 
 
@@ -190,7 +173,7 @@ def wan() -> dict[str, Route]:
             P, model,
             keep=("prompt", "resolution", "multi_shots"),
             rename={"image_url": "image_urls"},
-            convert={"duration": _str, "image_url": lambda v: [v], "seed": lambda v: None,
+            convert={"duration": _str, "image_url": lambda v: [v], "seed": _no_seed,
                      "audio_url": _no_list("audio_url"), "prompt_extend": only_default("prompt_extend", False),
                      "negative_prompt": only_default("negative_prompt", "")},
             allowed={"resolution": {"720p", "1080p"}},
@@ -198,7 +181,6 @@ def wan() -> dict[str, Route]:
         routes[f"wan/v2.6/{kind}"] = Route(
             P, model, (spec),
             lambda i, h, p, lb=label: per_unit(p, f"wan 2.6, {lb}, {i.get('duration', 5)}.0s-{i.get('resolution', '720p')}"),
-            notes=("seed is not available on KIE",),
         )  # fmt: skip
     # 2.7
     common = ("prompt", "duration", "resolution", "prompt_extend", "negative_prompt", "seed")
@@ -270,7 +252,7 @@ def others() -> dict[str, Route]:
             model = f"{prefix}/{kind}"
             convert = {"image_url": lambda v: [v]}
             if not seed:
-                convert["seed"] = lambda v: None
+                convert["seed"] = _no_seed
             spec = Spec(
                 P, model, keep=("prompt", "duration", "resolution", "aspect_ratio", "seed"),
                 rename={"image_url": "image_urls", "image_urls": "reference_image"}, convert=convert,

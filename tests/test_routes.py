@@ -24,12 +24,21 @@ EXPECTED_UNSUPPORTED = {
 ROUTED = [(name, mid) for name, cls in PROVIDERS.items() for mid in sorted(cls.routes())]
 
 
-def sample(model_id: str) -> dict:
+def requested(model_id: str) -> dict:
+    """Lo que pone el usuario: prompt, medios obligatorios y, en referencias, un video."""
     schema = get_catalog().get(model_id)["input_schema"]
     filled, _ = fill_placeholders(schema, {"prompt": "a red fox running through snow"})
     if "video_urls" in schema["properties"] and "reference" in model_id:
         filled["video_urls"] = ["https://cdn.test/ref.mp4"]
-    return with_defaults(schema, filled)
+    return filled
+
+
+def sample(model_id: str) -> dict:
+    return with_defaults(get_catalog().get(model_id)["input_schema"], requested(model_id))
+
+
+def chosen(model_id: str, *extra: str) -> frozenset:
+    return frozenset(requested(model_id)) | frozenset(extra)
 
 
 @pytest.mark.parametrize(("provider", "model_id"), ROUTED)
@@ -40,10 +49,10 @@ def test_route_translates_and_prices_a_typical_request(provider, model_id):
     logical = sample(model_id)
     if (provider, model_id) in EXPECTED_UNSUPPORTED:
         with pytest.raises(ProviderError) as info:
-            route.translate(logical)
+            route.translate(logical, chosen(model_id))
         assert info.value.kind == "unsupported"
         return
-    out = route.translate(logical)
+    out = route.translate(logical, chosen(model_id))
     assert out and None not in out.values()
     usd = route.price(logical, {"input_video_seconds": 5}, prices)
     assert usd is not None and 0 < usd < 10, f"{provider} {model_id}: {usd}"
@@ -86,11 +95,11 @@ def test_seedance_edit_puts_the_source_video_first():
     logical = sample("bytedance/seedance-2.5/video-edit")
     logical["video_url"] = "https://cdn.test/source.mp4"
     logical["video_urls"] = ["https://cdn.test/extra.mp4"]
-    am = PROVIDERS["apimart"].routes()["bytedance/seedance-2.5/video-edit"].translate(logical)
+    asked = chosen("bytedance/seedance-2.5/video-edit", "video_urls")
+    am = PROVIDERS["apimart"].routes()["bytedance/seedance-2.5/video-edit"].translate(logical, asked)
     assert am["video_urls"] == ["https://cdn.test/source.mp4", "https://cdn.test/extra.mp4"]
     assert am["omni_reference_task_type"] == "edit" and am["duration"] == -1 and "video_url" not in am
-    kie = PROVIDERS["kie"].routes()["bytedance/seedance-2.5/video-edit"].translate(logical)
-    assert kie["reference_video_urls"][0] == "https://cdn.test/source.mp4" and "video_urls" not in kie
+    assert "bytedance/seedance-2.5/video-edit" not in PROVIDERS["kie"].routes()  # sin modo de edición fiel
 
 
 def test_video_input_price_needs_the_input_length():
@@ -101,4 +110,21 @@ def test_video_input_price_needs_the_input_length():
     # 8 s de entrada + 8 s de salida (duration -1 = largo de la entrada) a la tarifa 720P-input
     assert route.price(logical, {"input_video_seconds": 8}, prices) == round(
         prices["seedance-2.5|720P-input"] * 16, 4
+    )
+
+
+def test_explicit_choices_without_equivalent_exclude_the_provider():
+    """Revisión 28: una semilla fija o un bitrate elegido no se descartan en silencio."""
+    kie, am = PROVIDERS["kie"].routes(), PROVIDERS["apimart"].routes()
+    mid = "bytedance/seedance-2.5/text-to-video"
+    logical = sample(mid)
+    assert "bitrate_mode" not in am[mid].translate(logical, chosen(mid))  # valor por defecto: se omite
+    for value in ("high", "standard"):
+        with pytest.raises(ProviderError):
+            am[mid].translate({**logical, "bitrate_mode": value}, chosen(mid, "bitrate_mode"))
+    for mid in ("wan/v2.6/text-to-video", "alibaba/happy-horse/v1.1/text-to-video"):
+        with pytest.raises(ProviderError):
+            kie[mid].translate({**sample(mid), "seed": 123}, chosen(mid, "seed"))
+    assert "seed" not in kie["wan/v2.6/text-to-video"].translate(
+        {**sample("wan/v2.6/text-to-video"), "seed": -1}, chosen("wan/v2.6/text-to-video", "seed")
     )

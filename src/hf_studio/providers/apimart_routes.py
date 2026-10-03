@@ -68,6 +68,19 @@ def _seedance_price(model: str):
     return price
 
 
+def _seedance_reserve(model: str):
+    """`duration=-1` retiene 30 s de salida al enviar (docs de Seedance 2.5, «Billing») y luego liquida."""
+
+    def reserve(i: dict, hints: dict, prices: dict) -> float | None:
+        if i.get("duration", -1) != -1 or not (i.get("video_urls") or i.get("video_url")):
+            return None
+        seconds = video_seconds(hints)
+        res = str(i.get("resolution", "720p")).upper()
+        return None if seconds is None else per_second(prices, f"{model}|{res}-input", min(seconds, 30) + 30)
+
+    return reserve
+
+
 def _videos_first(source: dict, out: dict) -> dict:
     videos = [source["video_url"], *(source.get("video_urls") or [])]
     if len(videos) > 10:
@@ -85,6 +98,7 @@ def seedance() -> dict[str, Route]:
         drop = {"bitrate_mode"} if version == "2.5" else set()
         notes = ("bitrate_mode is not available on APIMart; its default bitrate is used",) if drop else ()
         price = _seedance_price(model)
+        later = version == "2.5"  # 2.5 se liquida por tokens tras generar
         t2v_keep = (*keep, "output_format") if version == "2.5" else keep
         routes[f"bytedance/seedance-{version}/text-to-video"] = Route(
             P,
@@ -97,14 +111,14 @@ def seedance() -> dict[str, Route]:
             P, model,
             Spec(P, model, keep=(*keep, "image_url", "end_image_url"), drop=drop, fixed={"size": "adaptive"},
                  build=_frames),
-            price, notes=notes,
+            price, notes=notes, settles_later=later,
         )  # fmt: skip
         fixed = {"omni_reference_task_type": "reference"} if version == "2.5" else {}
         routes[f"bytedance/seedance-{version}/reference-to-video"] = Route(
             P, model,
             Spec(P, model, keep=(*keep, "image_urls", "video_urls", "audio_urls"), rename={"aspect_ratio": "size"},
                  drop=drop, fixed=fixed),
-            price, notes=notes,
+            price, notes=notes, settles_later=later,
         )  # fmt: skip
     edit_keep = (
         "prompt",
@@ -120,7 +134,9 @@ def seedance() -> dict[str, Route]:
         Spec(P, "seedance-2.5", keep=edit_keep, drop={"bitrate_mode"}, build=_videos_first,
              fixed={"omni_reference_task_type": "edit", "duration": -1, "size": "adaptive"}),
         _seedance_price("seedance-2.5"),
-        notes=("APIMart infers edit from the prompt; a prompt that does not read as an edit fails (refunded)",),
+        notes=("APIMart infers edit from the prompt; a prompt that does not read as an edit fails (refunded)",
+               "APIMart first holds 30 s of output and refunds the difference after generating"),
+        reserve=_seedance_reserve("seedance-2.5"), settles_later=True,
     )  # fmt: skip
     routes["bytedance/seedance-2.5/video-extend"] = Route(
         P, "seedance-2.5",
@@ -128,6 +144,7 @@ def seedance() -> dict[str, Route]:
              fixed={"omni_reference_task_type": "extend", "size": "adaptive"}),
         _seedance_price("seedance-2.5"),
         notes=("APIMart infers extend from the prompt; a prompt that does not read as an extension fails (refunded)",),
+        settles_later=True,
     )  # fmt: skip
     return routes
 

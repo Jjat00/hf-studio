@@ -14,6 +14,7 @@ from hf_studio.api import create_app
 from hf_studio.config import Settings
 from hf_studio.db import ApiClient, Job, Upload, hash_token, utcnow
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 T2V = "bytedance/seedance-2.0/text-to-video"
 I2V = "bytedance/seedance-2.0/image-to-video"
 VIDEO = {"prompt": "A cinematic tracking shot along a sunlit coastal road", "resolution": "720p",
@@ -299,7 +300,7 @@ async def test_long_poll_wait_returns_when_terminal(env):
 
 async def test_upload(env):
     _, http, _ = env
-    r = await http.post("/v1/uploads", files={"file": ("a.png", b"\x89PNG", "image/png")})
+    r = await http.post("/v1/uploads", files={"file": ("a.png", PNG, "image/png")})
     assert r.status_code == 201 and r.json()["url"] == "https://cdn.test/in.png"
     r = await http.post("/v1/uploads", files={"file": ("a.txt", b"hola", "text/plain")})
     assert r.status_code == 415
@@ -310,10 +311,10 @@ async def test_upload_retries_transient_higgsfield_errors(env, monkeypatch):
     real_sleep = asyncio.sleep
     monkeypatch.setattr("hf_studio.higgsfield.asyncio.sleep", lambda s: real_sleep(0))
     fake.upload_failures = 2
-    r = await http.post("/v1/uploads", files={"file": ("a.png", b"\x89PNG", "image/png")})
+    r = await http.post("/v1/uploads", files={"file": ("a.png", PNG, "image/png")})
     assert r.status_code == 201 and fake.upload_failures == 0
     fake.upload_failures = 5
-    r = await http.post("/v1/uploads", files={"file": ("a.png", b"\x89PNG", "image/png")})
+    r = await http.post("/v1/uploads", files={"file": ("a.png", PNG, "image/png")})
     assert r.status_code == 502 and fake.upload_failures == 2
 
 
@@ -478,3 +479,11 @@ async def test_studio_notes_warn_about_silent_edits(env):
     notes = (await http.get(f"/v1/models/{EDIT}")).json()["studio_notes"]
     assert any("SILENT" in n for n in notes) and any("keep_source_audio" in n for n in notes)
     assert (await http.get(f"/v1/models/{T2V}")).json()["studio_notes"] == []
+
+
+async def test_upload_rejects_content_that_is_not_the_declared_type(env):
+    """Revisión 28: un manifiesto DASH subido como video/mp4 haría que ffmpeg abriera sus URLs."""
+    _, http, _ = env
+    mpd = b'<?xml version="1.0"?><MPD><BaseURL>https://127.0.0.1/internal.mp4</BaseURL></MPD>'
+    r = await http.post("/v1/uploads", files={"file": ("a.mp4", mpd, "video/mp4")})
+    assert r.status_code == 415 and r.json()["error"]["code"] == "content_mismatch"

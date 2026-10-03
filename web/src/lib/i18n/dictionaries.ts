@@ -168,6 +168,7 @@ const es = {
     compare: (n: number) => `Comparar ${n} proveedores`,
     notAvailable: "No disponible",
     unofficial: "canal no oficial",
+    reserve: (usd: string) => `Retiene ${usd} al empezar y devuelve la diferencia al terminar`,
     priceChanged: (usd: string) => `El precio cambió: ahora cuesta ${usd}. Revisa el costo y vuelve a generar.`,
   },
   providers: {
@@ -660,6 +661,7 @@ const en: Dict = {
     compare: (n) => `Compare ${n} providers`,
     notAvailable: "Not available",
     unofficial: "unofficial channel",
+    reserve: (usd) => `Holds ${usd} at the start and refunds the difference when done`,
     priceChanged: (usd) => `The price changed: it now costs ${usd}. Check the cost and generate again.`,
   },
   providers: {

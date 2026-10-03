@@ -118,6 +118,12 @@ class Job(Base):
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     poll_delay: Mapped[float] = mapped_column(Float, default=2.0)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # Bloqueo optimista: cada escritura exige la versión leída. Así un sondeo o webhook tardío no pisa un
+    # trabajo que otro proceso ya movió (p. ej. al proveedor de respaldo) y no se envía dos veces.
+    # Las actualizaciones directas (`update(Job)`) deben subirla a mano: `version=Job.version + 1`.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+
+    __mapper_args__ = {"version_id_col": version}  # noqa: RUF012
 
 
 def make_engine(url: str) -> AsyncEngine:
@@ -140,6 +146,7 @@ ADDED_COLUMNS = {
         "plan_index": "INTEGER NOT NULL DEFAULT 0",
         "max_usd": "FLOAT",
         "attempts_log": "JSON",
+        "version": "INTEGER NOT NULL DEFAULT 1",
     },
 }
 

@@ -62,11 +62,9 @@ export function providerTitle(name: string | undefined) {
   return name ? (PROVIDER_TITLES[name] ?? name) : "";
 }
 
-/** Siguiente opción del plan: la que espera aprobación cuando falló la actual. */
-export function nextOption(g: Generation) {
-  const plan = g.plan ?? [];
-  const i = plan.findIndex((o) => o.provider === g.provider);
-  return i >= 0 ? plan[i + 1] : undefined;
+/** Opción actual del plan: en awaiting_approval, la que espera que se apruebe su precio. */
+export function currentOption(g: Generation) {
+  return (g.plan ?? []).find((o) => o.provider === g.provider);
 }
 
 // Nombres legibles de los clientes habituales; cualquier otro se muestra tal cual.
@@ -279,7 +277,7 @@ function ApprovalPanel({ g }: { g: Generation }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const next = nextOption(g);
+  const next = currentOption(g);
   const price = next?.usd != null ? formatUsd(next.usd) : t.approval.unknownPrice;
   async function act(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -300,8 +298,8 @@ function ApprovalPanel({ g }: { g: Generation }) {
       <div className="mt-1 flex gap-2">
         <button
           type="button"
-          disabled={busy}
-          onClick={() => act(() => studio.approve(g.id, next?.usd ?? null))}
+          disabled={busy || next?.usd == null}
+          onClick={() => next?.usd != null && act(() => studio.approve(g.id, next.usd!))}
           className="rounded-lg bg-lime px-3 py-1.5 text-xs font-bold text-black disabled:opacity-50"
         >
           {t.approval.approve(`${price} · ${providerTitle(next?.provider)}`)}

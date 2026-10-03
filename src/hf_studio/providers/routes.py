@@ -31,6 +31,10 @@ class Route:
     translate: Translator
     price: Pricer | None = None
     official: bool = True  # False: canal no oficial del proveedor (más barato, menos estable)
+    # Débito inicial si es mayor que el costo final (el proveedor retiene y luego devuelve la diferencia).
+    reserve: Pricer | None = None
+    # El cobro final se liquida después (p. ej. por tokens): el precio es aproximado, no exacto.
+    settles_later: bool = False
     notes: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -48,7 +52,8 @@ class Spec:
     - `convert={"sound": lambda v: v == "on"}` (se aplica antes de renombrar; si devuelve None, el
       campo se acepta pero no se envía)
     - `allowed={"duration": {5, 10}}` valores admitidos por el proveedor; otro valor es `unsupported`
-    - `drop={"cfg_scale"}` campos que se pueden omitir sin cambiar el resultado
+    - `drop={"bitrate_mode"}` campos sin equivalente que se omiten solo si el usuario no los eligió (vienen
+      del valor por defecto del esquema); si los eligió, el pedido es `unsupported` en este proveedor
     - `fixed={"generation_type": "TEXT_2_VIDEO"}` campos que el proveedor exige
     - `keep` campos que pasan con el mismo nombre (por defecto prompt, duration, resolution, aspect_ratio,
       seed y negative_prompt)
@@ -82,13 +87,18 @@ class Spec:
         self.build = build
         self.keep = set(keep)
 
-    def __call__(self, logical: dict[str, Any]) -> dict[str, Any]:
+    def __call__(self, logical: dict[str, Any], explicit: frozenset[str] | None = None) -> dict[str, Any]:
+        """`explicit`: campos que puso el usuario (sin ellos, todos cuentan como elegidos: lo más estricto)."""
         source = {**self.defaults, **logical}
         out: dict[str, Any] = {}
         for key, value in source.items():
             if value is None:
                 continue
             if key in self.drop:
+                if explicit is None or key in explicit:
+                    raise unsupported(
+                        self.provider, f"{self.model}: {key} cannot be reproduced on {self.provider}"
+                    )
                 continue
             if key in self.allowed and value not in self.allowed[key]:
                 raise unsupported(

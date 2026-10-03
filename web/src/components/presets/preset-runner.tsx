@@ -92,7 +92,7 @@ export function PresetRunner({ slug }: { slug: string }) {
     setFormError(null);
     idempotency.current ??= crypto.randomUUID();
     try {
-      add(await studio.runPreset(preset.slug, values, idempotency.current));
+      add(await studio.runPreset(preset.slug, values, idempotency.current, current?.estimate?.usd ?? null));
       idempotency.current = null;
     } catch (e) {
       const fields = fieldErrors(e);

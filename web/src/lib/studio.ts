@@ -92,11 +92,11 @@ export const studio = {
       body: JSON.stringify({ model, input, keep_source_audio: keepSourceAudio, hints, ...(maxUsd != null ? { max_usd: maxUsd } : {}) }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
-  approve: (id: string, maxUsd: number | null) =>
+  approve: (id: string, maxUsd: number) =>
     call<Generation>(`/v1/generations/${id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(maxUsd != null ? { max_usd: maxUsd } : {}),
+      body: JSON.stringify({ max_usd: maxUsd }),
     }),
   providers: () => call<{ providers: ProviderInfo[] }>("/v1/providers"),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
@@ -153,11 +153,12 @@ export const studio = {
       `/v1/presets/${slug}/run`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ variables, dry_run: true, hints }) },
     ),
-  runPreset: (slug: string, variables: Record<string, unknown>, idempotencyKey: string) =>
+  /** `maxUsd`: el precio que se mostró (dry_run); si subió, la API responde 409 cost_changed. */
+  runPreset: (slug: string, variables: Record<string, unknown>, idempotencyKey: string, maxUsd?: number | null) =>
     call<Generation>(`/v1/presets/${slug}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ variables }),
+      body: JSON.stringify({ variables, ...(maxUsd != null ? { max_usd: maxUsd } : {}) }),
     }),
   savePreset: (generationId: string, slug: string, title: string) =>
     call<Preset>(`/v1/presets/from-generation/${generationId}`, {
@@ -200,6 +201,8 @@ export type EstimateOption = Omit<Estimate, "options" | "excluded" | "savings_vs
   model: string;
   official: boolean;
   notes: string[];
+  /** Débito inicial mayor que el costo final (el proveedor devuelve la diferencia). */
+  reserve_usd?: number | null;
 };
 
 /** Un costo positivo nunca se muestra como cero: por debajo de una milésima sale «<$0.001». */

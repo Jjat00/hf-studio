@@ -27,8 +27,10 @@ INSTRUCTIONS = """Genera imágenes y videos con los modelos de Higgsfield a trav
 Proveedores: el mismo modelo puede salir por Higgsfield, APIMart o KIE. estimate_cost cotiza todos los que
 tengan clave y elige el más barato (options trae cada precio, excluded el motivo de los descartados y
 savings_vs_higgsfield el ahorro); generate envía al más barato. Si ese proveedor falla sin cobrar, HF Studio
-prueba el siguiente: solo si cuesta lo mismo o menos; si cuesta más, la generación queda en
-awaiting_approval: dile al usuario el nuevo precio y, con su OK, approve_fallback (o cancel_generation).
+prueba el siguiente: solo si cuesta lo mismo o menos; si cuesta más (o el precio cambió desde la
+cotización), la generación queda en awaiting_approval: dile al usuario el nuevo precio (cost_usd) y, con su
+OK, approve_fallback (o cancel_generation). reserve_usd en una opción es lo que el proveedor retiene al
+empezar (devuelve la diferencia al terminar): menciónaselo al usuario.
 provider="kie" (u otro) en estimate_cost y generate fuerza uno. providers_status muestra claves, saldos y
 los enlaces para crear cuenta o recargar.
 Atajos: recommend_models("lo que quiere el usuario") sugiere modelos con su costo; list_presets y
@@ -503,9 +505,10 @@ def list_generations(status: str | None = None, limit: int = 20) -> dict:
     ),
 )
 def approve_fallback(generation_id: str, max_usd: float) -> dict:
-    """Para una generación en awaiting_approval: el proveedor más barato falló sin cobrar y el siguiente
-    cuesta más (lo dice su `error`). Dile al usuario ese precio y, con su OK, llama con `max_usd` igual a
-    ese precio. Si el respaldo cuesta más que max_usd, falla sin gastar."""
+    """Para una generación en awaiting_approval: el proveedor anterior falló sin cobrar o el precio cambió
+    desde la cotización, y la opción actual (`provider`, `cost_usd`) cuesta más de lo aprobado. Dile al
+    usuario ese precio y, con su OK, llama con `max_usd` igual a ese precio. HF Studio vuelve a cotizar: si
+    ahora cuesta más que max_usd o no tiene precio, falla sin gastar y devuelve el precio actual."""
     return _call("POST", f"/v1/generations/{generation_id}/approve", json={"max_usd": max_usd})
 
 
@@ -677,7 +680,8 @@ def generate_batch(
         quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True})
         return {**quote, "quote_id": _issue_quote(payload, quote["total"])}
     headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
-    return _call("POST", "/v1/generations/batch", json={**payload, "dry_run": False}, headers=headers)
+    body = {**payload, "dry_run": False, "max_total_usd": _quoted_usd(quote_id)}
+    return _call("POST", "/v1/generations/batch", json=body, headers=headers)
 
 
 @mcp.tool(
@@ -747,7 +751,8 @@ def run_preset(
         quote = _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
         return {**quote, "quote_id": _issue_quote(payload, quote["estimate"])}
     headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
-    return _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": False}, headers=headers)
+    body = {**body, "dry_run": False, "max_usd": _quoted_usd(quote_id)}
+    return _call("POST", f"/v1/presets/{slug}/run", json=body, headers=headers)
 
 
 @mcp.tool(

@@ -114,7 +114,15 @@ class HiggsfieldClient(Provider):
     async def submit_job(
         self, model: str, arguments: dict[str, Any], webhook_url: str | None = None
     ) -> Submitted:
-        result = await self.submit(model, arguments, webhook_url)
+        try:
+            result = await self.submit(model, arguments, webhook_url)
+        except HiggsfieldError as exc:
+            # 503/423 dicen «no disponible» (sin tarea); otro 5xx tras el POST no garantiza nada.
+            if exc.kind == "server":
+                exc.kind = "ambiguous"
+            raise
+        if not result.get("request_id"):
+            raise HiggsfieldError("ambiguous", "Higgsfield accepted the request without a request_id")
         status = result.get("status")
         return Submitted(
             request_id=result["request_id"],

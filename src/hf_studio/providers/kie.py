@@ -109,10 +109,22 @@ class KIEProvider(Provider):
             raise ProviderError(
                 "ambiguous", f"Submission got no response ({type(exc).__name__})", provider=self.name
             ) from exc
-        data = self._body(response).get("data") or {}
-        task_id = data.get("taskId")
+        if not response.is_success:
+            # KIE responde 200 a todo; otro código HTTP viene de un intermediario y no dice si hubo tarea.
+            raise ProviderError("ambiguous", f"KIE answered HTTP {response.status_code}", response.status_code,
+                                provider=self.name)  # fmt: skip
+        try:
+            body = self._body(response)
+        except ProviderError as exc:
+            # Rechazos explícitos de KIE (validación, saldo, modelo caído…) no crean tarea. Un fallo interno
+            # genérico sí puede haberla creado.
+            if exc.kind == "server" or exc.status is None:
+                exc.kind = "ambiguous"
+            raise
+        data = body.get("data") or {}
+        task_id = data.get("taskId") if isinstance(data, dict) else None
         if not task_id:
-            raise ProviderError("server", "KIE returned no taskId", provider=self.name)
+            raise ProviderError("ambiguous", "KIE accepted the request without a taskId", provider=self.name)
         return Submitted(task_id, "queued", raw=data)
 
     @classmethod

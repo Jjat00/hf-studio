@@ -117,6 +117,8 @@ function ProviderComparison({ estimate }: { estimate: Estimate }) {
   const total = options.length + excluded.length;
   return (
     <div className="mt-1.5 text-xs">
+      {best.reserve_usd != null && <p className="text-warning">{t.cost.reserve(formatUsd(best.reserve_usd))}</p>}
+      {best.notes.length > 0 && <p className="text-fg-3">{best.notes.join(" · ")}</p>}
       <p className="text-fg-2">
         <span className="font-semibold text-fg">{t.cost.via(best.title)}</span>
         {savings && savings.usd > 0 && <span className="text-lime"> · {t.cost.saves(formatUsd(savings.usd), savings.pct)}</span>}
@@ -126,7 +128,11 @@ function ProviderComparison({ estimate }: { estimate: Estimate }) {
           <summary className="cursor-pointer text-fg-3 hover:text-fg-2">{t.cost.compare(total)}</summary>
           <ul className="mt-1 space-y-0.5">
             {options.map((o, i) => (
-              <li key={o.provider} className={clsx("flex justify-between gap-3", i === 0 ? "text-fg" : "text-fg-2")}>
+              <li
+                key={o.provider}
+                title={o.notes.join("\n") || undefined}
+                className={clsx("flex justify-between gap-3", i === 0 ? "text-fg" : "text-fg-2")}
+              >
                 <span>
                   {o.title}
                   {!o.official && <span className="text-fg-3"> · {t.cost.unofficial}</span>}

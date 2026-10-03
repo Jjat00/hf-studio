@@ -48,13 +48,14 @@ from .elevenlabs_audio import estimate as audio_estimate
 from .elevenlabs_audio import run as run_audio_service
 from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES
+from .media import local_duration, matches_type
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, total
 from .providers import ProviderError
 from .providers import registry as provider_registry
 from .providers.prices import PriceBook
 from .recommend import recommend
-from .routing import Plan, Router, video_urls
+from .routing import Plan, Router, requote, video_urls
 from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
 from .sounds import LABELS as SOUND_LABELS
 from .sounds import as_dict as sound_dict
@@ -140,6 +141,9 @@ class BatchIn(BaseModel):
     items: list[BatchItem] = Field(min_length=1, max_length=20)
     dry_run: bool = Field(False, description="Solo cotiza: devuelve costo por ítem y total, sin generar")
     hints: dict[str, Hint] = Field(default_factory=dict)
+    max_total_usd: float | None = Field(
+        None, ge=0, description="Total aprobado (el del dry_run); si el lote cuesta más o sin precio, 409"
+    )
 
 
 class PresetIn(BaseModel):
@@ -163,6 +167,7 @@ class PresetRun(BaseModel):
     variables: dict[str, Any] = Field(default_factory=dict)
     dry_run: bool = False
     hints: dict[str, Hint] = Field(default_factory=dict)
+    max_usd: float | None = Field(None, ge=0, description="Precio aprobado (el del dry_run); si subió, 409")
 
 
 class EstimateIn(BaseModel):
@@ -175,13 +180,14 @@ class EstimateIn(BaseModel):
 
 
 class ApproveIn(BaseModel):
-    max_usd: float | None = Field(
-        None, ge=0, description="Precio que se aprueba; si el respaldo cuesta más, 409"
+    max_usd: float = Field(
+        ge=0, description="Precio que se aprueba; se recotiza y si cuesta más responde 409"
     )
 
 
 PRICE_REFRESH_SECONDS = 3600
-COST_TOLERANCE_USD = 0.005
+# Solo error de redondeo de coma flotante: nunca amplía lo que el usuario aprobó (revisión 28).
+COST_TOLERANCE_USD = 1e-9
 
 
 async def refresh_prices(app: FastAPI) -> None:
@@ -209,6 +215,7 @@ def create_app(
         app.state.worker = Worker(app.state.sessions, app.state.providers, settings)
         app.state.prices = PriceBook(Path(settings.storage_dir) / "prices")
         app.state.router = Router(app.state.providers, app.state.prices, get_catalog)
+        app.state.worker.router = app.state.router
         app.state.tasks = set()
         app.state.eleven = ElevenLabsClient(settings, transport)
         app.state.voice_slots = asyncio.Semaphore(2)
@@ -219,7 +226,7 @@ def create_app(
                 update(Job)
                 .where(Job.model.in_((VOICE_MODEL, *AUDIO_MODELS)), Job.status.in_(ACTIVE))
                 .values(status="failed", error_kind="interrupted", error="Interrupted by a server restart",
-                        finished_at=utcnow())
+                        finished_at=utcnow(), version=Job.version + 1)
             )  # fmt: skip
             await s.commit()
         if not settings.hf_configured:
@@ -409,9 +416,11 @@ def create_app(
             raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
         return model_out(model, full=True)
 
-    async def complete_hints(session: AsyncSession, owner: ApiClient, arguments: dict, hints: dict) -> dict:
+    async def complete_hints(
+        request: Request, session: AsyncSession, owner: ApiClient, arguments: dict, hints: dict
+    ) -> dict:
         """Mide la duración de los videos de entrada (si no viene en `hints`): varios proveedores cobran
-        por ella. Solo medios propios: ffprobe nunca abre URLs arbitrarias (SSRF)."""
+        por ella. Solo medios propios, descargados y medidos en local sin red (SSRF, revisión 28)."""
         hints = dict(hints or {})
         urls = video_urls(arguments)
         if "input_video_seconds" in hints or not urls:
@@ -420,7 +429,7 @@ def create_app(
         for url in urls:
             if not await trusted_media(session, owner, url):
                 return hints
-            measured = await probe_duration(url)
+            measured = await local_duration(url, request.app.state.hf.plain, settings.max_upload_bytes)
             if not measured:
                 return hints
             seconds += measured
@@ -431,10 +440,24 @@ def create_app(
         request: Request, session: AsyncSession, owner: ApiClient, model: dict, arguments: dict, hints: dict,
         provider: str | None = None,
     ) -> Plan:  # fmt: skip
-        hints = await complete_hints(session, owner, arguments, hints)
+        hints = await complete_hints(request, session, owner, arguments, hints)
         if provider and provider not in provider_registry.PROVIDERS:
             raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
         return await request.app.state.router.plan(model, arguments, hints, only=provider)
+
+    def check_ceiling(option, max_usd: float | None, plan: Plan | None = None) -> None:
+        """Con un precio aprobado, la opción debe tener precio completo y no superarlo."""
+        if max_usd is None:
+            return
+        details = plan.public() if plan else None
+        if option.usd is None or option.missing:
+            raise ServiceError(409, "cost_unknown",
+                               "The price is no longer known; quote again before generating", details)  # fmt: skip
+        if option.usd > max_usd + COST_TOLERANCE_USD:
+            raise ServiceError(
+                409, "cost_changed",
+                f"The cheapest option now costs {option.usd:.4f} USD (approved {max_usd:.4f}); quote again", details,
+            )  # fmt: skip
 
     def estimate_body(plan: Plan) -> dict:
         """Costo de la opción elegida con los campos de siempre, más todas las opciones y el ahorro."""
@@ -497,6 +520,10 @@ def create_app(
                 )
         if not data:
             raise ServiceError(422, "empty_file", "The file is empty")
+        if not matches_type(bytes(data[:16]), content_type):
+            # Solo el contenido que dice ser: un manifiesto DASH/HLS como «video/mp4» haría que ffmpeg
+            # abriera las URLs de dentro (SSRF, revisión 28).
+            raise ServiceError(415, "content_mismatch", f"The file content is not a valid {content_type}")
         url = await request.app.state.hf.upload(bytes(data), content_type)
         record = Upload(
             owner_id=owner.id,
@@ -540,12 +567,7 @@ def create_app(
         best = plan.best
         if best is None:
             raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
-        if body.max_usd is not None and best.usd is not None and best.usd > body.max_usd + COST_TOLERANCE_USD:
-            raise ServiceError(
-                409, "cost_changed",
-                f"The cheapest option now costs {best.usd:.2f} USD (approved {body.max_usd:.2f}); quote again",
-                plan.public(),
-            )  # fmt: skip
+        check_ceiling(best, body.max_usd, plan)
         job, created = await create_generation(
             session,
             settings,
@@ -643,14 +665,27 @@ def create_app(
                 "too_many_active",
                 f"This batch needs {wanted} slots; you have {active} active of {settings.max_active_jobs_per_client}",
             )
-        jobs, created_any = [], False
-        n = 0
+        plans = []
         for item in body.items:
             plan = await make_plan(
                 request, session, owner, catalog.get(item.model), item.input, {**body.hints, **item.hints}
             )
             if plan.best is None:
                 raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
+            plans.append(plan)
+        if body.max_total_usd is not None:
+            # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisión 28).
+            if any(p.best.usd is None or p.best.missing for p in plans):
+                raise ServiceError(
+                    409, "cost_unknown", "Some item no longer has a price; quote the batch again"
+                )
+            cost = sum(p.best.usd * i.count for p, i in zip(plans, body.items, strict=True))
+            if cost > body.max_total_usd + COST_TOLERANCE_USD:
+                raise ServiceError(409, "cost_changed",
+                                   f"The batch now costs {cost:.4f} USD (approved {body.max_total_usd:.4f})", cost)  # fmt: skip
+        jobs, created_any = [], False
+        n = 0
+        for item, plan in zip(body.items, plans, strict=True):
             for _ in range(item.count):
                 key = f"{idempotency_key}:{n}" if idempotency_key else None
                 job, created = await create_generation(
@@ -694,26 +729,36 @@ def create_app(
         shutil.rmtree(Path(settings.storage_dir) / "outputs" / job_id, ignore_errors=True)
 
     @app.post("/v1/generations/{job_id}/approve", tags=["generaciones"])
-    async def approve(job_id: str, body: ApproveIn, request: Request, session: Session, owner: Owner) -> dict:
-        """Aprueba el proveedor de respaldo más caro que espera un trabajo (`awaiting_approval`)."""
+    async def approve(
+        job_id: str, body: ApproveIn, request: Request, session: Session, owner: Owner, catalog: CatalogDep
+    ) -> dict:
+        """Aprueba el precio del proveedor que espera un trabajo (`awaiting_approval`). Se vuelve a cotizar
+        en el momento: si ahora cuesta más que `max_usd` o no tiene precio, responde 409 con el actual."""
         job = await get_owned_job(session, owner, job_id)
-        if job.status != "awaiting_approval" or job.plan_index + 1 >= len(job.plan or []):
+        if job.status != "awaiting_approval" or not job.plan:
             raise ServiceError(
                 409, "not_awaiting_approval", f"Generation is {job.status}; nothing to approve"
             )
-        option = job.plan[job.plan_index + 1]
-        usd = option.get("usd")
-        if body.max_usd is not None and (usd is None or usd > body.max_usd + COST_TOLERANCE_USD):
-            price = f"{usd:.2f} USD" if usd is not None else "an unknown price"
+        index, version = job.plan_index, job.version
+        fresh = await requote(request.app.state.router, catalog.get(job.model), job.input, job.plan[index])
+        if fresh is None:
             raise ServiceError(
-                409, "cost_changed", f"The fallback costs {price}, more than {body.max_usd:.2f}"
+                409, "provider_unavailable", "That provider can no longer run this request; cancel it"
             )
+        if fresh["usd"] is None:
+            raise ServiceError(409, "cost_unknown", "The price is unknown now; cancel it or try later")
+        if fresh["usd"] > body.max_usd + COST_TOLERANCE_USD:
+            raise ServiceError(409, "cost_changed",
+                               f"It now costs {fresh['usd']:.4f} USD, more than {body.max_usd:.4f}", fresh["usd"])  # fmt: skip
+        plan = list(job.plan)
+        plan[index] = fresh
+        # CAS sobre la versión leída: dos aprobaciones, o aprobar y cancelar a la vez, no pueden ganar ambas.
         done = await session.execute(
             update(Job)
-            .where(Job.id == job.id, Job.status == "awaiting_approval")
-            .values(status="pending", plan_index=job.plan_index + 1, provider=option["provider"],
-                    max_usd=max(job.max_usd or 0, usd) if usd is not None else job.max_usd,
-                    error=None, error_kind=None, next_check_at=None)
+            .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version,
+                   Job.plan_index == index)
+            .values(status="pending", plan=plan, max_usd=max(job.max_usd or 0, fresh["usd"]), error=None,
+                    error_kind=None, next_check_at=None, version=Job.version + 1)
         )  # fmt: skip
         await session.commit()
         if done.rowcount != 1:
@@ -730,7 +775,7 @@ def create_app(
             done = await session.execute(
                 update(Job)
                 .where(Job.id == job.id, Job.status.in_(("pending", "awaiting_approval")))
-                .values(status="canceled", finished_at=utcnow(), next_check_at=None)
+                .values(status="canceled", finished_at=utcnow(), next_check_at=None, version=Job.version + 1)
             )
             await session.commit()
             await session.refresh(job)
@@ -744,7 +789,10 @@ def create_app(
             job.status, job.finished_at, job.next_check_at = "canceled", utcnow(), None
         else:
             raise ServiceError(409, "not_cancelable", f"Cannot cancel a generation in status {job.status}")
-        await session.commit()
+        if not await request.app.state.worker.commit(session, job.id):
+            raise ServiceError(
+                409, "not_cancelable", "The generation changed while canceling; check it again"
+            )
         return job_out(job)
 
     @app.get("/v1/generations/{job_id}/files/{name}", tags=["generaciones"])
@@ -869,16 +917,11 @@ def create_app(
         plan = await make_plan(request, session, owner, model, model_input, body.hints)
         if plan.best is None:
             raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
+        check_ceiling(plan.best, body.max_usd, plan)
         job, created = await create_generation(
-            session,
-            settings,
-            catalog,
-            owner,
-            preset["model"],
-            model_input,
-            idempotency_key,
-            plan=plan.stored(),
-        )
+            session, settings, catalog, owner, preset["model"], model_input, idempotency_key, plan=plan.stored(),
+            max_usd=body.max_usd,
+        )  # fmt: skip
         if created:
             request.app.state.worker.wake()
         return JSONResponse(job_out(job, deduplicated=not created), status_code=202 if created else 200)
@@ -1458,6 +1501,6 @@ def create_app(
             job = await session.get(Job, job_id)
             if job:
                 await app.state.worker.refresh(session, job)
-                await session.commit()
+                await app.state.worker.commit(session, job_id)
 
     return app

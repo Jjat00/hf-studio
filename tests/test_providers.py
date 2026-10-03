@@ -264,3 +264,20 @@ async def test_providers_route_lists_links_and_balance(tmp_path):
     assert items["higgsfield"]["valid"] is True and items["higgsfield"]["required"] is True
     assert items["apimart"]["configured"] is False and "valid" not in items["apimart"]
     assert items["apimart"]["key_url"] == "https://apimart.ai/keys"
+
+
+async def test_duration_is_measured_locally_without_network(tmp_path):
+    """Un MPD que pasara como medio propio no llega a ffprobe, y ffprobe solo lee el archivo local."""
+    from hf_studio.media import local_duration
+
+    mpd = b'<?xml version="1.0"?><MPD><BaseURL>https://127.0.0.1/internal.mp4</BaseURL></MPD>'
+    requested = []
+
+    def handler(request):
+        requested.append(str(request.url))
+        return httpx.Response(200, content=mpd)
+
+    async with httpx.AsyncClient(transport=mock(handler)) as client:
+        assert await local_duration("https://cdn.test/uploaded.mp4", client, 10_000) is None
+        assert await local_duration("http://cdn.test/plain.mp4", client, 10_000) is None
+    assert requested == ["https://cdn.test/uploaded.mp4"]

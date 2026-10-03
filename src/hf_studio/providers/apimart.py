@@ -117,14 +117,23 @@ class APIMartProvider(Provider):
                 "ambiguous", f"Submission got no response ({type(exc).__name__})", provider=self.name
             ) from exc
         if not response.is_success:
-            raise self._error(response)
-        data = response.json().get("data")
+            error = self._error(response)
+            if error.kind in ("server",):
+                # Un 5xx genérico tras el POST no garantiza que no se creó la tarea (revisión 28).
+                error.kind = "ambiguous"
+            raise error
+        try:
+            data = response.json().get("data")
+        except (ValueError, AttributeError):
+            data = None
         task = data[0] if isinstance(data, list) and data else data if isinstance(data, dict) else {}
         task_id = task.get("task_id") or task.get("id")
         if not task_id:
+            # Aceptado sin id: pudo crearse y cobrarse; nunca se reintenta ni se salta de proveedor.
             raise ProviderError(
-                "server", f"APIMart returned no task id: {response.text[:300]}", provider=self.name
-            )
+                "ambiguous", f"APIMart accepted the request without a task id: {response.text[:300]}",
+                provider=self.name,
+            )  # fmt: skip
         return Submitted(task_id, STATUS.get(str(task.get("status")), "queued"), raw=response.json())
 
     @classmethod

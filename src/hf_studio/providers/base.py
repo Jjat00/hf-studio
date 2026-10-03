@@ -145,6 +145,11 @@ class Provider(ABC):
             "blurb": self.blurb,
         }
 
+    @property
+    def plain(self) -> httpx.AsyncClient:
+        """Cliente sin credenciales (descargas de CDN)."""
+        return self._plain
+
     async def aclose(self) -> None:
         await self._plain.aclose()
 

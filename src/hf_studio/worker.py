@@ -15,6 +15,7 @@ from urllib.parse import quote, urlparse
 import httpx
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm.exc import StaleDataError
 
 from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
@@ -22,6 +23,7 @@ from .db import Job, utcnow
 from .elevenlabs_audio import AUDIO_MODELS
 from .providers.base import TERMINAL_STATUSES, Polled, Provider, ProviderError
 from .providers.registry import DEFAULT_PROVIDER
+from .routing import requote, stale
 from .voice import VOICE_MODEL
 
 # Trabajos locales (ElevenLabs): no ocupan concurrencia de los proveedores.
@@ -39,6 +41,7 @@ class Worker:
         self.sessions = sessions
         self.providers = providers
         self.settings = settings
+        self.router = None  # routing.Router, lo pone la API: recotiza opciones viejas antes de enviarlas
         self._wake = asyncio.Event()
         self._submit_paused_until = utcnow()
         self._task: asyncio.Task | None = None
@@ -133,12 +136,17 @@ class Worker:
         async with self.sessions() as session:
             # Reclamo atómico: evita envíos dobles si corren varios procesos.
             claimed = await session.execute(
-                update(Job).where(Job.id == job_id, Job.status == "pending").values(status="submitting")
+                update(Job)
+                .where(Job.id == job_id, Job.status == "pending")
+                .values(status="submitting", version=Job.version + 1)
             )
             await session.commit()
             if claimed.rowcount != 1:
                 return True
             job = await session.get(Job, job_id)
+            if not await self.refresh_quote(job):
+                await self.commit(session, job_id)
+                return True
             job.attempts += 1
             webhook = self.webhook_url(job)
             model, arguments = self.target(job)
@@ -146,7 +154,7 @@ class Worker:
                 result = await self.provider(job).submit_job(model, arguments, webhook)
             except ProviderError as exc:
                 keep_going = self._handle_submit_error(job, exc)
-                await session.commit()
+                await self.commit(session, job_id)
                 return keep_going
             job.hf_request_id = result.request_id
             job.status_url = result.status_url
@@ -157,15 +165,29 @@ class Worker:
             job.poll_delay = 2.0
             job.next_check_at = job.submitted_at + timedelta(seconds=2)
             job.error = job.error_kind = None
-            await session.commit()
+            if not await self.commit(session, job_id):
+                # Nadie más debería tocar un trabajo en `submitting`: si pasa, la tarea remota queda
+                # registrada en el log para revisarla a mano (nunca se reenvía).
+                log.error("Trabajo %s: tarea %s en %s sin guardar", job_id, result.request_id, job.provider)
+                return True
             log.info("Trabajo %s enviado a %s como %s", job.id, job.provider, job.hf_request_id)
             if result.status in TERMINAL_STATUSES:
                 final = result.polled or await self.provider(job).poll_job(
                     result.request_id, result.status_url
                 )
                 await self.apply_polled(session, job, final)
-                await session.commit()
+                await self.commit(session, job_id)
             return True
+
+    async def commit(self, session: AsyncSession, job_id: str) -> bool:
+        """Guarda si nadie cambió el trabajo desde que se leyó; si lo cambió, descarta esta escritura."""
+        try:
+            await session.commit()
+        except StaleDataError:
+            await session.rollback()
+            log.info("Trabajo %s cambió mientras se procesaba: se descarta un resultado viejo", job_id)
+            return False
+        return True
 
     def webhook_url(self, job: Job) -> str | None:
         if not self.settings.public_base_url:
@@ -227,31 +249,65 @@ class Worker:
 
     def fallback(self, job: Job, kind: str | None, message: str | None) -> None:
         """El proveedor actual falló sin cobrar: pasa al siguiente del plan. Corre solo si cuesta lo mismo
-        o menos que lo aprobado (`max_usd`); si cuesta más o no tiene precio, espera aprobación."""
+        o menos que lo aprobado (`max_usd`); si cuesta más o no tiene precio, espera aprobación. En los dos
+        casos el trabajo apunta ya al siguiente (`plan_index`); el envío recotiza si la cotización es vieja."""
         failed = self._title(job.provider)
         job.attempts_log = [
             *(job.attempts_log or []),
             {"provider": job.provider, "request_id": job.hf_request_id, "error_kind": kind, "error": message,
              "at": utcnow().isoformat()},
         ]  # fmt: skip
-        option = job.plan[job.plan_index + 1]
+        job.plan_index += 1
+        option = job.plan[job.plan_index]
+        job.provider = option["provider"]
         job.hf_request_id = job.status_url = job.cancel_url = None
         job.outputs, job.attempts, job.next_check_at = [], 0, None
-        title, usd = self._title(option["provider"]), option.get("usd")
-        if usd is not None and job.max_usd is not None and usd <= job.max_usd + 1e-9:
-            job.plan_index += 1
-            job.provider = option["provider"]
+        title = self._title(option["provider"])
+        if self.within_budget(job, option.get("usd")):
             job.status, job.error_kind = "pending", None
             job.error = f"{failed} failed ({message}); trying {title}"
             log.info("Trabajo %s: %s falló (%s), pasa a %s", job.id, failed, kind, option["provider"])
             return
-        price = f"{usd:.2f} USD" if usd is not None else "an unknown price"
-        approved = f"{job.max_usd:.2f} USD" if job.max_usd is not None else "no price"
-        job.status, job.error_kind = "awaiting_approval", "needs_approval"
+        self.ask_approval(job, f"{failed} failed ({message}).")
+
+    @staticmethod
+    def within_budget(job: Job, usd: float | None) -> bool:
+        return usd is not None and job.max_usd is not None and usd <= job.max_usd + 1e-9
+
+    def ask_approval(self, job: Job, reason: str) -> None:
+        option = job.plan[job.plan_index]
+        usd = option.get("usd")
+        price = f"{usd:.4f} USD" if usd is not None else "an unknown price"
+        approved = f"{job.max_usd:.4f} USD" if job.max_usd is not None else "no price"
+        job.status, job.error_kind, job.next_check_at = "awaiting_approval", "needs_approval", None
         job.error = (
-            f"{failed} failed ({message}). {title} can do it for {price} (you approved {approved}). "
+            f"{reason} {self._title(option['provider'])} can do it for {price} (you approved {approved}). "
             f"Approve with POST /v1/generations/{job.id}/approve or cancel it."
         )
+
+    async def refresh_quote(self, job: Job) -> bool:
+        """Antes de enviar una opción cotizada hace más de 15 min, vuelve a cotizarla. False si el precio
+        nuevo supera lo aprobado (o ya no hay precio): el trabajo queda esperando aprobación."""
+        option = job.plan[job.plan_index] if job.plan else None
+        if option is None or self.router is None or not stale(option):
+            return True
+        model = self.router.catalog.get(job.model)
+        fresh = await requote(self.router, model, job.input, option) if model else None
+        if fresh is None:
+            if self.has_fallback(job):
+                self.fallback(
+                    job, "unavailable", f"{self._title(job.provider)} can no longer run this request"
+                )
+            else:
+                self._finish(job, "failed", "unavailable", "No provider can run this request anymore")
+            return False
+        plan = list(job.plan)
+        plan[job.plan_index] = fresh
+        job.plan = plan
+        if self.within_budget(job, fresh["usd"]):
+            return True
+        self.ask_approval(job, "The price changed since it was quoted.")
+        return False
 
     def _with_attempts(self, job: Job, message: str | None) -> str | None:
         if not job.attempts_log:
@@ -263,17 +319,21 @@ class Worker:
 
     async def poll_due(self) -> None:
         async with self.sessions() as session:
-            jobs = (
+            ids = (
                 await session.scalars(
-                    select(Job)
+                    select(Job.id)
                     .where(Job.status.in_(("queued", "in_progress")), Job.next_check_at <= utcnow())
                     .order_by(Job.next_check_at)
                     .limit(POLL_BATCH)
                 )
             ).all()
-            for job in jobs:
-                await self.refresh(session, job)
-                await session.commit()
+        for job_id in ids:
+            # Una sesión por trabajo: un conflicto de versión en uno no deja caducados a los demás.
+            async with self.sessions() as session:
+                job = await session.get(Job, job_id)
+                if job is not None and job.status in ("queued", "in_progress"):
+                    await self.refresh(session, job)
+                    await self.commit(session, job_id)
 
     async def refresh(self, session: AsyncSession, job: Job) -> None:
         """Consulta el estado autoritativo en el proveedor y lo aplica al trabajo."""
@@ -369,7 +429,10 @@ class Worker:
                 self._finish(
                     job, "timed_out", "timeout", f"Exceeded {self.settings.job_timeout_seconds}s.{remote}"
                 )
-            await session.commit()
+            try:
+                await session.commit()
+            except StaleDataError:  # alguno cambió a la vez: el siguiente ciclo lo vuelve a mirar
+                await session.rollback()
 
     @staticmethod
     def _finish(job: Job, status: str, kind: str | None, error: str | None) -> None:
