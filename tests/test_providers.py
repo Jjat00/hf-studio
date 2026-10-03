@@ -356,3 +356,18 @@ async def test_concurrent_downloads_of_the_same_source_do_not_clash(tmp_path):
         )
     assert all(isinstance(r, str) and Path(r).read_bytes() == mp4 for r in results), results
     assert not list((tmp_path / "sources").glob("*.part"))
+
+
+@pytest.mark.parametrize(
+    ("message", "kind"),
+    [("resolution is not within the range of allowed options", "validation"),
+     ("Internal server error", "ambiguous"), ("System busy, please try again", "ambiguous")],
+)  # fmt: skip
+async def test_kie_code_500_is_only_safe_when_it_names_a_parameter(message, kind):
+    """Revisión 34: el número 500 no basta para saber que no se creó la tarea."""
+    body = {"code": 500, "msg": message, "data": None}
+    with pytest.raises(ProviderError) as info:
+        await KIEProvider(settings(**KEYS), mock(lambda r: httpx.Response(200, json=body))).submit_job(
+            "m", {}
+        )
+    assert info.value.kind == kind and info.value.fallback_safe == (kind == "validation")

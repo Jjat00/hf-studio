@@ -568,3 +568,26 @@ async def test_a_batch_cannot_mix_a_total_cap_with_an_unknown_acceptance(env):
     assert r.status_code == 422 and r.json()["error"]["code"] == "conflicting_approval"
     async with app.state.sessions() as s:
         assert (await s.scalars(select(Job))).all() == []
+
+
+async def test_a_kie_internal_error_never_falls_back(env):
+    """Revisión 34: KIE con HTTP 200 y code 500 genérico: un solo POST y ningún respaldo."""
+    app, http, fakes = env
+    original = fakes.__call__
+
+    def kie_internal(request):
+        if request.url.host == "api.kie.ai" and request.method == "POST":
+            fakes.sent["kie"].append(json.loads(request.content))
+            return httpx.Response(200, json={"code": 500, "msg": "Internal server error", "data": None})
+        return original(request)
+
+    app.state.providers["kie"]._api._transport = httpx.MockTransport(kie_internal)
+    app.state.prices.store(
+        "apimart", {}
+    )  # KIE (1,025) es el más barato; Higgsfield (1,51) cabe como respaldo
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 5})).json()
+    assert job["provider"] == "kie" and [o["provider"] for o in job["plan"]][:2] == ["kie", "higgsfield"]
+    await tick(app, polls=3)
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert state["status"] == "failed" and state["error_kind"] == "submission_ambiguous"
+    assert len(fakes.sent["kie"]) == 1 and fakes.sent["apimart"] == [] and fakes.sent["higgsfield"] == []
