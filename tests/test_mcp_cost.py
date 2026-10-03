@@ -220,4 +220,4 @@ def test_accepting_an_unknown_batch_total_sends_no_ceiling(monkeypatch):
     monkeypatch.setattr(mcp_server, "_call", call)
     q = mcp_server.generate_batch(ITEMS, dry_run=True)["quote_id"]
     mcp_server.generate_batch(ITEMS, dry_run=False, quote_id=q, confirm_unknown_cost=True)
-    assert sent[0]["max_total_usd"] is None and sent[0]["max_total_reserve_usd"] is None
+    assert sent[0]["max_total_usd"] is None and sent[0]["accept_unknown_cost"] is True

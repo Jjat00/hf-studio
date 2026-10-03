@@ -8,6 +8,7 @@ mide sobre una copia local, sin red y solo con demuxers de contenedores de video
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 from pathlib import Path
 
@@ -28,6 +29,12 @@ _SIGNATURES = {
 }
 # Demuxers de contenedor: nada de dash, hls, concat, image2… que abren otros archivos o URLs.
 VIDEO_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm"
+
+
+def _head(path: Path) -> bytes:
+    """Los primeros bytes (firma) de un archivo local."""
+    with path.open("rb") as fh:
+        return fh.read(16)
 
 
 def is_media_container(head: bytes) -> bool:
@@ -72,14 +79,16 @@ async def cached_source(url: str, storage: Path, client: httpx.AsyncClient, max_
     path = folder / hashlib.sha256(url.encode()).hexdigest()
     if path.is_file():
         return str(path)
-    tmp = path.with_suffix(".part")
+    # Un temporal propio por descarga: dos descargas simultáneas de la misma URL no se pisan (revisión 30).
+    fd, name = tempfile.mkstemp(prefix=f"{path.name}.", suffix=".part", dir=folder)
+    os.close(fd)
+    tmp = Path(name)
     try:
         if not await _download(url, client, max_bytes, tmp):
             return None
-        with tmp.open("rb") as fh:
-            if not is_media_container(fh.read(16)):
-                return None
-        tmp.replace(path)
+        if not is_media_container(_head(tmp)):
+            return None
+        tmp.replace(path)  # atómico; si otra descarga ganó, el contenido es el mismo
     finally:
         tmp.unlink(missing_ok=True)
     return str(path)
@@ -98,8 +107,7 @@ async def local_duration(
         path = Path(tmp) / "media"
         if not await _download(url, client, max_bytes, path):
             return None
-        with path.open("rb") as fh:
-            head = fh.read(16)
+        head = _head(path)
         if not matches_type(head, "video/mp4") and head[:4] != b"\x1a\x45\xdf\xa3":
             return None  # ni MP4/MOV ni Matroska/WebM
         code, out = await _run(

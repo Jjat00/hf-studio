@@ -86,6 +86,7 @@ export const studio = {
     maxUsd?: number | null,
     hints: Record<string, number> = {},
     maxReserveUsd?: number | null,
+    acceptUnknownCost = false,
   ) =>
     call<Generation>("/v1/generations", {
       method: "POST",
@@ -97,6 +98,7 @@ export const studio = {
         hints,
         ...(maxUsd != null ? { max_usd: maxUsd } : {}),
         ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+        ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
       }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */

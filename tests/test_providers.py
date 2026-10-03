@@ -325,3 +325,34 @@ async def test_unclear_submissions_are_ambiguous_on_every_provider(response):
             await provider.submit_job("m", {"prompt": "x"})
         assert info.value.kind == "ambiguous", (cls.name, info.value.kind, info.value.message)
         assert not info.value.fallback_safe and not info.value.retryable
+
+
+async def test_concurrent_downloads_of_the_same_source_do_not_clash(tmp_path):
+    """Revisión 30: dos descargas simultáneas de la misma URL usan temporales distintos."""
+    import asyncio
+
+    from hf_studio.media import cached_source
+
+    mp4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64
+    both_open = asyncio.Event()
+    opened = 0
+
+    class Slow(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            nonlocal opened
+            opened += 1
+            if opened == 2:
+                both_open.set()
+            await both_open.wait()
+            yield mp4
+
+    async def handler(request):
+        return httpx.Response(200, stream=Slow())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        results = await asyncio.gather(
+            *(cached_source("https://cdn.test/same.mp4", tmp_path, client, 10_000) for _ in range(2)),
+            return_exceptions=True,
+        )
+    assert all(isinstance(r, str) and Path(r).read_bytes() == mp4 for r in results), results
+    assert not list((tmp_path / "sources").glob("*.part"))

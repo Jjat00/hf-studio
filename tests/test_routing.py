@@ -316,8 +316,10 @@ async def test_a_stale_quote_is_requoted_before_sending(env):
     await tick(app)  # APIMart sin saldo → KIE, que ahora cuesta 2,50: no se envía
     await tick(app)
     state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    # El plan se rehízo con las tarifas de ahora: tras APIMart, el respaldo más barato es Higgsfield (1,51),
+    # no KIE (2,50); como supera lo aprobado (1,10), espera aprobación y KIE no recibe nada.
     assert state["status"] == "awaiting_approval" and fakes.sent["kie"] == []
-    assert "price changed" in state["error"] and state["cost_usd"] == 2.5
+    assert state["provider"] == "higgsfield" and state["cost_usd"] == 1.51
 
 
 async def test_a_batch_keeps_the_approved_total(env):
@@ -413,3 +415,50 @@ async def test_a_rejected_approval_shows_the_new_price(env):
     state = (await http.get(f"/v1/generations/{job['id']}")).json()
     assert state["status"] == "awaiting_approval" and state["cost_usd"] == 2.5
     assert (await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 2.5})).status_code == 200
+
+
+# --- Revisión 30 ----------------------------------------------------------------------------------
+
+
+async def test_accepting_an_unknown_total_still_requires_the_hold(env):
+    app, http, fakes = env
+    fakes.hf_usd = "9.000"  # APIMart (con retención) es el más barato
+    edit = {
+        "prompt": "Remove the passers-by from video 1",
+        "video_url": "https://cdn.test/in.mp4",
+        "resolution": "720p",
+    }
+    items = [{"model": "bytedance/seedance-2.5/video-edit", "input": edit, "hints": {"input_video_seconds": 8}},
+             {"model": T2V, "input": VIDEO, "provider": "apimart"}]  # fmt: skip
+    prices = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    prices["seedance-2.5|720P-input"] *= 2  # la retención sube a 9,85 USD
+    app.state.prices.store("apimart", prices)
+    r = await http.post("/v1/generations/batch", json={"items": items[:1], "accept_unknown_cost": True,
+                                                        "max_total_reserve_usd": 4.9248})  # fmt: skip
+    assert r.status_code == 409 and r.json()["error"]["code"] == "reserve_not_approved"
+    async with app.state.sessions() as s:
+        assert (await s.scalars(select(Job))).all() == []
+
+
+async def test_an_accepted_unknown_price_is_honored_for_that_option(env):
+    app, http, fakes = env
+    app.state.prices.store("apimart", {})
+    r = await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "apimart",
+                                                  "accept_unknown_cost": True})  # fmt: skip
+    assert r.status_code == 202 and r.json()["cost_usd"] is None
+    await tick(app)
+    assert len(fakes.sent["apimart"]) == 1
+    assert (await http.get(f"/v1/generations/{r.json()['id']}")).json()["status"] == "queued"
+
+
+async def test_the_cheapest_provider_is_reconsidered_before_the_first_send(env):
+    app, http, fakes = env
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 2})).json()
+    assert job["provider"] == "apimart"
+    prices = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    prices["seedance-2.0|720P"] = 0.3  # APIMart pasa a 1,50; KIE (1,025) es ahora el más barato
+    app.state.prices.store("apimart", prices)
+    await tick(app)
+    assert fakes.sent["apimart"] == [] and len(fakes.sent["kie"]) == 1
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert state["provider"] == "kie" and state["cost_usd"] == 1.025

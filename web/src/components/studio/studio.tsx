@@ -259,6 +259,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
         current?.value?.usd ?? null,
         JSON.parse(hintsKey) as Record<string, number>,
         current?.value?.reserve_usd ?? null,
+        // Llegar aquí sin precio completo significa que el usuario confirmó un costo desconocido.
+        !costAllowsDirectSubmit(current?.value ?? null),
       );
       add(g);
       setView("history");

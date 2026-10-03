@@ -113,6 +113,9 @@ RESERVE_FIELD = (
 
 class GenerationIn(BaseModel):
     model: str = Field(description="ID del endpoint, p. ej. bytedance/seedance-2.0/text-to-video")
+    accept_unknown_cost: bool = Field(
+        False, description="El usuario aceptó explícitamente un precio desconocido (solo para esta opción)"
+    )
     max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
     input: dict[str, Any] = Field(description="Argumentos según el input_schema del modelo")
     max_usd: float | None = Field(
@@ -153,6 +156,9 @@ class BatchIn(BaseModel):
     max_total_reserve_usd: float | None = Field(
         None, ge=0, description="Suma de retenciones iniciales aprobada"
     )
+    accept_unknown_cost: bool = Field(
+        False, description="Se aceptó explícitamente un total con precios desconocidos"
+    )
 
 
 class PresetIn(BaseModel):
@@ -177,6 +183,9 @@ class PresetRun(BaseModel):
     dry_run: bool = False
     hints: dict[str, Hint] = Field(default_factory=dict)
     max_usd: float | None = Field(None, ge=0, description="Precio aprobado (el del dry_run); si subió, 409")
+    accept_unknown_cost: bool = Field(
+        False, description="El usuario aceptó explícitamente un precio desconocido (solo para esta opción)"
+    )
     max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
 
 
@@ -190,6 +199,7 @@ class EstimateIn(BaseModel):
 
 
 class ApproveIn(BaseModel):
+    accept_unknown_cost: bool = Field(False, description="Aprueba aunque el precio actual sea desconocido")
     max_usd: float = Field(
         ge=0, description="Precio que se aprueba; se recotiza y si cuesta más responde 409"
     )
@@ -466,29 +476,40 @@ def create_app(
             raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
         return await request.app.state.router.plan(model, arguments, hints, only=provider)
 
-    def check_ceiling(
-        option, max_usd: float | None, plan: Plan | None = None, max_reserve_usd: float | None = None
+    def check_reserve(
+        reserve: float | None, approved: float | None, details=None, what: str = "This provider"
     ) -> None:
-        """Con un precio aprobado, la opción debe tener precio completo y no superarlo; si retiene más al
-        empezar, esa retención también tiene que estar aprobada (revisión 29)."""
-        if max_usd is None:
-            return
-        details = plan.public() if plan else None
-        reserve = option.reserve_usd
-        if reserve is not None and (
-            max_reserve_usd is None or reserve > max_reserve_usd + COST_TOLERANCE_USD
-        ):
+        if reserve and (approved is None or reserve > approved + COST_TOLERANCE_USD):
             raise ServiceError(409, "reserve_not_approved",
-                               f"This provider first holds {reserve:.4f} USD (refunded after); approve max_reserve_usd",
+                               f"{what} first holds {reserve:.4f} USD (refunded after); approve that hold",
                                details)  # fmt: skip
-        if option.usd is None or option.missing:
-            raise ServiceError(409, "cost_unknown",
-                               "The price is no longer known; quote again before generating", details)  # fmt: skip
-        if option.usd > max_usd + COST_TOLERANCE_USD:
-            raise ServiceError(
-                409, "cost_changed",
-                f"The cheapest option now costs {option.usd:.4f} USD (approved {max_usd:.4f}); quote again", details,
-            )  # fmt: skip
+
+    def authorize(
+        plan: Plan, max_usd: float | None, max_reserve_usd: float | None, accept_unknown: bool
+    ) -> tuple[list[dict], float | None, float | None]:
+        """Comprueba lo aprobado contra la opción más barata de ahora y devuelve (plan para guardar, precio
+        aprobado, retención aprobada). La retención se aprueba aparte del precio: también con un precio
+        desconocido aceptado (revisión 30). Una petición sin ningún dato de aprobación (API directa, sin
+        cotización previa) aprueba lo que cueste ahora."""
+        best, details = plan.best, plan.public()
+        unknown = best.usd is None or bool(best.missing)
+        if max_usd is not None:
+            if unknown and not accept_unknown:
+                raise ServiceError(409, "cost_unknown",
+                                   "The price is no longer known; quote again before generating", details)  # fmt: skip
+            if not unknown and best.usd > max_usd + COST_TOLERANCE_USD:
+                raise ServiceError(
+                    409, "cost_changed",
+                    f"The cheapest option now costs {best.usd:.4f} USD (approved {max_usd:.4f}); quote again", details,
+                )  # fmt: skip
+        quoted = max_usd is not None or max_reserve_usd is not None or accept_unknown
+        if quoted:
+            check_reserve(best.reserve_usd, max_reserve_usd, details)
+        stored = plan.stored()
+        if accept_unknown and unknown:
+            stored[0]["unknown_accepted"] = True  # solo esta opción; un respaldo pedirá aprobación
+        approved_usd = max_usd if max_usd is not None else best.usd
+        return stored, approved_usd, (max_reserve_usd if quoted else best.reserve_usd)
 
     def estimate_body(plan: Plan) -> dict:
         """Costo de la opción elegida con los campos de siempre, más todas las opciones y el ahorro."""
@@ -607,7 +628,9 @@ def create_app(
         best = plan.best
         if best is None:
             raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
-        check_ceiling(best, body.max_usd, plan, body.max_reserve_usd)
+        stored, approved_usd, approved_reserve = authorize(
+            plan, body.max_usd, body.max_reserve_usd, body.accept_unknown_cost
+        )
         job, created = await create_generation(
             session,
             settings,
@@ -618,9 +641,9 @@ def create_app(
             idempotency_key,
             body.allow_duplicate,
             keep_source_audio=body.keep_source_audio,
-            plan=plan.stored(),
-            max_usd=body.max_usd if body.max_usd is not None else best.usd,
-            max_reserve_usd=body.max_reserve_usd,
+            plan=stored,
+            max_usd=approved_usd,
+            max_reserve_usd=approved_reserve,
         )
         if created:
             request.app.state.worker.wake()
@@ -714,31 +737,38 @@ def create_app(
             if plan.best is None:
                 raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
             plans.append(plan)
+        # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisiones 28 a 30).
+        unknown = [p.best.usd is None or bool(p.best.missing) for p in plans]
         if body.max_total_usd is not None:
-            # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisión 28).
-            if any(p.best.usd is None or p.best.missing for p in plans):
+            if any(unknown) and not body.accept_unknown_cost:
                 raise ServiceError(
                     409, "cost_unknown", "Some item no longer has a price; quote the batch again"
                 )
-            cost = sum(p.best.usd * i.count for p, i in zip(plans, body.items, strict=True))
-            held = sum((p.best.reserve_usd or 0) * i.count for p, i in zip(plans, body.items, strict=True))
-            if held and (
-                body.max_total_reserve_usd is None or held > body.max_total_reserve_usd + COST_TOLERANCE_USD
-            ):
-                raise ServiceError(409, "reserve_not_approved",
-                                   f"The batch first holds {held:.4f} USD (refunded after); approve max_total_reserve_usd",
-                                   held)  # fmt: skip
+            cost = sum(
+                p.best.usd * i.count for p, i, u in zip(plans, body.items, unknown, strict=True) if not u
+            )
             if cost > body.max_total_usd + COST_TOLERANCE_USD:
                 raise ServiceError(409, "cost_changed",
                                    f"The batch now costs {cost:.4f} USD (approved {body.max_total_usd:.4f})", cost)  # fmt: skip
+        quoted = (
+            body.max_total_usd is not None
+            or body.max_total_reserve_usd is not None
+            or body.accept_unknown_cost
+        )
+        held = sum((p.best.reserve_usd or 0) * i.count for p, i in zip(plans, body.items, strict=True))
+        if quoted:
+            check_reserve(held, body.max_total_reserve_usd, held, "The batch")
         jobs, created_any = [], False
         n = 0
         for item, plan in zip(body.items, plans, strict=True):
             for _ in range(item.count):
                 key = f"{idempotency_key}:{n}" if idempotency_key else None
+                stored = plan.stored()
+                if body.accept_unknown_cost and (plan.best.usd is None or plan.best.missing):
+                    stored[0]["unknown_accepted"] = True
                 job, created = await create_generation(
                     session, settings, catalog, owner, item.model, item.input, key, allow_duplicate=True,
-                    plan=plan.stored(),
+                    plan=stored, max_reserve_usd=plan.best.reserve_usd if quoted else None,
                 )  # fmt: skip
                 jobs.append(job)
                 created_any |= created
@@ -794,7 +824,9 @@ def create_app(
                 409, "provider_unavailable", "That provider can no longer run this request; cancel it"
             )
         problem = None
-        if fresh["usd"] is None:
+        if fresh["usd"] is None and body.accept_unknown_cost:
+            fresh["unknown_accepted"] = True
+        elif fresh["usd"] is None:
             problem = ("cost_unknown", "The price is unknown now; cancel it or try later")
         elif fresh["usd"] > body.max_usd + COST_TOLERANCE_USD:
             problem = ("cost_changed", f"It now costs {fresh['usd']:.4f} USD, more than {body.max_usd:.4f}")
@@ -825,7 +857,7 @@ def create_app(
             update(Job)
             .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version,
                    Job.plan_index == index)
-            .values(status="pending", plan=plan, max_usd=max(job.max_usd or 0, fresh["usd"]), error=None,
+            .values(status="pending", plan=plan, max_usd=max(job.max_usd or 0, fresh["usd"] or 0) or job.max_usd, error=None,
                     max_reserve_usd=max(job.max_reserve_usd or 0, fresh.get("reserve_usd") or 0) or job.max_reserve_usd,
                     error_kind=None, next_check_at=None, version=Job.version + 1)
         )  # fmt: skip
@@ -986,10 +1018,12 @@ def create_app(
         plan = await make_plan(request, session, owner, model, model_input, body.hints)
         if plan.best is None:
             raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
-        check_ceiling(plan.best, body.max_usd, plan, body.max_reserve_usd)
+        stored, approved_usd, approved_reserve = authorize(
+            plan, body.max_usd, body.max_reserve_usd, body.accept_unknown_cost
+        )
         job, created = await create_generation(
-            session, settings, catalog, owner, preset["model"], model_input, idempotency_key, plan=plan.stored(),
-            max_usd=body.max_usd, max_reserve_usd=body.max_reserve_usd,
+            session, settings, catalog, owner, preset["model"], model_input, idempotency_key, plan=stored,
+            max_usd=approved_usd, max_reserve_usd=approved_reserve,
         )  # fmt: skip
         if created:
             request.app.state.worker.wake()

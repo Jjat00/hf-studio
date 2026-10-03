@@ -282,9 +282,14 @@ class Worker:
         """Precio final dentro de lo aprobado y, si el proveedor retiene más al empezar, esa retención
         también aprobada (revisión 29)."""
         usd, reserve = option.get("usd"), option.get("reserve_usd")
-        if usd is None or job.max_usd is None or usd > job.max_usd + 1e-9:
-            return False
-        return reserve is None or (job.max_reserve_usd is not None and reserve <= job.max_reserve_usd + 1e-9)
+        # Un precio desconocido aceptado vale solo para la opción que se aceptó (revisión 30).
+        price_ok = bool(option.get("unknown_accepted")) or (
+            usd is not None and job.max_usd is not None and usd <= job.max_usd + 1e-9
+        )
+        reserve_ok = reserve is None or (
+            job.max_reserve_usd is not None and reserve <= job.max_reserve_usd + 1e-9
+        )
+        return price_ok and reserve_ok
 
     def ask_approval(self, job: Job, reason: str) -> None:
         option = job.plan[job.plan_index]
@@ -305,13 +310,18 @@ class Worker:
         option = job.plan[job.plan_index] if job.plan else None
         if option is None or self.router is None:
             return True
+        model = self.router.catalog.get(job.model)
+        if model is None:
+            return True
+        first_try = job.plan_index == 0 and not job.attempts_log
+        if first_try and not option.get("forced") and not option.get("unknown_accepted"):
+            return await self.replan(job, model, option)
         provider = self.providers.get(option["provider"])
         # Con tabla local, recotizar es gratis: se hace siempre (una tarifa nueva ya conocida manda). Las
         # cotizaciones remotas (Higgsfield) solo si tienen más de 15 min.
         if not stale(option) and not (provider and provider.has_price_table):
             return True
-        model = self.router.catalog.get(job.model)
-        fresh = await requote(self.router, model, job.input, option) if model else None
+        fresh = await requote(self.router, model, job.input, option)
         if fresh is None:
             if self.has_fallback(job):
                 self.fallback(
@@ -327,6 +337,22 @@ class Worker:
             return True
         self.ask_approval(job, "The price changed since it was quoted.")
         return False
+
+    async def replan(self, job: Job, model: dict, option: dict) -> bool:
+        """Primer envío automático: rehace el plan con las tarifas de ahora y elige el más barato que quepa
+        en lo aprobado (precio y retención). Si ninguno cabe, pide aprobación del más barato (revisión 30)."""
+        plan = (await self.router.plan(model, job.input, option.get("hints") or {})).stored()
+        if not plan:
+            self._finish(job, "failed", "unavailable", "No provider can run this request anymore")
+            return False
+        fits = next((i for i, o in enumerate(plan) if self.within_budget(job, o)), None)
+        if fits is None:
+            job.plan, job.plan_index, job.provider = plan, 0, plan[0]["provider"]
+            self.ask_approval(job, "The price changed since it was quoted.")
+            return False
+        # Las más baratas que no caben quedan fuera: ya no se reintentan como respaldo sin aprobación.
+        job.plan, job.plan_index, job.provider = plan[fits:], 0, plan[fits]["provider"]
+        return True
 
     def _with_attempts(self, job: Job, message: str | None) -> str | None:
         if not job.attempts_log:

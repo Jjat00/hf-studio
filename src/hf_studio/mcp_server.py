@@ -197,6 +197,7 @@ def generate(
         # El precio que vio el usuario: si subió, la API responde 409 y hay que volver a cotizar.
         "max_usd": approved["usd"],
         "max_reserve_usd": approved["reserve_usd"],
+        "accept_unknown_cost": approved["accept_unknown_cost"],
     }
     return _call("POST", "/v1/generations", json=body, headers=headers)
 
@@ -664,8 +665,9 @@ def _authorize(
         q["key"] = key
         estimate = dict(q["estimate"])
         complete = _complete(estimate)
-        approved = {"usd": estimate.get("usd") if complete else None,
-                    "reserve_usd": estimate.get("reserve_usd") if complete else None}  # fmt: skip
+        # La retención vista se aprueba siempre por separado, también con un precio desconocido aceptado.
+        approved = {"usd": estimate.get("usd") if complete else None, "reserve_usd": estimate.get("reserve_usd"),
+                    "accept_unknown_cost": not complete}  # fmt: skip
         return key, approved
 
 
@@ -696,7 +698,7 @@ def generate_batch(
     key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
     headers = {"Idempotency-Key": key}
     body = {**payload, "dry_run": False, "max_total_usd": approved["usd"],
-            "max_total_reserve_usd": approved["reserve_usd"]}  # fmt: skip
+            "max_total_reserve_usd": approved["reserve_usd"], "accept_unknown_cost": approved["accept_unknown_cost"]}  # fmt: skip
     return _call("POST", "/v1/generations/batch", json=body, headers=headers)
 
 
@@ -768,7 +770,8 @@ def run_preset(
         return {**quote, "quote_id": _issue_quote(payload, quote["estimate"])}
     key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
     headers = {"Idempotency-Key": key}
-    body = {**body, "dry_run": False, "max_usd": approved["usd"], "max_reserve_usd": approved["reserve_usd"]}
+    body = {**body, "dry_run": False, "max_usd": approved["usd"], "max_reserve_usd": approved["reserve_usd"],
+            "accept_unknown_cost": approved["accept_unknown_cost"]}  # fmt: skip
     return _call("POST", f"/v1/presets/{slug}/run", json=body, headers=headers)
 
 

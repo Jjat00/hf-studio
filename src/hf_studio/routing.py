@@ -57,6 +57,7 @@ class Plan:
     options: list[Option]  # utilizables, de la más barata a la más cara
     excluded: list[dict[str, Any]]  # {provider, title, reason, usd?, key_url?}
     hints: dict[str, Any] = field(default_factory=dict)
+    forced: bool = False  # el usuario eligió el proveedor: no se reordena por precio
 
     @property
     def best(self) -> Option | None:
@@ -88,7 +89,7 @@ class Plan:
         """Lo que se guarda en el trabajo para el worker."""
         now = time.time()
         return [{"provider": o.provider, "model": o.model, "input": o.input, "usd": o.usd, "kind": o.kind,
-                 "reserve_usd": o.reserve_usd, "quoted_at": now, "hints": self.hints}
+                 "reserve_usd": o.reserve_usd, "quoted_at": now, "hints": self.hints, "forced": self.forced}
                 for o in self.options]  # fmt: skip
 
 
@@ -155,7 +156,7 @@ class Router:
             options.append(option)
         order = {name: i for i, name in enumerate(PROVIDERS)}
         options.sort(key=lambda o: (o.usd is None, o.usd or 0, not o.official, order.get(o.provider, 99)))
-        return Plan(model["id"], options, excluded, hints)
+        return Plan(model["id"], options, excluded, hints, forced=only is not None)
 
     async def _option(
         self,
