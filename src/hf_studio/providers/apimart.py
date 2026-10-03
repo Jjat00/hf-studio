@@ -118,7 +118,7 @@ class APIMartProvider(Provider):
             ) from exc
         if not response.is_success:
             error = self._error(response)
-            if error.kind in ("server",):
+            if error.kind in ("server", "unavailable"):
                 # Un 5xx genérico tras el POST no garantiza que no se creó la tarea (revisión 28).
                 error.kind = "ambiguous"
             raise error
@@ -126,15 +126,15 @@ class APIMartProvider(Provider):
             data = response.json().get("data")
         except (ValueError, AttributeError):
             data = None
-        task = data[0] if isinstance(data, list) and data else data if isinstance(data, dict) else {}
-        task_id = task.get("task_id") or task.get("id")
+        task = data[0] if isinstance(data, list) and data else data
+        task_id = (task.get("task_id") or task.get("id")) if isinstance(task, dict) else None
         if not task_id:
             # Aceptado sin id: pudo crearse y cobrarse; nunca se reintenta ni se salta de proveedor.
             raise ProviderError(
                 "ambiguous", f"APIMart accepted the request without a task id: {response.text[:300]}",
                 provider=self.name,
             )  # fmt: skip
-        return Submitted(task_id, STATUS.get(str(task.get("status")), "queued"), raw=response.json())
+        return Submitted(str(task_id), STATUS.get(str(task.get("status")), "queued"), raw={"data": data})
 
     @classmethod
     def routes(cls):

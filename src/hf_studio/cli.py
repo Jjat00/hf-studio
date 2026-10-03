@@ -81,7 +81,18 @@ async def _keep_source_audio(session, job_id: str) -> int:
         )
         return 1
     storage = Path(get_settings().storage_dir) / "outputs" / job.id
-    job.files = await apply_to_files(job.files, storage, source)
+    import httpx
+
+    from .media import cached_source
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        local = await cached_source(
+            source, Path(get_settings().storage_dir), client, get_settings().max_upload_bytes
+        )
+    if local is None:
+        print("Could not download the source video as a media file", file=sys.stderr)
+        return 1
+    job.files = await apply_to_files(job.files, storage, local)
     job.keep_source_audio = True
     await session.commit()
     states = [f.get("audio") for f in job.files if f.get("kind") == "video"]

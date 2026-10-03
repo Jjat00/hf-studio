@@ -278,7 +278,7 @@ function ApprovalPanel({ g }: { g: Generation }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const next = currentOption(g);
-  const price = next?.usd != null ? formatUsd(next.usd) : t.approval.unknownPrice;
+  const price = next?.usd != null ? `${next.kind === "approx" ? "~" : ""}${formatUsd(next.usd)}` : t.approval.unknownPrice;
   async function act(fn: () => Promise<unknown>) {
     setBusy(true);
     setError(null);
@@ -295,11 +295,12 @@ function ApprovalPanel({ g }: { g: Generation }) {
       <AlertTriangle className="size-7 text-warning" />
       <p className="text-sm font-semibold">{t.approval.title}</p>
       {g.error && <p className="line-clamp-3 max-w-sm text-xs text-fg-3">{g.error}</p>}
+      {next?.reserve_usd != null && <p className="max-w-sm text-xs text-warning">{t.cost.reserve(formatUsd(next.reserve_usd))}</p>}
       <div className="mt-1 flex gap-2">
         <button
           type="button"
           disabled={busy || next?.usd == null}
-          onClick={() => next?.usd != null && act(() => studio.approve(g.id, next.usd!))}
+          onClick={() => next?.usd != null && act(() => studio.approve(g.id, next.usd!, next.reserve_usd ?? null))}
           className="rounded-lg bg-lime px-3 py-1.5 text-xs font-bold text-black disabled:opacity-50"
         >
           {t.approval.approve(`${price} · ${providerTitle(next?.provider)}`)}

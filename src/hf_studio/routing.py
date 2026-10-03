@@ -88,7 +88,8 @@ class Plan:
         """Lo que se guarda en el trabajo para el worker."""
         now = time.time()
         return [{"provider": o.provider, "model": o.model, "input": o.input, "usd": o.usd, "kind": o.kind,
-                 "quoted_at": now, "hints": self.hints} for o in self.options]  # fmt: skip
+                 "reserve_usd": o.reserve_usd, "quoted_at": now, "hints": self.hints}
+                for o in self.options]  # fmt: skip
 
 
 class Router:
@@ -235,4 +236,5 @@ async def requote(router: Router, model: dict, arguments: dict, option: dict) ->
         return None
     priced = fresh.usd is not None and not fresh.missing
     return {**option, "model": fresh.model, "input": fresh.input or option["input"],
-            "usd": fresh.usd if priced else None, "kind": fresh.kind, "quoted_at": time.time()}  # fmt: skip
+            "usd": fresh.usd if priced else None, "kind": fresh.kind, "reserve_usd": fresh.reserve_usd,
+            "quoted_at": time.time()}  # fmt: skip

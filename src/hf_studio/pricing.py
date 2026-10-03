@@ -224,7 +224,7 @@ async def quote(hf, catalog, model: dict, args: dict, hints: dict) -> dict:
 
 def total(quotes: list[dict], counts: list[int]) -> dict:
     """Suma de USD y créditos; `complete` es False si algún ítem no tiene precio."""
-    usd = credits = 0.0
+    usd = credits = reserve = 0.0
     complete = True
     for q, n in zip(quotes, counts, strict=True):
         if q.get("usd") is None or q.get("missing"):
@@ -232,4 +232,6 @@ def total(quotes: list[dict], counts: list[int]) -> dict:
             continue
         usd += q["usd"] * n
         credits += (q.get("credits") or 0) * n
-    return {"usd": round(usd, 4), "credits": round(credits, 3) or None, "complete": complete}
+        reserve += (q.get("reserve_usd") or 0) * n
+    return {"usd": round(usd, 4), "credits": round(credits, 3) or None, "complete": complete,
+            "reserve_usd": round(reserve, 4) or None}  # fmt: skip

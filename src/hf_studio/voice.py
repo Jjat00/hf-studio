@@ -20,7 +20,7 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel, Field, model_validator
 
-from .audio import PROTOCOLS, duration, has_audio
+from .audio import PROBE_GUARD, duration, guarded, has_audio
 from .config import Settings
 
 log = logging.getLogger(__name__)
@@ -261,7 +261,7 @@ async def probe_duration(source: str) -> float | None:
 async def image_duration(source: str) -> float | None:
     """Lo que dura la imagen (la pista de video), que puede diferir de la del audio."""
     code, out = await _run(
-        "ffprobe", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-select_streams", "v:0",
+        "ffprobe", "-v", "error", *PROBE_GUARD, "-select_streams", "v:0",
         "-show_entries", "stream=duration", "-of", "csv=p=0", source, timeout=60,
     )  # fmt: skip
     try:
@@ -338,7 +338,7 @@ def mix_command(
         f"{wet}[wet];[dry][wet]amix=inputs=2:normalize=0:duration=first,alimiter=limit=0.95[a]"
     )
     return [
-        "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS, "-i", source, "-i", str(voice),
+        "ffmpeg", "-y", "-v", "error", *guarded(source), *guarded(str(voice)),
         "-filter_complex", graph, "-map", "0:v:0", "-map", "[a]",
         # La duración la fija la imagen: el audio original se completa con silencio (apad) si es más corto.
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", *(["-t", f"{total:.3f}"] if total else ["-shortest"]),
@@ -356,8 +356,8 @@ async def change_voice(
     with tempfile.TemporaryDirectory(prefix="hfs-voice-") as tmp:
         segment, converted = Path(tmp) / "segment.wav", Path(tmp) / "voice.mp3"
         code, err = await _run(
-            "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", PROTOCOLS,
-            "-ss", str(start), "-t", str(end - start), "-i", source,
+            "ffmpeg", "-y", "-v", "error",
+            "-ss", str(start), "-t", str(end - start), *guarded(source),
             "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", str(segment),
         )  # fmt: skip
         if code != 0:

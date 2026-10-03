@@ -117,11 +117,12 @@ class HiggsfieldClient(Provider):
         try:
             result = await self.submit(model, arguments, webhook_url)
         except HiggsfieldError as exc:
-            # 503/423 dicen «no disponible» (sin tarea); otro 5xx tras el POST no garantiza nada.
-            if exc.kind == "server":
+            # Solo 423 (modelo bloqueado) dice explícitamente que no se procesó; un 5xx genérico, 503
+            # incluido, puede llegar después de aceptar la tarea (revisión 29).
+            if exc.kind == "server" or exc.status == 503:
                 exc.kind = "ambiguous"
             raise
-        if not result.get("request_id"):
+        if not isinstance(result, dict) or not result.get("request_id"):
             raise HiggsfieldError("ambiguous", "Higgsfield accepted the request without a request_id")
         status = result.get("status")
         return Submitted(
@@ -156,7 +157,15 @@ class HiggsfieldClient(Provider):
             # La petición pudo llegar: reintentarla podría duplicar la generación y el cobro.
             raise HiggsfieldError("ambiguous", f"Submission got no response ({type(exc).__name__})") from exc
         _raise_for(response)
-        return {**response.json(), "_correlation_id": response.headers.get("x-correlation-id")}
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise HiggsfieldError(
+                "ambiguous", "Higgsfield accepted the request with an unreadable answer"
+            ) from exc
+        if not isinstance(body, dict):
+            raise HiggsfieldError("ambiguous", "Higgsfield accepted the request with an unexpected answer")
+        return {**body, "_correlation_id": response.headers.get("x-correlation-id")}
 
     async def status(self, request_id: str, status_url: str | None = None) -> dict:
         url = self._own_url(status_url, f"/requests/{quote(request_id)}/status")

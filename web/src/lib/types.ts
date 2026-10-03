@@ -79,7 +79,9 @@ export type Generation = {
   provider?: string;
   cost_usd?: number | null;
   max_usd?: number | null;
-  plan?: { provider: string; usd: number | null }[];
+  max_reserve_usd?: number | null;
+  reserve_usd?: number | null;
+  plan?: { provider: string; usd: number | null; kind?: string | null; reserve_usd?: number | null }[];
   attempts?: { provider: string; error_kind: string | null; error: string | null; at: string }[];
 };
 

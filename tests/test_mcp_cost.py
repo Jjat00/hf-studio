@@ -188,3 +188,36 @@ def test_generate_sends_the_quoted_price_as_the_ceiling(monkeypatch):
         mcp_server.generate("m", {"prompt": "x"}, quote_id=q)
     mcp_server.generate("m", {"prompt": "x"}, quote_id=q, provider="kie")
     assert sent[0]["max_usd"] == 0.71 and sent[0]["provider"] == "kie"
+
+
+def test_the_approved_ceiling_survives_a_concurrent_quote_cleanup(monkeypatch):
+    """Revisión 29: el tope se copia al canjear; si la cotización desaparece después, se envía igual."""
+    sent = []
+
+    def call(method, path, **kw):
+        if path == "/v1/estimate":
+            return {"usd": 0.71, "complete": True, "missing": [], "reserve_usd": 4.9}
+        mcp_server._quotes.clear()  # limpieza concurrente justo antes de enviar
+        sent.append(kw["json"])
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.estimate_cost("m", {"prompt": "x"})["quote_id"]
+    mcp_server.generate("m", {"prompt": "x"}, quote_id=q)
+    assert sent[0]["max_usd"] == 0.71 and sent[0]["max_reserve_usd"] == 4.9
+
+
+def test_accepting_an_unknown_batch_total_sends_no_ceiling(monkeypatch):
+    """Revisión 29: un subtotal incompleto no se convierte en presupuesto."""
+    sent = []
+
+    def call(method, path, **kw):
+        if kw["json"].get("dry_run"):
+            return {"total": {"usd": 0.0, "complete": False}, "items": []}
+        sent.append(kw["json"])
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.generate_batch(ITEMS, dry_run=True)["quote_id"]
+    mcp_server.generate_batch(ITEMS, dry_run=False, quote_id=q, confirm_unknown_cost=True)
+    assert sent[0]["max_total_usd"] is None and sent[0]["max_total_reserve_usd"] is None

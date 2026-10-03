@@ -77,7 +77,9 @@ class KIEProvider(Provider):
             body = response.json()
         except ValueError:
             body = {"code": response.status_code, "msg": response.text[:300]}
-        code = body.get("code", response.status_code) if isinstance(body, dict) else response.status_code
+        if not isinstance(body, dict):
+            raise ProviderError("server", f"Unexpected KIE answer: {str(body)[:200]}", provider=self.name)
+        code = body.get("code", response.status_code)
         if response.is_success and code == 200:
             return body
         message = str(body.get("msg") or response.reason_phrase)
@@ -121,7 +123,7 @@ class KIEProvider(Provider):
             if exc.kind == "server" or exc.status is None:
                 exc.kind = "ambiguous"
             raise
-        data = body.get("data") or {}
+        data = body.get("data") if isinstance(body, dict) else None
         task_id = data.get("taskId") if isinstance(data, dict) else None
         if not task_id:
             raise ProviderError("ambiguous", "KIE accepted the request without a taskId", provider=self.name)

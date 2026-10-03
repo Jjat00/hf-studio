@@ -215,7 +215,8 @@ async def test_forcing_a_provider(env):
     job = (
         await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "higgsfield"})
     ).json()
-    assert job["provider"] == "higgsfield" and job["plan"] == [{"provider": "higgsfield", "usd": 1.51}]
+    assert job["provider"] == "higgsfield"
+    assert job["plan"] == [{"provider": "higgsfield", "usd": 1.51, "kind": "exact", "reserve_usd": None}]
     await tick(app)
     assert fakes.sent["higgsfield"][0] == VIDEO  # Higgsfield recibe la entrada tal cual
 
@@ -353,3 +354,62 @@ async def test_seedance_edit_shows_the_initial_hold_and_checks_balance_against_i
     est = (await http.post("/v1/estimate", json=body)).json()
     assert "apimart" not in [o["provider"] for o in est["options"]]
     assert any(e["provider"] == "apimart" and "insufficient" in e["reason"] for e in est["excluded"])
+
+
+async def test_a_known_price_change_blocks_sending_even_within_15_minutes(env):
+    """Revisión 29: con tabla local se recotiza siempre antes de enviar."""
+    app, http, fakes = env
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "apimart",
+                                                    "max_usd": 0.71})).json()  # fmt: skip
+    prices = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    prices["seedance-2.0|720P"] = 0.3  # 1,50 USD
+    app.state.prices.store("apimart", prices)
+    await tick(app)
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert state["status"] == "awaiting_approval" and fakes.sent["apimart"] == [] and state["cost_usd"] == 1.5
+
+
+async def test_the_reserve_survives_the_plan_and_needs_approval(env):
+    """Revisión 29: la retención inicial se guarda, se publica y se aprueba aparte en los respaldos."""
+    app, http, fakes = env
+    edit = {
+        "prompt": "Remove the passers-by from video 1",
+        "video_url": "https://cdn.test/in.mp4",
+        "resolution": "720p",
+    }
+    body = {"model": "bytedance/seedance-2.5/video-edit", "input": edit, "hints": {"input_video_seconds": 8}}
+    fakes.hf_usd = "0.100"  # Higgsfield es el más barato; APIMart (con reserva) queda de respaldo
+    est = (await http.post("/v1/estimate", json=body)).json()
+    assert est["provider"] == "higgsfield" and est["options"][1]["reserve_usd"] == 4.9248
+    job = (await http.post("/v1/generations", json={**body, "max_usd": 3.0})).json()
+    assert job["plan"][1] == {"provider": "apimart", "usd": 2.0736, "kind": "approx", "reserve_usd": 4.9248}
+    async with app.state.sessions() as s:  # Higgsfield rechaza el envío sin cobrar
+        row = await s.get(Job, job["id"])
+        app.state.worker.fallback(row, "unavailable", "model locked")
+        await s.commit()
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert (
+        state["status"] == "awaiting_approval" and "holds 4.9248 USD" in state["error"]
+    )  # cabe en 3 USD, la reserva no
+    r = await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 2.0736})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "reserve_not_approved"
+    ok = await http.post(
+        f"/v1/generations/{job['id']}/approve", json={"max_usd": 2.0736, "max_reserve_usd": 4.9248}
+    )
+    assert ok.status_code == 200 and ok.json()["max_reserve_usd"] == 4.9248
+
+
+async def test_a_rejected_approval_shows_the_new_price(env):
+    """Revisión 29: tras cost_changed la generación muestra el precio actual (no el viejo para siempre)."""
+    app, http, fakes = env
+    fakes.apimart_submit = "credits"
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO})).json()
+    await tick(app)
+    prices = json.loads((FIXTURES / "prices_kie.json").read_text())
+    prices["bytedance/seedance-2, 720p no video input"] = 0.5
+    app.state.prices.store("kie", prices)
+    r = await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.025})
+    assert r.status_code == 409
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert state["status"] == "awaiting_approval" and state["cost_usd"] == 2.5
+    assert (await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 2.5})).status_code == 200

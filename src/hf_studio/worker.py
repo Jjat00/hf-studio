@@ -21,6 +21,7 @@ from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
 from .db import Job, utcnow
 from .elevenlabs_audio import AUDIO_MODELS
+from .media import cached_source
 from .providers.base import TERMINAL_STATUSES, Polled, Provider, ProviderError
 from .providers.registry import DEFAULT_PROVIDER
 from .routing import requote, stale
@@ -156,6 +157,12 @@ class Worker:
                 keep_going = self._handle_submit_error(job, exc)
                 await self.commit(session, job_id)
                 return keep_going
+            except Exception as exc:  # respuesta imprevista tras el POST: pudo crearse la tarea
+                log.exception("Respuesta inesperada al enviar %s a %s", job_id, job.provider)
+                error = ProviderError("ambiguous", f"Unexpected answer from {job.provider}: {exc!r}"[:300])
+                self._handle_submit_error(job, error)
+                await self.commit(session, job_id)
+                return True
             job.hf_request_id = result.request_id
             job.status_url = result.status_url
             job.cancel_url = result.cancel_url
@@ -263,7 +270,7 @@ class Worker:
         job.hf_request_id = job.status_url = job.cancel_url = None
         job.outputs, job.attempts, job.next_check_at = [], 0, None
         title = self._title(option["provider"])
-        if self.within_budget(job, option.get("usd")):
+        if self.within_budget(job, option):
             job.status, job.error_kind = "pending", None
             job.error = f"{failed} failed ({message}); trying {title}"
             log.info("Trabajo %s: %s falló (%s), pasa a %s", job.id, failed, kind, option["provider"])
@@ -271,13 +278,20 @@ class Worker:
         self.ask_approval(job, f"{failed} failed ({message}).")
 
     @staticmethod
-    def within_budget(job: Job, usd: float | None) -> bool:
-        return usd is not None and job.max_usd is not None and usd <= job.max_usd + 1e-9
+    def within_budget(job: Job, option: dict) -> bool:
+        """Precio final dentro de lo aprobado y, si el proveedor retiene más al empezar, esa retención
+        también aprobada (revisión 29)."""
+        usd, reserve = option.get("usd"), option.get("reserve_usd")
+        if usd is None or job.max_usd is None or usd > job.max_usd + 1e-9:
+            return False
+        return reserve is None or (job.max_reserve_usd is not None and reserve <= job.max_reserve_usd + 1e-9)
 
     def ask_approval(self, job: Job, reason: str) -> None:
         option = job.plan[job.plan_index]
         usd = option.get("usd")
         price = f"{usd:.4f} USD" if usd is not None else "an unknown price"
+        if option.get("reserve_usd") is not None:
+            price += f" (it first holds {option['reserve_usd']:.4f} USD and refunds the difference)"
         approved = f"{job.max_usd:.4f} USD" if job.max_usd is not None else "no price"
         job.status, job.error_kind, job.next_check_at = "awaiting_approval", "needs_approval", None
         job.error = (
@@ -289,7 +303,12 @@ class Worker:
         """Antes de enviar una opción cotizada hace más de 15 min, vuelve a cotizarla. False si el precio
         nuevo supera lo aprobado (o ya no hay precio): el trabajo queda esperando aprobación."""
         option = job.plan[job.plan_index] if job.plan else None
-        if option is None or self.router is None or not stale(option):
+        if option is None or self.router is None:
+            return True
+        provider = self.providers.get(option["provider"])
+        # Con tabla local, recotizar es gratis: se hace siempre (una tarifa nueva ya conocida manda). Las
+        # cotizaciones remotas (Higgsfield) solo si tienen más de 15 min.
+        if not stale(option) and not (provider and provider.has_price_table):
             return True
         model = self.router.catalog.get(job.model)
         fresh = await requote(self.router, model, job.input, option) if model else None
@@ -304,7 +323,7 @@ class Worker:
         plan = list(job.plan)
         plan[job.plan_index] = fresh
         job.plan = plan
-        if self.within_budget(job, fresh["usd"]):
+        if self.within_budget(job, fresh):
             return True
         self.ask_approval(job, "The price changed since it was quoted.")
         return False
@@ -405,7 +424,15 @@ class Worker:
             )
         source = job.input.get(SOURCE_KEY)
         if job.keep_source_audio and isinstance(source, str):
-            files = await apply_to_files(files, Path(self.settings.storage_dir) / "outputs" / job.id, source)
+            # ffmpeg solo lee archivos locales: la fuente se descarga antes de forma controlada.
+            local = await cached_source(
+                source, Path(self.settings.storage_dir), self.providers[DEFAULT_PROVIDER].plain,
+                self.settings.max_upload_bytes,
+            )  # fmt: skip
+            if local is not None:
+                files = await apply_to_files(
+                    files, Path(self.settings.storage_dir) / "outputs" / job.id, local
+                )
         job.files = files
 
     # --- Timeout -------------------------------------------------------------------------------

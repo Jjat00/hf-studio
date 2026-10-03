@@ -48,7 +48,7 @@ from .elevenlabs_audio import estimate as audio_estimate
 from .elevenlabs_audio import run as run_audio_service
 from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES
-from .media import local_duration, matches_type
+from .media import cached_source, local_duration, matches_type
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, total
 from .providers import ProviderError
@@ -106,8 +106,14 @@ HF_ERROR_STATUS = {
 Hint = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
+RESERVE_FIELD = (
+    "Retención inicial aprobada (reserve_usd de /v1/estimate) si el proveedor retiene más de lo que cobra"
+)
+
+
 class GenerationIn(BaseModel):
     model: str = Field(description="ID del endpoint, p. ej. bytedance/seedance-2.0/text-to-video")
+    max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
     input: dict[str, Any] = Field(description="Argumentos según el input_schema del modelo")
     max_usd: float | None = Field(
         None,
@@ -144,6 +150,9 @@ class BatchIn(BaseModel):
     max_total_usd: float | None = Field(
         None, ge=0, description="Total aprobado (el del dry_run); si el lote cuesta más o sin precio, 409"
     )
+    max_total_reserve_usd: float | None = Field(
+        None, ge=0, description="Suma de retenciones iniciales aprobada"
+    )
 
 
 class PresetIn(BaseModel):
@@ -168,6 +177,7 @@ class PresetRun(BaseModel):
     dry_run: bool = False
     hints: dict[str, Hint] = Field(default_factory=dict)
     max_usd: float | None = Field(None, ge=0, description="Precio aprobado (el del dry_run); si subió, 409")
+    max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
 
 
 class EstimateIn(BaseModel):
@@ -183,6 +193,7 @@ class ApproveIn(BaseModel):
     max_usd: float = Field(
         ge=0, description="Precio que se aprueba; se recotiza y si cuesta más responde 409"
     )
+    max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
 
 
 PRICE_REFRESH_SECONDS = 3600
@@ -332,7 +343,17 @@ def create_app(
             "provider": job.provider,
             "cost_usd": (job.plan[job.plan_index].get("usd") if job.plan else None),
             "max_usd": job.max_usd,
-            "plan": [{"provider": o["provider"], "usd": o.get("usd")} for o in job.plan or []],
+            "max_reserve_usd": job.max_reserve_usd,
+            "reserve_usd": (job.plan[job.plan_index].get("reserve_usd") if job.plan else None),
+            "plan": [
+                {
+                    "provider": o["provider"],
+                    "usd": o.get("usd"),
+                    "kind": o.get("kind"),
+                    "reserve_usd": o.get("reserve_usd"),
+                }
+                for o in job.plan or []
+            ],
             "attempts": job.attempts_log or [],
             "created_at": iso(job.created_at),
             "submitted_at": iso(job.submitted_at),
@@ -445,11 +466,21 @@ def create_app(
             raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
         return await request.app.state.router.plan(model, arguments, hints, only=provider)
 
-    def check_ceiling(option, max_usd: float | None, plan: Plan | None = None) -> None:
-        """Con un precio aprobado, la opción debe tener precio completo y no superarlo."""
+    def check_ceiling(
+        option, max_usd: float | None, plan: Plan | None = None, max_reserve_usd: float | None = None
+    ) -> None:
+        """Con un precio aprobado, la opción debe tener precio completo y no superarlo; si retiene más al
+        empezar, esa retención también tiene que estar aprobada (revisión 29)."""
         if max_usd is None:
             return
         details = plan.public() if plan else None
+        reserve = option.reserve_usd
+        if reserve is not None and (
+            max_reserve_usd is None or reserve > max_reserve_usd + COST_TOLERANCE_USD
+        ):
+            raise ServiceError(409, "reserve_not_approved",
+                               f"This provider first holds {reserve:.4f} USD (refunded after); approve max_reserve_usd",
+                               details)  # fmt: skip
         if option.usd is None or option.missing:
             raise ServiceError(409, "cost_unknown",
                                "The price is no longer known; quote again before generating", details)  # fmt: skip
@@ -467,7 +498,16 @@ def create_app(
             base = {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
                     "basis": f"No provider can run this request ({reasons})", "missing": [], "description": None}  # fmt: skip
         else:
-            keys = ("kind", "credits", "usd", "discount_pct", "basis", "missing", "description")
+            keys = (
+                "kind",
+                "credits",
+                "usd",
+                "discount_pct",
+                "basis",
+                "missing",
+                "description",
+                "reserve_usd",
+            )
             base = {k: getattr(best, k) for k in keys}
         return {**base, **plan.public()}
 
@@ -567,7 +607,7 @@ def create_app(
         best = plan.best
         if best is None:
             raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
-        check_ceiling(best, body.max_usd, plan)
+        check_ceiling(best, body.max_usd, plan, body.max_reserve_usd)
         job, created = await create_generation(
             session,
             settings,
@@ -580,6 +620,7 @@ def create_app(
             keep_source_audio=body.keep_source_audio,
             plan=plan.stored(),
             max_usd=body.max_usd if body.max_usd is not None else best.usd,
+            max_reserve_usd=body.max_reserve_usd,
         )
         if created:
             request.app.state.worker.wake()
@@ -680,6 +721,13 @@ def create_app(
                     409, "cost_unknown", "Some item no longer has a price; quote the batch again"
                 )
             cost = sum(p.best.usd * i.count for p, i in zip(plans, body.items, strict=True))
+            held = sum((p.best.reserve_usd or 0) * i.count for p, i in zip(plans, body.items, strict=True))
+            if held and (
+                body.max_total_reserve_usd is None or held > body.max_total_reserve_usd + COST_TOLERANCE_USD
+            ):
+                raise ServiceError(409, "reserve_not_approved",
+                                   f"The batch first holds {held:.4f} USD (refunded after); approve max_total_reserve_usd",
+                                   held)  # fmt: skip
             if cost > body.max_total_usd + COST_TOLERANCE_USD:
                 raise ServiceError(409, "cost_changed",
                                    f"The batch now costs {cost:.4f} USD (approved {body.max_total_usd:.4f})", cost)  # fmt: skip
@@ -745,11 +793,31 @@ def create_app(
             raise ServiceError(
                 409, "provider_unavailable", "That provider can no longer run this request; cancel it"
             )
+        problem = None
         if fresh["usd"] is None:
-            raise ServiceError(409, "cost_unknown", "The price is unknown now; cancel it or try later")
-        if fresh["usd"] > body.max_usd + COST_TOLERANCE_USD:
-            raise ServiceError(409, "cost_changed",
-                               f"It now costs {fresh['usd']:.4f} USD, more than {body.max_usd:.4f}", fresh["usd"])  # fmt: skip
+            problem = ("cost_unknown", "The price is unknown now; cancel it or try later")
+        elif fresh["usd"] > body.max_usd + COST_TOLERANCE_USD:
+            problem = ("cost_changed", f"It now costs {fresh['usd']:.4f} USD, more than {body.max_usd:.4f}")
+        elif fresh.get("reserve_usd") is not None and (
+            body.max_reserve_usd is None or fresh["reserve_usd"] > body.max_reserve_usd + COST_TOLERANCE_USD
+        ):
+            problem = ("reserve_not_approved",
+                       f"It first holds {fresh['reserve_usd']:.4f} USD (refunded after); approve max_reserve_usd")  # fmt: skip
+        if problem:
+            # Se guarda la cotización nueva (sigue esperando aprobación): la UI y el agente ven el precio actual
+            # y pueden aprobarlo con una acción explícita, sin repetir el importe viejo (revisión 29).
+            plan = list(job.plan)
+            plan[index] = fresh
+            await session.execute(
+                update(Job)
+                .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version,
+                       Job.plan_index == index)
+                .values(plan=plan, error=problem[1], version=Job.version + 1)
+            )  # fmt: skip
+            await session.commit()
+            raise ServiceError(
+                409, problem[0], problem[1], {"usd": fresh["usd"], "reserve_usd": fresh.get("reserve_usd")}
+            )
         plan = list(job.plan)
         plan[index] = fresh
         # CAS sobre la versión leída: dos aprobaciones, o aprobar y cancelar a la vez, no pueden ganar ambas.
@@ -758,6 +826,7 @@ def create_app(
             .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version,
                    Job.plan_index == index)
             .values(status="pending", plan=plan, max_usd=max(job.max_usd or 0, fresh["usd"]), error=None,
+                    max_reserve_usd=max(job.max_reserve_usd or 0, fresh.get("reserve_usd") or 0) or job.max_reserve_usd,
                     error_kind=None, next_check_at=None, version=Job.version + 1)
         )  # fmt: skip
         await session.commit()
@@ -917,10 +986,10 @@ def create_app(
         plan = await make_plan(request, session, owner, model, model_input, body.hints)
         if plan.best is None:
             raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
-        check_ceiling(plan.best, body.max_usd, plan)
+        check_ceiling(plan.best, body.max_usd, plan, body.max_reserve_usd)
         job, created = await create_generation(
             session, settings, catalog, owner, preset["model"], model_input, idempotency_key, plan=plan.stored(),
-            max_usd=body.max_usd,
+            max_usd=body.max_usd, max_reserve_usd=body.max_reserve_usd,
         )  # fmt: skip
         if created:
             request.app.state.worker.wake()
@@ -928,8 +997,21 @@ def create_app(
 
     # --- Cambio de voz (ElevenLabs) --------------------------------------------------------------
 
-    async def voice_source(session: AsyncSession, owner: ApiClient, body: VoiceChangeIn) -> str:
-        """Ruta local o URL del video de origen."""
+    async def local_source(request: Request, url: str) -> str:
+        """Copia local controlada de un medio propio: ffmpeg nunca abre URLs (SSRF, revisión 29)."""
+        path = await cached_source(
+            url, Path(settings.storage_dir), request.app.state.hf.plain, settings.max_upload_bytes
+        )
+        if path is None:
+            raise ServiceError(
+                422, "invalid_source", "Could not download the source as an audio or video file"
+            )
+        return path
+
+    async def voice_source(
+        request: Request, session: AsyncSession, owner: ApiClient, body: VoiceChangeIn
+    ) -> str:
+        """Ruta local del video de origen (los remotos se descargan antes)."""
         if body.source_url:
             # Solo medios propios: ffmpeg no debe abrir URLs arbitrarias (SSRF).
             if not await trusted_media(session, owner, body.source_url):
@@ -938,7 +1020,7 @@ def create_app(
                     "untrusted_source",
                     "source_url must come from /v1/uploads (upload_media) or be one of your generations",
                 )
-            return body.source_url
+            return await local_source(request, body.source_url)
         job = await get_owned_job(session, owner, body.source_generation_id or "")
         videos = [o for o in job.outputs or [] if o.get("kind") == "video"]
         if job.status != "completed" or not videos:
@@ -947,12 +1029,12 @@ def create_app(
             path = Path(settings.storage_dir) / "outputs" / job.id / f["name"]
             if f.get("kind") == "video" and path.exists():
                 return str(path.resolve())
-        return videos[0]["url"]
+        return await local_source(request, videos[0]["url"])
 
     async def voice_plan(
-        session: AsyncSession, owner: ApiClient, body: VoiceChangeIn
+        request: Request, session: AsyncSession, owner: ApiClient, body: VoiceChangeIn
     ) -> tuple[str, float, float]:
-        source = await voice_source(session, owner, body)
+        source = await voice_source(request, session, owner, body)
         duration = await probe_duration(source)
         if duration is None:
             raise ServiceError(422, "invalid_source", "Could not read the source video")
@@ -1014,7 +1096,7 @@ def create_app(
         body: VoiceChangeIn, request: Request, session: Session, owner: Owner
     ) -> dict:
         """Costo de un cambio de voz antes de lanzarlo, con un voice_quote de un solo uso para lanzarlo."""
-        _, start, end = await voice_plan(session, owner, body)
+        _, start, end = await voice_plan(request, session, owner, body)
         quotes: dict = request.app.state.voice_quotes
         now = time.monotonic()
         for qid in [q for q, v in quotes.items() if v["expires"] < now]:
@@ -1074,7 +1156,7 @@ def create_app(
         # simultáneos no pueden canjear la misma cotización. Si algo falla antes de crear el trabajo, se libera.
         quote["used"] = True
         try:
-            source, start, end = await voice_plan(session, owner, body)
+            source, start, end = await voice_plan(request, session, owner, body)
             if abs((end - start) - quote["seconds"]) > 0.05:
                 raise ServiceError(
                     409,
@@ -1164,8 +1246,8 @@ def create_app(
 
     # --- Audio de ElevenLabs: texto a voz, efectos, música y aislamiento ------------------------
 
-    async def audio_source(session: AsyncSession, owner: ApiClient, body: IsolateIn) -> str:
-        """Ruta local o URL de un video o audio propio (nunca una URL arbitraria)."""
+    async def audio_source(request: Request, session: AsyncSession, owner: ApiClient, body: IsolateIn) -> str:
+        """Ruta local de un video o audio propio (los remotos se descargan antes; nunca una URL arbitraria)."""
         if body.source_url:
             if not await trusted_media(session, owner, body.source_url):
                 raise ServiceError(
@@ -1173,7 +1255,7 @@ def create_app(
                     "untrusted_source",
                     "source_url must come from /v1/uploads (upload_media) or your generations",
                 )
-            return body.source_url
+            return await local_source(request, body.source_url)
         job = await get_owned_job(session, owner, body.source_generation_id or "")
         media = [o for o in job.outputs or [] if o.get("kind") in ("video", "audio")]
         if job.status != "completed" or not media:
@@ -1184,13 +1266,15 @@ def create_app(
             path = Path(settings.storage_dir) / "outputs" / job.id / f["name"]
             if f.get("kind") in ("video", "audio") and path.exists():
                 return str(path.resolve())
-        return media[0]["url"]
+        return await local_source(request, media[0]["url"])
 
-    async def audio_plan(session: AsyncSession, owner: ApiClient, body: BaseModel) -> tuple[str | None, dict]:
+    async def audio_plan(
+        request: Request, session: AsyncSession, owner: ApiClient, body: BaseModel
+    ) -> tuple[str | None, dict]:
         """(fuente, cotización) de un servicio de audio; el aislamiento mide la duración de la fuente."""
         if not isinstance(body, IsolateIn):
             return None, audio_estimate(body)
-        source = await audio_source(session, owner, body)
+        source = await audio_source(request, session, owner, body)
         seconds = await probe_duration(source)
         if seconds is None:
             raise ServiceError(422, "invalid_source", "Could not read the source media")
@@ -1205,7 +1289,7 @@ def create_app(
             return input_hash(model_id, body.model_dump(exclude_none=True, exclude={"audio_quote"}))
 
         async def estimate_route(body: schema, request: Request, session: Session, owner: Owner) -> dict:  # type: ignore[valid-type]
-            _, est = await audio_plan(session, owner, body)
+            _, est = await audio_plan(request, session, owner, body)
             quotes: dict = request.app.state.voice_quotes
             now = time.monotonic()
             for qid in [q for q, v in quotes.items() if v["expires"] < now]:
@@ -1259,7 +1343,7 @@ def create_app(
             # Reserva atómica (sin await desde la comprobación); se libera si falla antes de crear el trabajo.
             quote["used"] = True
             try:
-                source, est = await audio_plan(session, owner, body)
+                source, est = await audio_plan(request, session, owner, body)
                 if abs(est["units"] - quote["seconds"]) > 0.05:
                     raise ServiceError(
                         409, "cost_changed", "The input changed since it was quoted. Quote again"

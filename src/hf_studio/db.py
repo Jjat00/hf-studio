@@ -101,6 +101,8 @@ class Job(Base):
     plan_index: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     # Lo máximo aprobado en USD: el respaldo que cueste lo mismo o menos corre sin preguntar.
     max_usd: Mapped[float | None] = mapped_column(Float)
+    # Retención inicial aprobada (algunos proveedores retienen más de lo que cobran y devuelven la diferencia).
+    max_reserve_usd: Mapped[float | None] = mapped_column(Float)
     # Intentos fallidos en otros proveedores: [{provider, request_id, error_kind, error, at}].
     attempts_log: Mapped[list] = mapped_column(JSON, default=list)
     status_url: Mapped[str | None] = mapped_column(Text)
@@ -145,6 +147,7 @@ ADDED_COLUMNS = {
         "plan": "JSON",
         "plan_index": "INTEGER NOT NULL DEFAULT 0",
         "max_usd": "FLOAT",
+        "max_reserve_usd": "FLOAT",
         "attempts_log": "JSON",
         "version": "INTEGER NOT NULL DEFAULT 1",
     },

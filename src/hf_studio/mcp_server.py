@@ -185,7 +185,8 @@ def generate(
     original; para conservarlo pasa keep_source_audio=true (gratis: HF Studio le pone el audio del
     video de origen al resultado). Lee studio_notes en get_model."""
     payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds), "provider": provider}
-    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
+    key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
+    headers = {"Idempotency-Key": key}
     body = {
         "model": model_id,
         "input": input,
@@ -194,7 +195,8 @@ def generate(
         "hints": _hints(input_video_seconds),
         "provider": provider,
         # El precio que vio el usuario: si subió, la API responde 409 y hay que volver a cotizar.
-        "max_usd": _quoted_usd(quote_id),
+        "max_usd": approved["usd"],
+        "max_reserve_usd": approved["reserve_usd"],
     }
     return _call("POST", "/v1/generations", json=body, headers=headers)
 
@@ -504,12 +506,18 @@ def list_generations(status: str | None = None, limit: int = 20) -> dict:
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
 )
-def approve_fallback(generation_id: str, max_usd: float) -> dict:
+def approve_fallback(generation_id: str, max_usd: float, max_reserve_usd: float | None = None) -> dict:
     """Para una generación en awaiting_approval: el proveedor anterior falló sin cobrar o el precio cambió
     desde la cotización, y la opción actual (`provider`, `cost_usd`) cuesta más de lo aprobado. Dile al
     usuario ese precio y, con su OK, llama con `max_usd` igual a ese precio. HF Studio vuelve a cotizar: si
-    ahora cuesta más que max_usd o no tiene precio, falla sin gastar y devuelve el precio actual."""
-    return _call("POST", f"/v1/generations/{generation_id}/approve", json={"max_usd": max_usd})
+    ahora cuesta más que max_usd o no tiene precio, falla sin gastar, guarda el precio actual y lo devuelve.
+    Si la opción tiene `reserve_usd` (retiene más al empezar y devuelve la diferencia), díselo al usuario y
+    pásalo en max_reserve_usd."""
+    body = {
+        "max_usd": max_usd,
+        **({"max_reserve_usd": max_reserve_usd} if max_reserve_usd is not None else {}),
+    }
+    return _call("POST", f"/v1/generations/{generation_id}/approve", json=body)
 
 
 @mcp.tool(
@@ -587,12 +595,6 @@ def _hints(input_video_seconds: float | None) -> dict:
     return {"input_video_seconds": input_video_seconds} if input_video_seconds is not None else {}
 
 
-def _quoted_usd(quote_id: str) -> float | None:
-    with _quotes_lock:
-        q = _quotes.get(quote_id or "")
-        return q["estimate"].get("usd") if q else None
-
-
 def _complete(estimate: dict) -> bool:
     if "complete" in estimate:
         return bool(estimate["complete"])
@@ -628,9 +630,17 @@ def _issue_quote(payload: dict, estimate: dict) -> str:
 def _redeem_quote(
     payload: dict, quote_id: str | None, idempotency_key: str | None, confirm_unknown_cost: bool
 ) -> str:
+    return _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)[0]
+
+
+def _authorize(
+    payload: dict, quote_id: str | None, idempotency_key: str | None, confirm_unknown_cost: bool
+) -> tuple[str, dict]:
     """Regla del dueño: no se gasta sin que el usuario haya visto el precio de esta misma petición.
     Cada cotización sirve para una sola ejecución; reintentar con la misma clave no vuelve a cobrar.
-    Devuelve la clave de idempotencia que debe usarse."""
+    Devuelve, leídas bajo el mismo lock, la clave de idempotencia y una copia de lo aprobado: `usd` (tope de
+    precio, None solo si el usuario aceptó explícitamente un costo desconocido) y `reserve_usd` (retención
+    inicial vista). Así una limpieza concurrente de cotizaciones no puede quitar el tope (revisión 29)."""
     with _quotes_lock:
         q = _quotes.get(quote_id or "")
         if not q or q["expires"] < time.monotonic() or q["request"] != _fingerprint(payload):
@@ -652,7 +662,11 @@ def _redeem_quote(
                 "for a new run, quote again and get the user's OK."
             )
         q["key"] = key
-        return key
+        estimate = dict(q["estimate"])
+        complete = _complete(estimate)
+        approved = {"usd": estimate.get("usd") if complete else None,
+                    "reserve_usd": estimate.get("reserve_usd") if complete else None}  # fmt: skip
+        return key, approved
 
 
 @mcp.tool(
@@ -679,8 +693,10 @@ def generate_batch(
     if dry_run:
         quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True})
         return {**quote, "quote_id": _issue_quote(payload, quote["total"])}
-    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
-    body = {**payload, "dry_run": False, "max_total_usd": _quoted_usd(quote_id)}
+    key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
+    headers = {"Idempotency-Key": key}
+    body = {**payload, "dry_run": False, "max_total_usd": approved["usd"],
+            "max_total_reserve_usd": approved["reserve_usd"]}  # fmt: skip
     return _call("POST", "/v1/generations/batch", json=body, headers=headers)
 
 
@@ -750,8 +766,9 @@ def run_preset(
     if dry_run:
         quote = _call("POST", f"/v1/presets/{slug}/run", json={**body, "dry_run": True})
         return {**quote, "quote_id": _issue_quote(payload, quote["estimate"])}
-    headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
-    body = {**body, "dry_run": False, "max_usd": _quoted_usd(quote_id)}
+    key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
+    headers = {"Idempotency-Key": key}
+    body = {**body, "dry_run": False, "max_usd": approved["usd"], "max_reserve_usd": approved["reserve_usd"]}
     return _call("POST", f"/v1/presets/{slug}/run", json=body, headers=headers)
 
 

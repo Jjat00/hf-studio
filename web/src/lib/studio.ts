@@ -85,18 +85,26 @@ export const studio = {
     keepSourceAudio = false,
     maxUsd?: number | null,
     hints: Record<string, number> = {},
+    maxReserveUsd?: number | null,
   ) =>
     call<Generation>("/v1/generations", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ model, input, keep_source_audio: keepSourceAudio, hints, ...(maxUsd != null ? { max_usd: maxUsd } : {}) }),
+      body: JSON.stringify({
+        model,
+        input,
+        keep_source_audio: keepSourceAudio,
+        hints,
+        ...(maxUsd != null ? { max_usd: maxUsd } : {}),
+        ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+      }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
-  approve: (id: string, maxUsd: number) =>
+  approve: (id: string, maxUsd: number, maxReserveUsd?: number | null) =>
     call<Generation>(`/v1/generations/${id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ max_usd: maxUsd }),
+      body: JSON.stringify({ max_usd: maxUsd, ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}) }),
     }),
   providers: () => call<{ providers: ProviderInfo[] }>("/v1/providers"),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
@@ -154,11 +162,21 @@ export const studio = {
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ variables, dry_run: true, hints }) },
     ),
   /** `maxUsd`: el precio que se mostró (dry_run); si subió, la API responde 409 cost_changed. */
-  runPreset: (slug: string, variables: Record<string, unknown>, idempotencyKey: string, maxUsd?: number | null) =>
+  runPreset: (
+    slug: string,
+    variables: Record<string, unknown>,
+    idempotencyKey: string,
+    maxUsd?: number | null,
+    maxReserveUsd?: number | null,
+  ) =>
     call<Generation>(`/v1/presets/${slug}/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({ variables, ...(maxUsd != null ? { max_usd: maxUsd } : {}) }),
+      body: JSON.stringify({
+        variables,
+        ...(maxUsd != null ? { max_usd: maxUsd } : {}),
+        ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+      }),
     }),
   savePreset: (generationId: string, slug: string, title: string) =>
     call<Preset>(`/v1/presets/from-generation/${generationId}`, {
@@ -190,6 +208,8 @@ export type Estimate = {
   description: string | null;
   /** Proveedor elegido (el más barato) y el resto de opciones. */
   provider?: string | null;
+  /** Retención inicial del elegido, mayor que su costo final (se devuelve la diferencia). */
+  reserve_usd?: number | null;
   options?: EstimateOption[];
   excluded?: { provider: string; title: string; reason: string; usd?: number | null; key_url?: string; billing_url?: string }[];
   savings_vs_higgsfield?: { usd: number; pct: number } | null;

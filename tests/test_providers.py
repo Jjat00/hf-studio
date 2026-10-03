@@ -6,6 +6,7 @@ Las respuestas imitan las reales comprobadas el 2026-10-03 (KIE responde HTTP 20
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -97,8 +98,7 @@ async def test_apimart_submit_poll_and_outputs():
 @pytest.mark.parametrize(
     ("status", "message", "kind"),
     [(402, "insufficient balance (current: 0.01 USD)", "credits"), (400, "duration must be 4-15", "validation"),
-     (400, "nsfw_content_detected", "moderation"), (429, "too many requests", "concurrency"),
-     (503, "upstream unavailable", "unavailable")],
+     (400, "nsfw_content_detected", "moderation"), (429, "too many requests", "concurrency")],
 )  # fmt: skip
 async def test_apimart_submit_errors_are_fallback_safe(status, message, kind):
     provider = APIMartProvider(
@@ -281,3 +281,47 @@ async def test_duration_is_measured_locally_without_network(tmp_path):
         assert await local_duration("https://cdn.test/uploaded.mp4", client, 10_000) is None
         assert await local_duration("http://cdn.test/plain.mp4", client, 10_000) is None
     assert requested == ["https://cdn.test/uploaded.mp4"]
+
+
+async def test_remote_sources_are_copied_locally_only_if_they_are_media(tmp_path):
+    """Revisión 29: voz, aislamiento y conservar audio ya no pasan URLs a ffmpeg."""
+    from hf_studio.media import cached_source
+
+    mpd = b'<?xml version="1.0"?><MPD><BaseURL>https://127.0.0.1/internal.mp4</BaseURL></MPD>'
+    mp4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32
+    bodies = {"/old.mp4": mpd, "/ok.mp4": mp4}
+
+    async with httpx.AsyncClient(
+        transport=mock(lambda r: httpx.Response(200, content=bodies[r.url.path]))
+    ) as c:
+        assert await cached_source("https://cdn.test/old.mp4", tmp_path, c, 10_000) is None
+        local = await cached_source("https://cdn.test/ok.mp4", tmp_path, c, 10_000)
+    assert local and Path(local).read_bytes() == mp4 and "://" not in local
+
+
+def test_every_ffmpeg_input_is_guarded():
+    from hf_studio.voice import VoiceChangeIn, mix_command
+
+    body = VoiceChangeIn(source_url="https://cdn.test/v.mp4", voice_id="v")
+    cmd = mix_command("/tmp/src.mp4", Path("/tmp/voice.mp3"), Path("/tmp/out.mp4"), 1.0, 2.0, body, 1.0, 3.0)
+    assert cmd.count("-i") == 2 and cmd.count("-protocol_whitelist") == 2
+    assert all(
+        cmd[i - 1] != "file" or cmd[i - 2] == "-protocol_whitelist" for i, a in enumerate(cmd) if a == "-i"
+    )
+
+
+@pytest.mark.parametrize(
+    "response",
+    [httpx.Response(503, text="Service Unavailable"), httpx.Response(200, text="<html>oops</html>"),
+     httpx.Response(200, json={"code": 200, "data": ["broken"]}), httpx.Response(200, json=[])],
+)  # fmt: skip
+async def test_unclear_submissions_are_ambiguous_on_every_provider(response):
+    """Revisión 29: 503 genérico y cuerpos malformados tras el POST pudieron crear la tarea."""
+    from hf_studio.higgsfield import HiggsfieldClient
+
+    for cls in (APIMartProvider, KIEProvider, HiggsfieldClient):
+        provider = cls(settings(**KEYS), mock(lambda r: response))
+        with pytest.raises(ProviderError) as info:
+            await provider.submit_job("m", {"prompt": "x"})
+        assert info.value.kind == "ambiguous", (cls.name, info.value.kind, info.value.message)
+        assert not info.value.fallback_safe and not info.value.retryable

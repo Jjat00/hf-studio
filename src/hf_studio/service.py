@@ -70,6 +70,7 @@ async def create_generation(
     keep_source_audio: bool = False,
     plan: list[dict] | None = None,
     max_usd: float | None = None,
+    max_reserve_usd: float | None = None,
 ) -> tuple[Job, bool]:
     """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente.
 
@@ -138,6 +139,9 @@ async def create_generation(
         plan=plan or [],
         provider=plan[0]["provider"] if plan else "higgsfield",
         max_usd=max_usd if max_usd is not None else (plan[0].get("usd") if plan else None),
+        max_reserve_usd=max_reserve_usd
+        if max_reserve_usd is not None
+        else (plan[0].get("reserve_usd") if plan else None),
         attempts_log=[],
     )
     session.add(job)

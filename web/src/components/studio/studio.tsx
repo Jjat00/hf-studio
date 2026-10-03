@@ -258,6 +258,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
         canKeepAudio && keepAudio,
         current?.value?.usd ?? null,
         JSON.parse(hintsKey) as Record<string, number>,
+        current?.value?.reserve_usd ?? null,
       );
       add(g);
       setView("history");
