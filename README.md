@@ -6,7 +6,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-25%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
-[Español](README.es.md) · **English**
+[Español](README.es.md) · **English** · [Website and examples](https://hf-studio-gold.vercel.app)
 
 **A self-hosted AI video, image and audio studio on top of the [Higgsfield](https://docs.higgsfield.ai) and
 [ElevenLabs](https://elevenlabs.io/docs) APIs.** One backend gives you a REST API, an **MCP server** so your agents

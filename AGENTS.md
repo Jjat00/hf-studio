@@ -54,6 +54,8 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   regenerated with `hf-studio sync-catalog`).
 - Every MCP tool declares `title` and all four hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`); `tests/test_mcp_tools.py` pins them. Keep them true to what the handler does.
+- `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in
+  `landing/public/media`, all from approved generations). It is separate from `web/`.
 - The UI is Next.js 16, which differs from older versions: read `web/AGENTS.md` before touching `web/`.
 - Do not make real generation calls in tests or checks. Do not expose the UI beyond `127.0.0.1`: its proxy does not
   authenticate visitors.
