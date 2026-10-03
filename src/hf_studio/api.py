@@ -750,7 +750,12 @@ def create_app(
             if plan.best is None:
                 raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
             plans.append(plan)
-        # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisiones 28 a 30).
+        # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisiones 28 a 33).
+        if body.accept_unknown_cost and body.max_total_usd is not None:
+            # Un tope total no se puede hacer cumplir por trabajo si algún precio es desconocido: o hay tope o se
+            # acepta el total desconocido sin tope, nunca las dos cosas.
+            raise ServiceError(422, "conflicting_approval",
+                               "Pass either max_total_usd or accept_unknown_cost=true (no cap), not both")  # fmt: skip
         unknown = [p.best.usd is None or bool(p.best.missing) for p in plans]
         if body.max_total_usd is not None:
             if any(unknown) and not body.accept_unknown_cost:

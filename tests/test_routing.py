@@ -556,3 +556,15 @@ async def test_an_uncapped_acceptance_survives_a_price_that_reappears(env):
     app.state.prices.store("apimart", {**real, "seedance-2.0|720P": 0.3})
     await tick(app)
     assert len(fakes.sent["apimart"]) == 1
+
+
+async def test_a_batch_cannot_mix_a_total_cap_with_an_unknown_acceptance(env):
+    """Revisión 33: aceptar desconocidos borraba el tope total; la combinación se rechaza sin crear nada."""
+    app, http, _ = env
+    items = [{"model": T2V, "input": VIDEO}]
+    r = await http.post(
+        "/v1/generations/batch", json={"items": items, "max_total_usd": 0.71, "accept_unknown_cost": True}
+    )
+    assert r.status_code == 422 and r.json()["error"]["code"] == "conflicting_approval"
+    async with app.state.sessions() as s:
+        assert (await s.scalars(select(Job))).all() == []
