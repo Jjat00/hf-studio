@@ -197,6 +197,7 @@ const es = {
   approval: {
     title: "El proveedor más barato falló sin cobrar",
     approve: (usd: string) => `Aprobar ${usd}`,
+    approveUnknown: (provider: string) => `Aprobar costo desconocido · ${provider}`,
     unknownPrice: "precio desconocido",
     cancel: "Cancelar",
     tried: "Intentos",
@@ -686,6 +687,7 @@ const en: Dict = {
   approval: {
     title: "The cheapest provider failed without charging",
     approve: (usd) => `Approve ${usd}`,
+    approveUnknown: (provider) => `Approve an unknown cost · ${provider}`,
     unknownPrice: "unknown price",
     cancel: "Cancel",
     tried: "Attempts",

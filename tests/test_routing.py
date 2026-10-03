@@ -171,7 +171,7 @@ async def test_a_more_expensive_fallback_waits_for_approval(env):
     r = await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.0})
     assert r.status_code == 409  # cuesta 1,025: más de lo que se aprueba
     approved = (await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.03})).json()
-    assert approved["status"] == "pending" and approved["provider"] == "kie" and approved["max_usd"] == 1.025
+    assert approved["status"] == "pending" and approved["provider"] == "kie" and approved["max_usd"] == 1.03
     assert (
         await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.03})
     ).status_code == 409
@@ -473,3 +473,52 @@ async def test_forcing_another_provider_is_not_deduplicated(env):
     b = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "kie"})).json()
     c = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "kie"})).json()
     assert a["id"] != b["id"] and b["provider"] == "kie" and c["id"] == b["id"]
+
+
+# --- Revisión 31 ----------------------------------------------------------------------------------
+
+
+async def test_a_numeric_cap_still_rules_when_an_unknown_price_becomes_known(env):
+    app, http, fakes = env
+    real = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    app.state.prices.store("apimart", {})
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "apimart",
+                                                    "max_usd": 0.71, "accept_unknown_cost": True})).json()  # fmt: skip
+    assert job["max_usd"] == 0.71
+    app.state.prices.store("apimart", {**real, "seedance-2.0|720P": 0.3})  # ahora 1,50 > 0,71
+    await tick(app)
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert state["status"] == "awaiting_approval" and fakes.sent["apimart"] == []
+
+
+async def test_approving_an_unknown_fallback_with_a_cap_keeps_the_cap(env):
+    app, http, fakes = env
+    fakes.apimart_submit = "credits"
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 0.71})).json()
+    await tick(app)  # APIMart sin saldo → KIE espera aprobación
+    real = json.loads((FIXTURES / "prices_kie.json").read_text())
+    app.state.prices.store("kie", {})
+    assert (
+        await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 0.71})
+    ).status_code == 409
+    ok = await http.post(
+        f"/v1/generations/{job['id']}/approve", json={"max_usd": 0.71, "accept_unknown_cost": True}
+    )
+    assert ok.status_code == 200 and ok.json()["max_usd"] == 0.71
+    app.state.prices.store("kie", {**real, "bytedance/seedance-2, 720p no video input": 0.5})  # 2,50 > 0,71
+    await tick(app)
+    assert fakes.sent["kie"] == []
+    assert (await http.get(f"/v1/generations/{job['id']}")).json()["status"] == "awaiting_approval"
+
+
+async def test_approving_an_unknown_fallback_without_a_cap_sends_it(env):
+    app, http, fakes = env
+    fakes.apimart_submit = "credits"
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 0.71})).json()
+    await tick(app)
+    app.state.prices.store("kie", {})
+    assert (await http.post(f"/v1/generations/{job['id']}/approve", json={})).status_code == 422
+    ok = await http.post(f"/v1/generations/{job['id']}/approve", json={"accept_unknown_cost": True})
+    assert ok.status_code == 200 and ok.json()["max_usd"] is None
+    await tick(app)
+    assert len(fakes.sent["kie"]) == 1

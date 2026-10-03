@@ -221,3 +221,17 @@ def test_accepting_an_unknown_batch_total_sends_no_ceiling(monkeypatch):
     q = mcp_server.generate_batch(ITEMS, dry_run=True)["quote_id"]
     mcp_server.generate_batch(ITEMS, dry_run=False, quote_id=q, confirm_unknown_cost=True)
     assert sent[0]["max_total_usd"] is None and sent[0]["accept_unknown_cost"] is True
+
+
+def test_approve_fallback_can_accept_an_unknown_cost(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        mcp_server, "_call", lambda method, path, **kw: sent.append((path, kw["json"])) or {"ok": True}
+    )
+    mcp_server.approve_fallback("g1", accept_unknown_cost=True)
+    mcp_server.approve_fallback("g2", max_usd=1.0, max_reserve_usd=4.9)
+    assert sent[0] == (
+        "/v1/generations/g1/approve",
+        {"max_usd": None, "max_reserve_usd": None, "accept_unknown_cost": True},
+    )
+    assert sent[1][1] == {"max_usd": 1.0, "max_reserve_usd": 4.9, "accept_unknown_cost": False}

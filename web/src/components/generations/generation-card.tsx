@@ -299,11 +299,21 @@ function ApprovalPanel({ g }: { g: Generation }) {
       <div className="mt-1 flex gap-2">
         <button
           type="button"
-          disabled={busy || next?.usd == null}
-          onClick={() => next?.usd != null && act(() => studio.approve(g.id, next.usd!, next.reserve_usd ?? null))}
+          disabled={busy || !next}
+          onClick={() =>
+            next &&
+            act(() =>
+              // Sin precio, el botón dice explícitamente que se aprueba un costo desconocido (sin tope).
+              next.usd != null
+                ? studio.approve(g.id, next.usd, next.reserve_usd ?? null)
+                : studio.approve(g.id, null, next.reserve_usd ?? null, true),
+            )
+          }
           className="rounded-lg bg-lime px-3 py-1.5 text-xs font-bold text-black disabled:opacity-50"
         >
-          {t.approval.approve(`${price} · ${providerTitle(next?.provider)}`)}
+          {next?.usd != null
+            ? t.approval.approve(`${price} · ${providerTitle(next?.provider)}`)
+            : t.approval.approveUnknown(providerTitle(next?.provider))}
         </button>
         <button
           type="button"

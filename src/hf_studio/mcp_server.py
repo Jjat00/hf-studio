@@ -507,16 +507,24 @@ def list_generations(status: str | None = None, limit: int = 20) -> dict:
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
 )
-def approve_fallback(generation_id: str, max_usd: float, max_reserve_usd: float | None = None) -> dict:
+def approve_fallback(
+    generation_id: str,
+    max_usd: float | None = None,
+    max_reserve_usd: float | None = None,
+    accept_unknown_cost: bool = False,
+) -> dict:
     """Para una generación en awaiting_approval: el proveedor anterior falló sin cobrar o el precio cambió
     desde la cotización, y la opción actual (`provider`, `cost_usd`) cuesta más de lo aprobado. Dile al
     usuario ese precio y, con su OK, llama con `max_usd` igual a ese precio. HF Studio vuelve a cotizar: si
-    ahora cuesta más que max_usd o no tiene precio, falla sin gastar, guarda el precio actual y lo devuelve.
+    ahora cuesta más que max_usd, falla sin gastar, guarda el precio actual y lo devuelve.
     Si la opción tiene `reserve_usd` (retiene más al empezar y devuelve la diferencia), díselo al usuario y
-    pásalo en max_reserve_usd."""
+    pásalo en max_reserve_usd. Si el precio es desconocido (cost_usd null) y el usuario acepta
+    explícitamente un costo desconocido, pasa accept_unknown_cost=True: sin max_usd queda sin tope; con
+    max_usd, ese tope sigue mandando si el precio vuelve a conocerse."""
     body = {
         "max_usd": max_usd,
-        **({"max_reserve_usd": max_reserve_usd} if max_reserve_usd is not None else {}),
+        "max_reserve_usd": max_reserve_usd,
+        "accept_unknown_cost": accept_unknown_cost,
     }
     return _call("POST", f"/v1/generations/{generation_id}/approve", json=body)
 

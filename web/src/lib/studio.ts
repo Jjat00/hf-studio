@@ -102,11 +102,16 @@ export const studio = {
       }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
-  approve: (id: string, maxUsd: number, maxReserveUsd?: number | null) =>
+  /** `acceptUnknown`: el usuario aceptó explícitamente un precio desconocido (sin `maxUsd`, sin tope). */
+  approve: (id: string, maxUsd: number | null, maxReserveUsd?: number | null, acceptUnknown = false) =>
     call<Generation>(`/v1/generations/${id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ max_usd: maxUsd, ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}) }),
+      body: JSON.stringify({
+        ...(maxUsd != null ? { max_usd: maxUsd } : {}),
+        ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+        ...(acceptUnknown ? { accept_unknown_cost: true } : {}),
+      }),
     }),
   providers: () => call<{ providers: ProviderInfo[] }>("/v1/providers"),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
@@ -170,6 +175,7 @@ export const studio = {
     idempotencyKey: string,
     maxUsd?: number | null,
     maxReserveUsd?: number | null,
+    acceptUnknownCost = false,
   ) =>
     call<Generation>(`/v1/presets/${slug}/run`, {
       method: "POST",
@@ -178,6 +184,7 @@ export const studio = {
         variables,
         ...(maxUsd != null ? { max_usd: maxUsd } : {}),
         ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
+        ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
       }),
     }),
   savePreset: (generationId: string, slug: string, title: string) =>

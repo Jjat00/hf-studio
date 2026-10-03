@@ -199,9 +199,11 @@ class EstimateIn(BaseModel):
 
 
 class ApproveIn(BaseModel):
-    accept_unknown_cost: bool = Field(False, description="Aprueba aunque el precio actual sea desconocido")
-    max_usd: float = Field(
-        ge=0, description="Precio que se aprueba; se recotiza y si cuesta más responde 409"
+    accept_unknown_cost: bool = Field(
+        False, description="Aprueba aunque el precio sea desconocido; con max_usd, ese tope sigue mandando"
+    )
+    max_usd: float | None = Field(
+        None, ge=0, description="Precio que se aprueba; se recotiza y si cuesta más responde 409"
     )
     max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
 
@@ -508,7 +510,8 @@ def create_app(
         stored = plan.stored()
         if accept_unknown and unknown:
             stored[0]["unknown_accepted"] = True  # solo esta opción; un respaldo pedirá aprobación
-        approved_usd = max_usd if max_usd is not None else best.usd
+        # Desconocido aceptado sin tope: queda sin tope (no se fija el precio de ahora como techo).
+        approved_usd = max_usd if max_usd is not None else (None if accept_unknown else best.usd)
         return stored, approved_usd, (max_reserve_usd if quoted else best.reserve_usd)
 
     def estimate_body(plan: Plan) -> dict:
@@ -825,11 +828,22 @@ def create_app(
                 409, "provider_unavailable", "That provider can no longer run this request; cancel it"
             )
         problem = None
-        if fresh["usd"] is None and body.accept_unknown_cost:
-            fresh["unknown_accepted"] = True
-        elif fresh["usd"] is None:
-            problem = ("cost_unknown", "The price is unknown now; cancel it or try later")
-        elif fresh["usd"] > body.max_usd + COST_TOLERANCE_USD:
+        if body.max_usd is None and not body.accept_unknown_cost:
+            raise ServiceError(
+                422, "missing_max_usd", "Pass max_usd (or accept_unknown_cost=true to approve without a cap)"
+            )
+        if body.accept_unknown_cost:
+            fresh["unknown_accepted"] = True  # solo esta opción; un tope dado sigue mandando (revisión 31)
+        if fresh["usd"] is None and not body.accept_unknown_cost:
+            problem = (
+                "cost_unknown",
+                "The price is unknown now; cancel it, try later or accept an unknown cost",
+            )
+        elif (
+            fresh["usd"] is not None
+            and body.max_usd is not None
+            and fresh["usd"] > body.max_usd + COST_TOLERANCE_USD
+        ):
             problem = ("cost_changed", f"It now costs {fresh['usd']:.4f} USD, more than {body.max_usd:.4f}")
         elif fresh.get("reserve_usd") is not None and (
             body.max_reserve_usd is None or fresh["reserve_usd"] > body.max_reserve_usd + COST_TOLERANCE_USD
@@ -858,7 +872,7 @@ def create_app(
             update(Job)
             .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version,
                    Job.plan_index == index)
-            .values(status="pending", plan=plan, max_usd=max(job.max_usd or 0, fresh["usd"] or 0) or job.max_usd, error=None,
+            .values(status="pending", plan=plan, max_usd=body.max_usd, error=None,
                     max_reserve_usd=max(job.max_reserve_usd or 0, fresh.get("reserve_usd") or 0) or job.max_reserve_usd,
                     error_kind=None, next_check_at=None, version=Job.version + 1)
         )  # fmt: skip

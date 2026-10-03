@@ -282,10 +282,15 @@ class Worker:
         """Precio final dentro de lo aprobado y, si el proveedor retiene más al empezar, esa retención
         también aprobada (revisión 29)."""
         usd, reserve = option.get("usd"), option.get("reserve_usd")
-        # Un precio desconocido aceptado vale solo para la opción que se aceptó (revisión 30).
-        price_ok = bool(option.get("unknown_accepted")) or (
-            usd is not None and job.max_usd is not None and usd <= job.max_usd + 1e-9
-        )
+        # Un tope numérico manda siempre que el precio se conozca; aceptar un desconocido solo cubre el precio
+        # desconocido o, si se aceptó sin tope, cualquiera. Vale solo para la opción aceptada (revisiones 30-31).
+        accepted = bool(option.get("unknown_accepted"))
+        if usd is None:
+            price_ok = accepted
+        elif job.max_usd is not None:
+            price_ok = usd <= job.max_usd + 1e-9
+        else:
+            price_ok = accepted
         reserve_ok = reserve is None or (
             job.max_reserve_usd is not None and reserve <= job.max_reserve_usd + 1e-9
         )

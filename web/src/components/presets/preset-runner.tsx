@@ -99,6 +99,8 @@ export function PresetRunner({ slug }: { slug: string }) {
           idempotency.current,
           current?.estimate?.usd ?? null,
           current?.estimate?.reserve_usd ?? null,
+          // Llegar aquí sin precio completo significa que el usuario confirmó un costo desconocido.
+          !costAllowsDirectSubmit(current?.estimate ?? null),
         ),
       );
       idempotency.current = null;
