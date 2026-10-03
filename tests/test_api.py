@@ -363,7 +363,7 @@ async def test_batch_dry_run_quotes_without_submitting(env):
         "dry_run": True,
     }
     r = (await http.post("/v1/generations/batch", json=body)).json()
-    assert r["total"] == {"usd": 0.18, "credits": 3.0, "complete": True}
+    assert r["total"] == {"usd": 0.18, "credits": 3.0, "complete": True, "reserve_usd": None}
     assert fake.submits == []
 
 
