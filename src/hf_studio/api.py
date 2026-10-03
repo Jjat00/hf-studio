@@ -644,6 +644,7 @@ def create_app(
             plan=stored,
             max_usd=approved_usd,
             max_reserve_usd=approved_reserve,
+            provider=body.provider,
         )
         if created:
             request.app.state.worker.wake()

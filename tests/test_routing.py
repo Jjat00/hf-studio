@@ -462,3 +462,14 @@ async def test_the_cheapest_provider_is_reconsidered_before_the_first_send(env):
     assert fakes.sent["apimart"] == [] and len(fakes.sent["kie"]) == 1
     state = (await http.get(f"/v1/generations/{job['id']}")).json()
     assert state["provider"] == "kie" and state["cost_usd"] == 1.025
+
+
+async def test_forcing_another_provider_is_not_deduplicated(env):
+    """Prueba real F0 (2026-10-03): la misma entrada forzada en otro proveedor devolvía el trabajo anterior."""
+    _, http, _ = env
+    a = (
+        await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "apimart"})
+    ).json()
+    b = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "kie"})).json()
+    c = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "kie"})).json()
+    assert a["id"] != b["id"] and b["provider"] == "kie" and c["id"] == b["id"]

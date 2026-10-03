@@ -71,6 +71,7 @@ async def create_generation(
     plan: list[dict] | None = None,
     max_usd: float | None = None,
     max_reserve_usd: float | None = None,
+    provider: str | None = None,
 ) -> tuple[Job, bool]:
     """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente.
 
@@ -88,9 +89,11 @@ async def create_generation(
             "keep_source_audio needs a video_url from /v1/uploads (upload_media) or from one of your generations",
         )
     # La opción cambia el resultado, así que forma parte de la huella (deduplicado e idempotencia).
-    digest = input_hash(
-        model["id"], {**arguments, "__keep_source_audio": True} if keep_source_audio else arguments
-    )
+    marked = {**arguments, "__keep_source_audio": True} if keep_source_audio else dict(arguments)
+    if provider:
+        # Forzar un proveedor es otra petición: no se deduplica con la misma entrada en otro proveedor.
+        marked["__provider"] = provider
+    digest = input_hash(model["id"], marked)
 
     if idempotency_key:
         existing = await session.scalar(
