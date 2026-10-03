@@ -5,12 +5,12 @@ export const AUTHOR = "https://jaimeaza.tech";
 
 /** Textos de la landing. Misma forma en los dos idiomas: el tipo sale del español. */
 const es = {
-  nav: { examples: "Ejemplos", audio: "Audio", agents: "Agentes", start: "Empezar", star: "Estrella en GitHub" },
+  nav: { examples: "Ejemplos", providers: "Proveedores", audio: "Audio", agents: "Agentes", start: "Empezar", star: "Estrella en GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS y Linux",
     title1: "Tu propio estudio de IA.",
     title2: "Todos los grandes modelos.",
-    body: "Video, imagen, voz, música y efectos con los modelos de Higgsfield y ElevenLabs, desde una interfaz web o desde tus agentes por MCP. Lo instalas en tu máquina y pagas solo lo que generas.",
+    body: "Video, imagen, voz, música y efectos con los grandes modelos, desde una interfaz web o desde tus agentes por MCP. Cada video sale por el proveedor más barato (Higgsfield, APIMart o KIE). Lo instalas en tu máquina y pagas solo lo que generas.",
     ctaRepo: "Ver en GitHub",
     ctaPromo: "Ver el promo",
     prompt: "Un auto deportivo en una carretera costera al atardecer, toma de dron",
@@ -19,8 +19,8 @@ const es = {
   },
   stats: [
     { value: "82", label: "modelos de video e imagen" },
-    { value: "25", label: "herramientas MCP" },
-    { value: "5", label: "funciones de audio" },
+    { value: "3", label: "proveedores, el más barato primero" },
+    { value: "27", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
   ],
   promo: {
@@ -45,6 +45,20 @@ const es = {
       { art: "object-swap", title: "Genjutsu", desc: "Sustituye una persona u objeto y deja el fondo intacto." },
       { art: "text-to-image", title: "Texto a imagen", desc: "Soul, Recraft, Ideogram, Qwen, Grok y más." },
       { art: "image-edit", title: "Editar imagen", desc: "Retoca o recompone una imagen con una frase." },
+    ],
+  },
+  providers: {
+    kicker: "Más barato con varios proveedores",
+    title: "El mismo modelo, al mejor precio",
+    body: "El mismo modelo se vende en varios sitios a precios muy distintos. HF Studio cotiza en todos los proveedores con clave y genera en el más barato, con exactamente el mismo modelo y la misma configuración.",
+    example: "Seedance 2.0 · 5 s a 720p · precios del 3 de octubre de 2026",
+    cheapest: "el más barato",
+    saves: "53 % menos que en Higgsfield",
+    points: [
+      { title: "Nunca un sustituto", desc: "Si un proveedor no puede reproducir un ajuste (una semilla, un bitrate, un formato), queda fuera en vez de cambiar tu pedido." },
+      { title: "Respaldo sin cobros dobles", desc: "Si el más barato falla sin cobrar, prueba el siguiente solo si no cuesta más de lo que aprobaste. Si cuesta más, te pregunta." },
+      { title: "Precio comprobado antes de enviar", desc: "Recotiza antes de generar (APIMart y KIE siempre; Higgsfield si la cotización tiene más de 15 min). Si supera lo aprobado, espera tu OK." },
+      { title: "Añadir una clave, un comando", desc: "hf-studio providers --add apimart abre el enlace, valida la clave gratis y la guarda. Higgsfield es la única obligatoria." },
     ],
   },
   audio: {
@@ -83,12 +97,12 @@ const es = {
     title1: "Tus agentes",
     title2: "generan por ti",
     body: "HF Studio también es un servidor MCP. Conéctalo a Claude Code, Codex, Claude Desktop o ChatGPT y tu agente busca el modelo, te dice cuánto cuesta, espera tu OK y genera.",
-    rule: "La regla: un agente no puede gastar créditos sin cotizar antes esa misma petición. Cada herramienta de pago exige un quote_id de un solo uso.",
+    rule: "La regla: un agente no puede gastar créditos sin cotizar antes esa misma petición. Cada generación exige un quote_id de un solo uso, y si el precio sube, el agente vuelve a pedirte el OK.",
     connect: "Conecta tu agente con un comando",
     chat: {
       user: "Hazme un video de 5 s de tinta de colores en agua, en cámara lenta",
       tools: ["recommend_models", "get_model", "estimate_cost"],
-      quote: "Wan 2.7 · texto a video, 5 s a 720p. Cuesta 8 créditos (0,50 USD). ¿Lo genero?",
+      quote: "Wan 2.7 · texto a video, 5 s a 720p. Lo más barato es APIMart: 0,33 USD (en Higgsfield, 0,43). ¿Lo genero?",
       ok: "Dale",
       done: "Listo: tinta.mp4 descargado en ./outputs",
     },
@@ -109,8 +123,8 @@ const es = {
     kicker: "Empieza en un minuto",
     title: "Instálalo en tu máquina",
     body: "Clona el repo y ejecuta el script: te pide la clave de Higgsfield (y, si quieres, la de ElevenLabs), la valida sin gastar créditos y abre el estudio en localhost:3000.",
-    reqs: ["Python 3.12 y uv", "Node.js 20 y pnpm", "ffmpeg para el audio", "Clave de la API de Higgsfield"],
-    note: "Sin suscripción: usa la API de Higgsfield, así que pagas solo lo que generas.",
+    reqs: ["Python 3.12 y uv", "Node.js 20 y pnpm", "ffmpeg para el audio", "Clave de la API de Higgsfield", "Opcional: claves de APIMart y KIE"],
+    note: "Sin suscripción: usa las APIs de Higgsfield, APIMart y KIE, así que pagas solo lo que generas, y al precio más bajo.",
     copy: "Copiar",
     copied: "Copiado",
   },
@@ -118,7 +132,7 @@ const es = {
     title: "Si te sirve, déjale una estrella",
     body: "HF Studio es gratis y open source. Una estrella en GitHub ayuda a que más gente lo encuentre.",
     cta: "Dar una estrella",
-    disclaimer: "Proyecto personal, sin relación con Higgsfield ni ElevenLabs. Usa sus APIs públicas con tus propias claves.",
+    disclaimer: "Proyecto personal, sin relación con Higgsfield, APIMart, KIE ni ElevenLabs. Usa sus APIs públicas con tus propias claves.",
     by: "Hecho por",
   },
 };
@@ -126,12 +140,12 @@ const es = {
 export type Dict = typeof es;
 
 const en: Dict = {
-  nav: { examples: "Examples", audio: "Audio", agents: "Agents", start: "Get started", star: "Star on GitHub" },
+  nav: { examples: "Examples", providers: "Providers", audio: "Audio", agents: "Agents", start: "Get started", star: "Star on GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS and Linux",
     title1: "Your own AI studio.",
     title2: "Every major model.",
-    body: "Video, image, voice, music and sound effects with the Higgsfield and ElevenLabs models, from a web UI or from your agents over MCP. It runs on your machine and you only pay for what you generate.",
+    body: "Video, image, voice, music and sound effects with the major models, from a web UI or from your agents over MCP. Every video runs on the cheapest provider (Higgsfield, APIMart or KIE). It runs on your machine and you only pay for what you generate.",
     ctaRepo: "View on GitHub",
     ctaPromo: "Watch the promo",
     prompt: "A sports car on a coastal road at sunset, drone shot",
@@ -140,8 +154,8 @@ const en: Dict = {
   },
   stats: [
     { value: "82", label: "video and image models" },
-    { value: "25", label: "MCP tools" },
-    { value: "5", label: "audio features" },
+    { value: "3", label: "providers, cheapest first" },
+    { value: "27", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
   ],
   promo: {
@@ -166,6 +180,20 @@ const en: Dict = {
       { art: "object-swap", title: "Genjutsu", desc: "Swap a person or an object and keep the background intact." },
       { art: "text-to-image", title: "Text to image", desc: "Soul, Recraft, Ideogram, Qwen, Grok and more." },
       { art: "image-edit", title: "Image edit", desc: "Retouch or recompose an image with one sentence." },
+    ],
+  },
+  providers: {
+    kicker: "Cheaper with more providers",
+    title: "The same model, at the best price",
+    body: "The same model is sold in several places at very different prices. HF Studio quotes every provider you have a key for and generates on the cheapest one, with exactly the same model and settings.",
+    example: "Seedance 2.0 · 5 s at 720p · prices on October 3, 2026",
+    cheapest: "cheapest",
+    saves: "53% less than on Higgsfield",
+    points: [
+      { title: "Never a substitute", desc: "If a provider cannot reproduce a setting (a seed, a bitrate, a format), it is left out instead of changing your request." },
+      { title: "Fallback without double charges", desc: "If the cheapest fails without charging, the next one runs only if it costs no more than you approved. If it costs more, it asks you." },
+      { title: "Price checked before sending", desc: "It re-quotes before generating (APIMart and KIE always; Higgsfield if the quote is over 15 min old). If it goes over what you approved, it waits for your OK." },
+      { title: "One command per key", desc: "hf-studio providers --add apimart opens the link, checks the key for free and saves it. Higgsfield is the only required one." },
     ],
   },
   audio: {
@@ -204,12 +232,12 @@ const en: Dict = {
     title1: "Your agents",
     title2: "generate for you",
     body: "HF Studio is also an MCP server. Connect it to Claude Code, Codex, Claude Desktop or ChatGPT and your agent finds the model, tells you the price, waits for your OK and generates.",
-    rule: "The rule: an agent cannot spend credits without first quoting that exact request. Every paid tool requires a single-use quote_id.",
+    rule: "The rule: an agent cannot spend credits without first quoting that exact request. Every generation requires a single-use quote_id, and if the price goes up the agent asks for your OK again.",
     connect: "Connect your agent with one command",
     chat: {
       user: "Make me a 5 s slow-motion video of colorful ink in water",
       tools: ["recommend_models", "get_model", "estimate_cost"],
-      quote: "Wan 2.7 · text to video, 5 s at 720p. It costs 8 credits ($0.50). Shall I generate it?",
+      quote: "Wan 2.7 · text to video, 5 s at 720p. Cheapest is APIMart: $0.33 ($0.43 on Higgsfield). Shall I generate it?",
       ok: "Go ahead",
       done: "Done: tinta.mp4 saved to ./outputs",
     },
@@ -230,8 +258,8 @@ const en: Dict = {
     kicker: "Up and running in a minute",
     title: "Install it on your machine",
     body: "Clone the repo and run the script: it asks for your Higgsfield key (and, optionally, ElevenLabs), validates it without spending credits and opens the studio at localhost:3000.",
-    reqs: ["Python 3.12 and uv", "Node.js 20 and pnpm", "ffmpeg for audio", "A Higgsfield API key"],
-    note: "No subscription: it uses the Higgsfield API, so you only pay for what you generate.",
+    reqs: ["Python 3.12 and uv", "Node.js 20 and pnpm", "ffmpeg for audio", "A Higgsfield API key", "Optional: APIMart and KIE keys"],
+    note: "No subscription: it uses the Higgsfield, APIMart and KIE APIs, so you only pay for what you generate, at the lowest price.",
     copy: "Copy",
     copied: "Copied",
   },
@@ -239,7 +267,7 @@ const en: Dict = {
     title: "If it helps, leave a star",
     body: "HF Studio is free and open source. A star on GitHub helps more people find it.",
     cta: "Star the repo",
-    disclaimer: "Personal project, not affiliated with Higgsfield or ElevenLabs. It uses their public APIs with your own keys.",
+    disclaimer: "Personal project, not affiliated with Higgsfield, APIMart, KIE or ElevenLabs. It uses their public APIs with your own keys.",
     by: "Made by",
   },
 };

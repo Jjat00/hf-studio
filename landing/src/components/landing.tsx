@@ -26,6 +26,7 @@ function Nav() {
   const { t, locale, setLocale } = useI18n();
   const links = [
     ["#ejemplos", t.nav.examples],
+    ["#proveedores", t.nav.providers],
     ["#audio", t.nav.audio],
     ["#agentes", t.nav.agents],
     ["#empezar", t.nav.start],
@@ -210,6 +211,58 @@ function Capabilities() {
             <p className="mt-1 text-[16px] text-fg-3">{c.desc}</p>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+// Cotización real de HF Studio el 2026-10-03 (Seedance 2.0, 5 s, 720p).
+const PRICES = [
+  { name: "APIMart", usd: 0.71 },
+  { name: "KIE", usd: 1.025 },
+  { name: "Higgsfield", usd: 1.51 },
+];
+
+function Providers() {
+  const { t, locale } = useI18n();
+  const p = t.providers;
+  const max = Math.max(...PRICES.map((x) => x.usd));
+  const money = (usd: number) =>
+    new Intl.NumberFormat(locale === "es" ? "es-CO" : "en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(usd);
+  return (
+    <section id="proveedores" className="mx-auto w-full max-w-[1400px] scroll-mt-20 px-4">
+      <div className="mb-8 max-w-3xl">
+        <Kicker>{p.kicker}</Kicker>
+        <h2 className="headline mt-3 text-[36px] md:text-[48px]">{p.title}</h2>
+        <p className="mt-3 text-[17px] text-fg-2">{p.body}</p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+        <div className="flex flex-col gap-5 rounded-[24px] border border-line bg-surface-2 p-6">
+          <p className="text-[14px] font-medium text-fg-3">{p.example}</p>
+          {PRICES.map((x, i) => (
+            <div key={x.name}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-[17px] font-semibold">
+                  {x.name}
+                  {i === 0 && <span className="ml-2 rounded-md bg-lime px-1.5 py-0.5 text-[11px] font-bold text-ink uppercase">{p.cheapest}</span>}
+                </span>
+                <span className="text-[17px] font-semibold tabular-nums">{money(x.usd)}</span>
+              </div>
+              <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-surface-3">
+                <div className={clsx("h-full rounded-full", i === 0 ? "bg-lime" : "bg-fg-3/40")} style={{ width: `${(x.usd / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+          <p className="mt-auto text-[15px] font-semibold text-lime">{p.saves}</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {p.points.map((pt) => (
+            <div key={pt.title} className="flex flex-col rounded-[22px] border border-line bg-surface-2 p-5">
+              <p className="text-[18px] font-semibold tracking-[-0.01em]">{pt.title}</p>
+              <p className="mt-1.5 text-[15px] leading-snug text-fg-3">{pt.desc}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -486,6 +539,7 @@ export function Landing() {
         <Promo />
         <Examples />
         <Capabilities />
+        <Providers />
         <Audio />
         <Agents />
         <More />
