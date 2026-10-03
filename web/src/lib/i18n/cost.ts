@@ -17,6 +17,13 @@ const BASIS_ES: [RegExp, string][] = [
   [/^Invalid input: /g, "Entrada no válida: "],
   [/Higgsfield needs the real media to price this model; upload it first/g, "Higgsfield necesita los medios reales para cotizar este modelo; súbelos primero"],
   [/Higgsfield could not price this request/g, "Higgsfield no pudo cotizar esta petición"],
+  [/^(\S+) price list \((\d{4}-\d{2}-\d{2})\)/g, "Lista de precios de $1 ($2)"],
+  [/^(\S+) price list/g, "Lista de precios de $1"],
+  [/^(\S+) has no price for this request in its list/g, "$1 no tiene precio para esta petición en su lista"],
+  [/^No provider can run this request/g, "Ningún proveedor puede hacer esta petición"],
+  [/insufficient balance/g, "saldo insuficiente"],
+  [/no key \(/g, "sin clave ("],
+  [/invalid key/g, "clave inválida"],
 ];
 
 const MISSING_ES: Record<string, string> = {

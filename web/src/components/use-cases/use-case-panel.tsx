@@ -48,6 +48,7 @@ function CostHint({ useCase }: { useCase: UseCase }) {
   let note = useCase.costNote && pick(useCase.costNote);
   if (state.failed) text = c.priceNA;
   else if (e?.kind === "exact" && e.credits !== null) text = `${+e.credits.toFixed(3)} ${c.credits}${e.usd !== null ? ` · ${formatUsd(e.usd)}` : ""}`;
+  else if (e?.kind === "exact" && e.usd !== null) text = formatUsd(e.usd);
   else if (e?.kind === "approx" && e.usd !== null && e.missing.length === 0) text = approxUsd(e.usd);
   else if (e?.usd != null) {
     // Subtotal: aún falta un dato facturable (p. ej. la duración del video de entrada).

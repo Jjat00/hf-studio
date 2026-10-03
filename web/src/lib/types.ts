@@ -54,7 +54,8 @@ export type JobStatus =
   | "failed"
   | "nsfw"
   | "canceled"
-  | "timed_out";
+  | "timed_out"
+  | "awaiting_approval";
 
 export type Generation = {
   id: string;
@@ -74,6 +75,28 @@ export type Generation = {
   deduplicated?: boolean;
   /** Cliente que la lanzó; solo llega a clientes que ven todo (la UI). */
   source?: string;
+  /** Proveedor que la ejecuta (higgsfield, apimart, kie…), su precio y lo aprobado. */
+  provider?: string;
+  cost_usd?: number | null;
+  max_usd?: number | null;
+  plan?: { provider: string; usd: number | null }[];
+  attempts?: { provider: string; error_kind: string | null; error: string | null; at: string }[];
+};
+
+export type ProviderInfo = {
+  name: string;
+  title: string;
+  env_var: string;
+  configured: boolean;
+  required: boolean;
+  signup_url: string;
+  key_url: string;
+  billing_url: string | null;
+  docs_url: string | null;
+  blurb: string;
+  valid?: boolean | null;
+  balance_usd?: number | null;
+  message?: string | null;
 };
 
 export type ApiErrorBody = {

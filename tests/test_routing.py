@@ -111,7 +111,7 @@ async def test_estimate_lists_every_provider_cheapest_first(env):
     body = (await http.post("/v1/estimate", json={"model": T2V, "input": VIDEO})).json()
     assert [o["provider"] for o in body["options"]] == ["apimart", "kie", "higgsfield"]
     assert body["provider"] == "apimart" and body["usd"] == 0.71 and body["kind"] == "exact"
-    assert body["basis"].startswith("APIMart:")
+    assert body["basis"].startswith("APIMart price list")
     assert body["savings_vs_higgsfield"] == {"usd": 0.8, "pct": 53}
     assert body["options"][1]["usd"] == 1.025
 

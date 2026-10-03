@@ -40,6 +40,14 @@ export function CostPanel({
     value = <span className="text-warning">{t.cost.unavailable}</span>;
     detail = error ?? t.cost.fixFields;
     warn = true;
+  } else if (estimate.kind === "exact" && estimate.credits === null) {
+    value = (
+      <span className="flex items-center gap-2">
+        <Sparkles className="size-4 fill-lime text-lime" />
+        {formatUsd(estimate.usd!)}
+      </span>
+    );
+    detail = basis;
   } else if (estimate.kind === "exact") {
     value = (
       <span className="flex items-center gap-2">
@@ -88,11 +96,54 @@ export function CostPanel({
       </div>
       <div className="mt-0.5 text-[16px] font-semibold">{value}</div>
       {detail && <p className="mt-0.5 line-clamp-2 text-xs text-fg-3">{detail}</p>}
+      {!loading && estimate?.options && estimate.options.length > 0 && <ProviderComparison estimate={estimate} />}
       {needsConfirm && warn !== undefined && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
           <AlertTriangle className="mt-px size-3.5 shrink-0" />
           {t.cost.cantShowExact}
         </p>
+      )}
+    </div>
+  );
+}
+
+/** Proveedor elegido, ahorro frente a Higgsfield y la comparación con los demás (y por qué se excluyen). */
+function ProviderComparison({ estimate }: { estimate: Estimate }) {
+  const { t, locale } = useI18n();
+  const options = estimate.options ?? [];
+  const excluded = estimate.excluded ?? [];
+  const best = options[0];
+  const savings = estimate.savings_vs_higgsfield;
+  const total = options.length + excluded.length;
+  return (
+    <div className="mt-1.5 text-xs">
+      <p className="text-fg-2">
+        <span className="font-semibold text-fg">{t.cost.via(best.title)}</span>
+        {savings && savings.usd > 0 && <span className="text-lime"> · {t.cost.saves(formatUsd(savings.usd), savings.pct)}</span>}
+      </p>
+      {total > 1 && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-fg-3 hover:text-fg-2">{t.cost.compare(total)}</summary>
+          <ul className="mt-1 space-y-0.5">
+            {options.map((o, i) => (
+              <li key={o.provider} className={clsx("flex justify-between gap-3", i === 0 ? "text-fg" : "text-fg-2")}>
+                <span>
+                  {o.title}
+                  {!o.official && <span className="text-fg-3"> · {t.cost.unofficial}</span>}
+                </span>
+                <span className="tabular-nums">{o.usd != null ? formatUsd(o.usd) : t.cost.notAvailable}</span>
+              </li>
+            ))}
+            {excluded.map((x) => (
+              <li key={x.provider} className="flex justify-between gap-3 text-fg-3">
+                <span className="truncate" title={x.reason}>
+                  {x.title} · {costBasis(x.reason, locale)}
+                </span>
+                <span className="tabular-nums">{x.usd != null ? formatUsd(x.usd) : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

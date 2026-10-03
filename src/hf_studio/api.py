@@ -446,8 +446,6 @@ def create_app(
         else:
             keys = ("kind", "credits", "usd", "discount_pct", "basis", "missing", "description")
             base = {k: getattr(best, k) for k in keys}
-            if best.provider != provider_registry.DEFAULT_PROVIDER:
-                base["basis"] = f"{best.title}: {best.basis}"
         return {**base, **plan.public()}
 
     @app.post("/v1/estimate", tags=["generaciones"])
@@ -473,7 +471,11 @@ def create_app(
         output: str | None = Query(None, pattern="^(video|image)$"),
     ) -> dict:
         """Sugiere modelos para una tarea, con el costo de una configuración estándar."""
-        return await recommend(request.app.state.hf, catalog, task, limit, output)
+
+        async def price(model: dict, arguments: dict) -> dict:
+            return estimate_body(await request.app.state.router.plan(model, arguments, {}))
+
+        return await recommend(price, catalog, task, limit, output)
 
     @app.post("/v1/uploads", status_code=201, tags=["archivos"])
     async def upload(

@@ -24,6 +24,13 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 INSTRUCTIONS = """Genera imágenes y videos con los modelos de Higgsfield a través de HF Studio.
+Proveedores: el mismo modelo puede salir por Higgsfield, APIMart o KIE. estimate_cost cotiza todos los que
+tengan clave y elige el más barato (options trae cada precio, excluded el motivo de los descartados y
+savings_vs_higgsfield el ahorro); generate envía al más barato. Si ese proveedor falla sin cobrar, HF Studio
+prueba el siguiente: solo si cuesta lo mismo o menos; si cuesta más, la generación queda en
+awaiting_approval: dile al usuario el nuevo precio y, con su OK, approve_fallback (o cancel_generation).
+provider="kie" (u otro) en estimate_cost y generate fuerza uno. providers_status muestra claves, saldos y
+los enlaces para crear cuenta o recargar.
 Atajos: recommend_models("lo que quiere el usuario") sugiere modelos con su costo; list_presets y
 run_preset ejecutan recetas listas (primero con dry_run=True para mostrar costo y entrada final);
 generate_batch hace variantes (primero dry_run=True) y wait_generations espera varias.
@@ -139,11 +146,14 @@ def upload_media(path: str) -> dict:
         readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
 )
-def estimate_cost(model_id: str, input: dict, input_video_seconds: float | None = None) -> dict:
-    """Costo de una generación sin ejecutarla. Funciona aunque falten los medios. Si el modelo cobra
-    por segundos de video de entrada, pasa input_video_seconds (duración del video que subirás).
-    Devuelve quote_id: muéstrale el costo al usuario y pásalo a generate con los mismos parámetros."""
-    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
+def estimate_cost(
+    model_id: str, input: dict, input_video_seconds: float | None = None, provider: str | None = None
+) -> dict:
+    """Costo de una generación sin ejecutarla, en cada proveedor (el más barato primero: `provider`, `usd`;
+    todas en `options`). Funciona aunque falten los medios. Si el modelo cobra por segundos de video de
+    entrada, pasa input_video_seconds (o sube el video antes: HF Studio lo mide). `provider` cotiza solo
+    ese. Devuelve quote_id: muéstrale el costo al usuario y pásalo a generate con los mismos parámetros."""
+    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds), "provider": provider}
     estimate = _call("POST", "/v1/estimate", json=payload)
     return {**estimate, "quote_id": _issue_quote(payload, estimate)}
 
@@ -163,20 +173,26 @@ def generate(
     input_video_seconds: float | None = None,
     confirm_unknown_cost: bool = False,
     keep_source_audio: bool = False,
+    provider: str | None = None,
 ) -> dict:
-    """Encola una generación y devuelve el trabajo (id, status). No espera: usa get_generation.
+    """Encola una generación en el proveedor más barato de la cotización (o en `provider`, el mismo que
+    se pasó a estimate_cost) y devuelve el trabajo (id, status, provider). No espera: usa get_generation.
     Requiere el quote_id de estimate_cost con los mismos model_id, input e input_video_seconds (el
     usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key.
     Al editar un video (entrada video_url), generate_audio=false da un video MUDO, no conserva el sonido
     original; para conservarlo pasa keep_source_audio=true (gratis: HF Studio le pone el audio del
     video de origen al resultado). Lee studio_notes en get_model."""
-    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds)}
+    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds), "provider": provider}
     headers = {"Idempotency-Key": _redeem_quote(payload, quote_id, idempotency_key, confirm_unknown_cost)}
     body = {
         "model": model_id,
         "input": input,
         "allow_duplicate": allow_duplicate,
         "keep_source_audio": keep_source_audio,
+        "hints": _hints(input_video_seconds),
+        "provider": provider,
+        # El precio que vio el usuario: si subió, la API responde 409 y hay que volver a cotizar.
+        "max_usd": _quoted_usd(quote_id),
     }
     return _call("POST", "/v1/generations", json=body, headers=headers)
 
@@ -481,13 +497,40 @@ def list_generations(status: str | None = None, limit: int = 20) -> dict:
 
 
 @mcp.tool(
+    title="Approve fallback provider (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def approve_fallback(generation_id: str, max_usd: float) -> dict:
+    """Para una generación en awaiting_approval: el proveedor más barato falló sin cobrar y el siguiente
+    cuesta más (lo dice su `error`). Dile al usuario ese precio y, con su OK, llama con `max_usd` igual a
+    ese precio. Si el respaldo cuesta más que max_usd, falla sin gastar."""
+    return _call("POST", f"/v1/generations/{generation_id}/approve", json={"max_usd": max_usd})
+
+
+@mcp.tool(
+    title="Providers status",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
+def providers_status() -> dict:
+    """Proveedores (Higgsfield, APIMart, KIE…): si tienen clave, si es válida, el saldo en USD y los enlaces
+    para crear cuenta (signup_url), copiar la clave (key_url) o recargar (billing_url). Con más proveedores
+    configurados los videos salen más baratos y hay respaldo si uno falla."""
+    return _call("GET", "/v1/providers")
+
+
+@mcp.tool(
     title="Cancel generation",
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True
     ),
 )
 def cancel_generation(generation_id: str) -> dict:
-    """Cancela una generación que aún no empezó (pending o queued). Lo cancelado se reembolsa."""
+    """Cancela una generación que aún no empezó (pending, queued o awaiting_approval). Lo cancelado
+    se reembolsa."""
     return _call("POST", f"/v1/generations/{generation_id}/cancel")
 
 
@@ -539,6 +582,12 @@ def recommend_models(task: str, output: str | None = None, limit: int = 5) -> di
 
 def _hints(input_video_seconds: float | None) -> dict:
     return {"input_video_seconds": input_video_seconds} if input_video_seconds is not None else {}
+
+
+def _quoted_usd(quote_id: str) -> float | None:
+    with _quotes_lock:
+        q = _quotes.get(quote_id or "")
+        return q["estimate"].get("usd") if q else None
 
 
 def _complete(estimate: dict) -> bool:

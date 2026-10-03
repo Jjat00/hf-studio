@@ -89,7 +89,7 @@ def test_concurrent_redeems_accept_a_single_key(monkeypatch):
 
     call, _ = _fake({"usd": 1.2, "complete": True, "missing": []})
     monkeypatch.setattr(mcp_server, "_call", call)
-    payload = {"model": "m", "input": {"prompt": "x"}, "hints": {}}
+    payload = {"model": "m", "input": {"prompt": "x"}, "hints": {}, "provider": None}
     q = mcp_server.estimate_cost("m", {"prompt": "x"})["quote_id"]
     start, accepted = threading.Barrier(8), []
 
@@ -171,3 +171,20 @@ def test_audio_tools_quote_then_run_with_the_api_quote(monkeypatch):
                          "model_id": "eleven_v3", "audio_quote": "aq_1"})  # fmt: skip
     with pytest.raises(ToolError):  # otra petición no puede usar esa cotización
         mcp_server.sound_effect("scream", quote_id=q["quote_id"])
+
+
+def test_generate_sends_the_quoted_price_as_the_ceiling(monkeypatch):
+    sent = []
+
+    def call(method, path, **kw):
+        if path == "/v1/estimate":
+            return {"usd": 0.71, "complete": True, "missing": [], "provider": "apimart"}
+        sent.append(kw["json"])
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    q = mcp_server.estimate_cost("m", {"prompt": "x"}, provider="kie")["quote_id"]
+    with pytest.raises(ToolError, match="mismatched"):  # el proveedor forma parte de la cotización
+        mcp_server.generate("m", {"prompt": "x"}, quote_id=q)
+    mcp_server.generate("m", {"prompt": "x"}, quote_id=q, provider="kie")
+    assert sent[0]["max_usd"] == 0.71 and sent[0]["provider"] == "kie"

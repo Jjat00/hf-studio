@@ -6,7 +6,6 @@ import asyncio
 import re
 
 from .catalog import Catalog
-from .pricing import quote
 
 # (patrón, capacidad exigida, explicación)
 INTENTS = [
@@ -111,7 +110,9 @@ def _standard_input(model: dict) -> dict:
     return args
 
 
-async def recommend(hf, catalog: Catalog, task: str, limit: int = 5, output: str | None = None) -> dict:
+async def recommend(price, catalog: Catalog, task: str, limit: int = 5, output: str | None = None) -> dict:
+    """`price(model, input)` cotiza en todos los proveedores (api.estimate_body): cada modelo lleva el
+    proveedor más barato y su precio."""
     parsed = parse_task(task)
     out = output or parsed["output"]
     pool = [m for m in catalog.models.values() if m["output"] in ("video", "image")]
@@ -138,12 +139,12 @@ async def recommend(hf, catalog: Catalog, task: str, limit: int = 5, output: str
         return s
 
     ranked = sorted(matches, key=score, reverse=True)[: max(limit * 2, limit)]
-    quotes = await asyncio.gather(*(quote(hf, catalog, m, _standard_input(m), {}) for m in ranked))
+    quotes = await asyncio.gather(*(price(m, _standard_input(m)) for m in ranked))
     items = []
     for m, q in zip(ranked, quotes, strict=True):
         items.append({
             "id": m["id"], "title": m["title"], "output": m["output"], "capabilities": m["capabilities"],
-            "standard_input": _standard_input(m), "estimate": q,
+            "standard_input": _standard_input(m), "estimate": q, "provider": q.get("provider"),
         })  # fmt: skip
     if parsed["cheap"]:
         items.sort(key=lambda i: (i["estimate"]["usd"] is None, i["estimate"]["usd"] or 0))
