@@ -13,6 +13,9 @@ from .catalog import Catalog
 from .config import Settings
 from .db import ACTIVE, ApiClient, Job, Upload, utcnow
 
+# «No se indicó» frente a None explícito («sin tope», revisión 32).
+UNSET: object = object()
+
 
 class ServiceError(Exception):
     def __init__(self, status: int, code: str, message: str, details: object = None):
@@ -69,8 +72,8 @@ async def create_generation(
     allow_duplicate: bool = False,
     keep_source_audio: bool = False,
     plan: list[dict] | None = None,
-    max_usd: float | None = None,
-    max_reserve_usd: float | None = None,
+    max_usd: float | None | object = UNSET,
+    max_reserve_usd: float | None | object = UNSET,
     provider: str | None = None,
 ) -> tuple[Job, bool]:
     """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente.
@@ -141,10 +144,12 @@ async def create_generation(
         keep_source_audio=keep_source_audio,
         plan=plan or [],
         provider=plan[0]["provider"] if plan else "higgsfield",
-        max_usd=max_usd if max_usd is not None else (plan[0].get("usd") if plan else None),
-        max_reserve_usd=max_reserve_usd
-        if max_reserve_usd is not None
-        else (plan[0].get("reserve_usd") if plan else None),
+        # Sin indicar, se aprueba lo que cuesta ahora; None explícito es «sin tope» (precio desconocido
+        # aceptado). Las retenciones se tratan igual.
+        max_usd=(plan[0].get("usd") if plan else None) if max_usd is UNSET else max_usd,
+        max_reserve_usd=(plan[0].get("reserve_usd") if plan else None)
+        if max_reserve_usd is UNSET
+        else max_reserve_usd,
         attempts_log=[],
     )
     session.add(job)

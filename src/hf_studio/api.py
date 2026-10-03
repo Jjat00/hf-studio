@@ -56,7 +56,15 @@ from .providers import registry as provider_registry
 from .providers.prices import PriceBook
 from .recommend import recommend
 from .routing import Plan, Router, requote, video_urls
-from .service import ServiceError, check_input, create_generation, get_owned_job, input_hash, trusted_media
+from .service import (
+    UNSET,
+    ServiceError,
+    check_input,
+    create_generation,
+    get_owned_job,
+    input_hash,
+    trusted_media,
+)
 from .sounds import LABELS as SOUND_LABELS
 from .sounds import as_dict as sound_dict
 from .sounds import backfill as backfill_sounds
@@ -508,8 +516,9 @@ def create_app(
         if quoted:
             check_reserve(best.reserve_usd, max_reserve_usd, details)
         stored = plan.stored()
-        if accept_unknown and unknown:
-            stored[0]["unknown_accepted"] = True  # solo esta opción; un respaldo pedirá aprobación
+        if accept_unknown:
+            # Solo esta opción, aunque su precio ya se conozca de nuevo; un respaldo pedirá aprobación.
+            stored[0]["unknown_accepted"] = True
         # Desconocido aceptado sin tope: queda sin tope (no se fija el precio de ahora como techo).
         approved_usd = max_usd if max_usd is not None else (None if accept_unknown else best.usd)
         return stored, approved_usd, (max_reserve_usd if quoted else best.reserve_usd)
@@ -768,11 +777,12 @@ def create_app(
             for _ in range(item.count):
                 key = f"{idempotency_key}:{n}" if idempotency_key else None
                 stored = plan.stored()
-                if body.accept_unknown_cost and (plan.best.usd is None or plan.best.missing):
-                    stored[0]["unknown_accepted"] = True
+                if body.accept_unknown_cost:
+                    stored[0]["unknown_accepted"] = True  # el total se aceptó sin tope
                 job, created = await create_generation(
                     session, settings, catalog, owner, item.model, item.input, key, allow_duplicate=True,
-                    plan=stored, max_reserve_usd=plan.best.reserve_usd if quoted else None,
+                    plan=stored, max_reserve_usd=plan.best.reserve_usd if quoted else UNSET,
+                    max_usd=None if body.accept_unknown_cost else UNSET,
                 )  # fmt: skip
                 jobs.append(job)
                 created_any |= created
@@ -832,8 +842,9 @@ def create_app(
             raise ServiceError(
                 422, "missing_max_usd", "Pass max_usd (or accept_unknown_cost=true to approve without a cap)"
             )
-        if body.accept_unknown_cost:
-            fresh["unknown_accepted"] = True  # solo esta opción; un tope dado sigue mandando (revisión 31)
+        # El permiso de esta aprobación (también False) solo se guarda si la aprobación sale bien: un 409 no
+        # añade ni hereda autorizaciones (revisión 32).
+        fresh.pop("unknown_accepted", None)
         if fresh["usd"] is None and not body.accept_unknown_cost:
             problem = (
                 "cost_unknown",
@@ -854,7 +865,8 @@ def create_app(
             # Se guarda la cotización nueva (sigue esperando aprobación): la UI y el agente ven el precio actual
             # y pueden aprobarlo con una acción explícita, sin repetir el importe viejo (revisión 29).
             plan = list(job.plan)
-            plan[index] = fresh
+            # Importes nuevos, pero el permiso que ya tenía la opción (no el de esta petición rechazada).
+            plan[index] = {**fresh, "unknown_accepted": bool(job.plan[index].get("unknown_accepted"))}
             await session.execute(
                 update(Job)
                 .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version,
@@ -866,7 +878,7 @@ def create_app(
                 409, problem[0], problem[1], {"usd": fresh["usd"], "reserve_usd": fresh.get("reserve_usd")}
             )
         plan = list(job.plan)
-        plan[index] = fresh
+        plan[index] = {**fresh, "unknown_accepted": body.accept_unknown_cost}
         # CAS sobre la versión leída: dos aprobaciones, o aprobar y cancelar a la vez, no pueden ganar ambas.
         done = await session.execute(
             update(Job)

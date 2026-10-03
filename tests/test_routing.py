@@ -522,3 +522,37 @@ async def test_approving_an_unknown_fallback_without_a_cap_sends_it(env):
     assert ok.status_code == 200 and ok.json()["max_usd"] is None
     await tick(app)
     assert len(fakes.sent["kie"]) == 1
+
+
+# --- Revisión 32 ----------------------------------------------------------------------------------
+
+
+async def test_a_rejected_approval_adds_no_permission(env):
+    app, http, fakes = env
+    fakes.apimart_submit = "credits"
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 0.71})).json()
+    await tick(app)  # KIE espera aprobación a 1,025
+    r = await http.post(
+        f"/v1/generations/{job['id']}/approve", json={"max_usd": 1, "accept_unknown_cost": True}
+    )
+    assert r.status_code == 409
+    ok = await http.post(
+        f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.025, "accept_unknown_cost": False}
+    )
+    assert ok.status_code == 200
+    app.state.prices.store("kie", {})  # la tarifa desaparece antes del envío
+    await tick(app)
+    assert fakes.sent["kie"] == []
+    assert (await http.get(f"/v1/generations/{job['id']}")).json()["status"] == "awaiting_approval"
+
+
+async def test_an_uncapped_acceptance_survives_a_price_that_reappears(env):
+    app, http, fakes = env
+    real = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    # Cotizado sin precio; al crear ya hay tarifa (0,71) y luego sube a 1,50: la aceptación sin tope manda.
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "apimart",
+                                                    "accept_unknown_cost": True})).json()  # fmt: skip
+    assert job["max_usd"] is None
+    app.state.prices.store("apimart", {**real, "seedance-2.0|720P": 0.3})
+    await tick(app)
+    assert len(fakes.sent["apimart"]) == 1
