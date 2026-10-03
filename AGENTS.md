@@ -30,11 +30,14 @@ owner's credits.
 ## Use it through MCP
 
 - Generations go to the cheapest provider with a key (Higgsfield, APIMart, KIE). `estimate_cost` returns every
-  option; a generation in `awaiting_approval` needs the user's OK on its new price (`approve_fallback`).
+  option; a generation in `awaiting_approval` needs the user's OK on its new price (`cost_usd`, and `reserve_usd` if
+  the provider holds more upfront). Approving is separate and takes no `quote_id`: `approve_fallback` with `max_usd`
+  and `max_reserve_usd`, or `accept_unknown_cost=True` only if the user accepts an unknown cost (no cap without
+  `max_usd`). `providers_status` shows keys, balances and the links to sign up or top up.
 - Flow: `recommend_models` or `find_models` → `get_model` (read `input_schema` and `studio_notes`) → `upload_media`
   for local files → `estimate_cost` → **tell the user the cost and wait for their OK** → `generate` with that
   `quote_id` → `get_generation` until `terminal` is true → `download_outputs`.
-- Every paid tool needs a single-use `quote_id` (15 min) from quoting the exact same request. Paid tools say
+- Every tool that starts a paid run needs a single-use `quote_id` (15 min) from quoting the exact same request. Paid tools say
   "spends credits" in their title. Never pass `confirm_unknown_cost=True` unless the user explicitly accepts an
   unknown price.
 - After an ambiguous error, check `list_generations` before calling `generate` again, and reuse the same

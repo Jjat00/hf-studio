@@ -4,7 +4,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-25%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+[![MCP](https://img.shields.io/badge/MCP-27%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
 **Español** · [English](README.md) · [Web y ejemplos](https://hf-studio-gold.vercel.app)
 
@@ -34,9 +34,14 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   bitrate, una relación de aspecto…) deja fuera a ese proveedor en vez de descartarse.
 - **Respaldo sin cobros dobles.** Si un proveedor rechaza el pedido o la tarea falla sin cobrar, el siguiente se
   prueba solo si cuesta lo mismo o menos que lo aprobado; si no, la generación espera tu aprobación. Un envío que pudo
-  llegar al proveedor (timeout, respuesta dudosa) nunca se reintenta en ninguno. Antes de enviar se vuelve a cotizar,
-  y un precio mayor o una retención inicial nueva (algunos proveedores retienen más de lo que cobran y devuelven la
-  diferencia) necesitan tu aprobación.
+  llegar al proveedor (timeout, respuesta dudosa) nunca se reintenta en ninguno.
+- **Precios comprobados antes de enviar.** APIMart y KIE se cotizan con tablas locales, así que se recotizan justo
+  antes de cada envío; las cotizaciones de Higgsfield se reutilizan 15 minutos y se piden de nuevo después. Antes del
+  primer envío automático se rehace el plan entero con los precios de ese momento. La generación se detiene a esperar
+  tu aprobación cuando el precio comprobado supera el tope aprobado, cuando el precio pasa a ser desconocido y no
+  aceptaste un costo desconocido para esa opción, o cuando una retención inicial (algunos proveedores retienen más de
+  lo que cobran y devuelven la diferencia) supera la que aprobaste. Si aceptaste un costo desconocido sin tope para
+  una opción, esa opción puede correr al precio que acabe teniendo; las retenciones siempre se aprueban aparte.
 - **Añadir una clave:** `uv run hf-studio providers --add apimart` (o `kie`) la pide, la valida gratis y la guarda;
   `--open NOMBRE` abre la página donde se crea y `hf-studio providers` muestra estado y saldos. La UI tiene la página
   **Proveedores** con los mismos enlaces.
@@ -201,14 +206,15 @@ se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se det
 mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
 `HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-Herramientas (25). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Herramientas (27). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
 | --- | --- |
 | Modelos | `find_models`, `get_model`, `recommend_models` |
 | Generar | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
-| Seguimiento | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs` |
+| Seguimiento | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
+| Proveedores | `providers_status` |
 | Presets | `list_presets`, `run_preset`, `save_preset` |
 | Voz (ElevenLabs) | `list_voices`, `change_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
@@ -220,7 +226,13 @@ exigen ese `quote_id` con los mismos parámetros. Las herramientas de ElevenLabs
 `quote_id` devuelven el costo; con él, generan. Cada cotización vale para una sola ejecución y dura 15 min; un
 reintento con la misma `idempotency_key` no vuelve a cobrar. Si el precio está incompleto (falta
 `input_video_seconds`, que en los lotes también puede ir por ítem en `hints`), hace falta además
-`confirm_unknown_cost=True`, solo cuando el usuario acepta explícitamente un costo desconocido. `get_model` devuelve
+`confirm_unknown_cost=True`, solo cuando el usuario acepta explícitamente un costo desconocido. **Aprobar una
+generación pendiente es un paso aparte, sin `quote_id`:** una generación en `awaiting_approval` (su proveedor falló
+sin cobrar, o el precio superó lo aprobado) muestra el precio nuevo en `cost_usd` y la retención inicial en
+`reserve_usd`; con el OK del usuario, `approve_fallback` recibe `max_usd` (ese precio), `max_reserve_usd` (esa
+retención) o, solo si el usuario acepta un costo desconocido, `accept_unknown_cost=True` (sin `max_usd` queda sin
+tope; con él, el tope sigue mandando cuando el precio se conoce). HF Studio recotiza al aprobar y responde 409 con
+el precio actual si subió. `get_model` devuelve
 también `studio_notes`, avisos de HF Studio como que `generate_audio=false` en una edición da un video mudo y cómo
 conservar el audio original (`generate` con `keep_source_audio=true`). El MCP no conoce las credenciales de
 Higgsfield ni de ElevenLabs, solo su propia clave `hfs_…`. Tampoco puede comprobar que una persona vio el precio:

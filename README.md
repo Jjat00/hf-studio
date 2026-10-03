@@ -4,7 +4,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-25%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
+[![MCP](https://img.shields.io/badge/MCP-27%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
 [Español](README.es.md) · **English** · [Website and examples](https://hf-studio-gold.vercel.app)
 
@@ -24,7 +24,7 @@ so it always has a price to show you before it generates.
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - **One place for 82 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
   (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand.
-- **Agents that quote before they spend.** Every paid MCP tool requires a single-use `quote_id` from a prior quote of
+- **Agents that quote before they spend.** Every MCP tool that starts a paid run requires a single-use `quote_id` from a prior quote of
   the same request, and the server tells the agent to show you that cost and wait for your OK.
 - **Persistent jobs.** Async jobs stored in a database, with validation before spending, deduplication,
   `Idempotency-Key`, a local queue that respects your account's concurrency, and local copies of every output
@@ -51,8 +51,14 @@ the cheapest provider that offers **the exact same model and settings**:
 - **Fallback without double charges.** If a provider rejects the request or the task fails without charging, the
   next one is tried on its own only if it costs the same or less than what you approved; otherwise the generation
   waits for your approval. A submission that may have reached the provider (timeout, unclear answer) is never
-  retried anywhere. Before sending, the price is quoted again, and a higher price or a new upfront hold (some
-  providers hold more than they charge and refund the difference) needs your approval.
+  retried anywhere.
+- **Prices checked again before sending.** APIMart and KIE are priced from local tables, so they are re-priced right
+  before every send; Higgsfield quotes are reused for 15 minutes and asked again after that. Before the first
+  automatic send the whole plan is redone with current prices. The generation stops for your approval when the
+  checked price goes over your approved cap, when the price becomes unknown and you did not accept an unknown cost
+  for that option, or when an upfront hold (some providers hold more than they charge and refund the difference)
+  goes over the hold you approved. If you accepted an unknown cost without a cap for an option, that option can run
+  at whatever price it ends up having; holds are always approved separately.
 - **Add a key:** `uv run hf-studio providers --add apimart` (or `kie`) asks for it, checks it for free and saves it;
   `--open NAME` opens the page where you create it, and `hf-studio providers` shows status and balances. The UI has a
   **Providers** page with the same links.
@@ -190,14 +196,15 @@ touched. If the agent already has `hf-studio`, `connect` stops: remove it first 
 server is `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with `HF_STUDIO_URL=http://127.0.0.1:8787`
 and `HF_STUDIO_TOKEN=hfs_…` in its environment.
 
-Tools (25). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Tools (27). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`), and the ones that spend credits say so in their title, so clients can warn you before calling them.
 
 | Group | Tools |
 | --- | --- |
 | Models | `find_models`, `get_model`, `recommend_models` |
 | Generate | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
-| Tracking | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs` |
+| Tracking | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
+| Providers | `providers_status` |
 | Presets | `list_presets`, `run_preset`, `save_preset` |
 | Voice (ElevenLabs) | `list_voices`, `change_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
@@ -209,7 +216,12 @@ Tools (25). Every tool declares all four MCP hints (`readOnlyHint`, `destructive
 without `quote_id` they return the cost; with it, they generate. Each quote is good for one run and lasts 15 minutes;
 a retry with the same `idempotency_key` is not charged again. If the price is incomplete (missing
 `input_video_seconds`, which in batches can also go per item in `hints`), `confirm_unknown_cost=True` is required too,
-only when the user explicitly accepts an unknown cost. `get_model` also returns `studio_notes`, HF Studio warnings
+only when the user explicitly accepts an unknown cost. **Approving a pending generation is a separate step without a
+`quote_id`:** a generation in `awaiting_approval` (its provider failed without charging, or the price went over what
+was approved) shows the new price in `cost_usd` and any upfront hold in `reserve_usd`; with the user's OK,
+`approve_fallback` takes `max_usd` (that price), `max_reserve_usd` (that hold) or, only if the user accepts an unknown
+cost, `accept_unknown_cost=True` (without `max_usd` it has no cap; with it, the cap still rules once the price is
+known). HF Studio quotes again when approving and answers 409 with the current price if it went up. `get_model` also returns `studio_notes`, HF Studio warnings
 such as `generate_audio=false` giving a silent video on an edit and how to keep the original audio (`generate` with
 `keep_source_audio=true`). The MCP server never sees the Higgsfield or ElevenLabs credentials, only its own `hfs_…`
 key. It cannot check that a person actually saw the price: showing it and waiting for an OK is up to the agent,
