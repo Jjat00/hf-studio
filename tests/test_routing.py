@@ -570,7 +570,9 @@ async def test_a_batch_cannot_mix_a_total_cap_with_an_unknown_acceptance(env):
         assert (await s.scalars(select(Job))).all() == []
 
 
-async def test_a_kie_internal_error_never_falls_back(env):
+@pytest.mark.parametrize("message", ["Internal server error", "Internal error: invalid parameter cache",
+                                     "moderation service timeout"])  # fmt: skip
+async def test_a_kie_internal_error_never_falls_back(env, message):
     """Revisión 34: KIE con HTTP 200 y code 500 genérico: un solo POST y ningún respaldo."""
     app, http, fakes = env
     original = fakes.__call__
@@ -578,7 +580,7 @@ async def test_a_kie_internal_error_never_falls_back(env):
     def kie_internal(request):
         if request.url.host == "api.kie.ai" and request.method == "POST":
             fakes.sent["kie"].append(json.loads(request.content))
-            return httpx.Response(200, json={"code": 500, "msg": "Internal server error", "data": None})
+            return httpx.Response(200, json={"code": 500, "msg": message, "data": None})
         return original(request)
 
     app.state.providers["kie"]._api._transport = httpx.MockTransport(kie_internal)

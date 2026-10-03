@@ -28,20 +28,17 @@ STATE = {
 MODERATION = re.compile(r"nsfw|moderat|sensitive|safety|content.?policy|violat|prohibit", re.IGNORECASE)
 
 
-# Mensajes con los que KIE rechaza parámetros (con code 500, comprobado el 2026-10-03). Un 500 que no los
-# trae puede ser un fallo interno tras aceptar la tarea: ambiguo (revisión 34).
-PARAM_REJECTION = re.compile(
-    r"not within the range|is not supported|is required|must be|invalid|not allowed|exceed|cannot be empty"
-    r"|out of range|allowed options|should be|parameter",
-    re.IGNORECASE,
-)
+# Rechazos de parámetros que KIE envía con code 500 y que están comprobados en vivo (2026-10-03). Solo
+# estos son seguros: cualquier otro 500, aunque mencione «invalid» o «moderation», puede ser un fallo
+# interno tras aceptar la tarea y es ambiguo (revisiones 34 y 35). Añadir aquí solo mensajes verificados.
+KNOWN_PARAM_REJECTIONS = re.compile(r"is not within the range of allowed options", re.IGNORECASE)
 
 
 def _kind(code: int, message: str) -> str:
+    if code >= 500:
+        return "validation" if code == 500 and KNOWN_PARAM_REJECTIONS.search(message) else "ambiguous"
     if MODERATION.search(message):
         return "moderation"
-    if code == 500:
-        return "validation" if PARAM_REJECTION.search(message) else "ambiguous"
     return {
         401: "auth",
         402: "credits",
@@ -50,9 +47,7 @@ def _kind(code: int, message: str) -> str:
         429: "concurrency",
         433: "concurrency",
         455: "unavailable",
-        501: "server",
-        505: "unavailable",
-    }.get(code, "server" if code >= 500 else "bad_request")
+    }.get(code, "bad_request")
 
 
 class KIEProvider(Provider):

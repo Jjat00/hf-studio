@@ -143,7 +143,7 @@ async def test_kie_credit_balance_and_invalid_key():
 async def test_kie_errors_come_inside_http_200():
     def handler(request):
         return httpx.Response(
-            200, json={"code": 500, "msg": "resolution is not within the range", "data": None}
+            200, json={"code": 500, "msg": "resolution is not within the range of allowed options", "data": None}
         )
 
     with pytest.raises(ProviderError) as info:
@@ -361,7 +361,9 @@ async def test_concurrent_downloads_of_the_same_source_do_not_clash(tmp_path):
 @pytest.mark.parametrize(
     ("message", "kind"),
     [("resolution is not within the range of allowed options", "validation"),
-     ("Internal server error", "ambiguous"), ("System busy, please try again", "ambiguous")],
+     ("Internal server error", "ambiguous"), ("System busy, please try again", "ambiguous"),
+     ("Internal error: invalid parameter cache", "ambiguous"), ("moderation service timeout", "ambiguous"),
+     ("parameter store unavailable", "ambiguous")],
 )  # fmt: skip
 async def test_kie_code_500_is_only_safe_when_it_names_a_parameter(message, kind):
     """Revisión 34: el número 500 no basta para saber que no se creó la tarea."""
