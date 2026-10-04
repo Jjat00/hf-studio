@@ -4,10 +4,11 @@ import clsx from "clsx";
 import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ReuseMenu } from "@/components/generations/reuse-menu";
 import { useI18n } from "@/components/i18n-provider";
 import type { Locale } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
-import { formatUsd, modelLabel, outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
+import { approxUsd, formatUsd, modelLabel, outputSrc, studio, VOICE_MODEL } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const RATIO: Record<string, string> = {
@@ -56,7 +57,7 @@ export function AudioPlayer({ src }: { src: string }) {
 }
 
 // Nombres de los proveedores (registry.py); uno nuevo se muestra con su id hasta añadirlo aquí.
-export const PROVIDER_TITLES: Record<string, string> = { higgsfield: "Higgsfield", apimart: "APIMart", kie: "KIE" };
+export const PROVIDER_TITLES: Record<string, string> = { higgsfield: "Higgsfield", apimart: "APIMart", kie: "KIE", elevenlabs: "ElevenLabs" };
 
 export function providerTitle(name: string | undefined) {
   return name ? (PROVIDER_TITLES[name] ?? name) : "";
@@ -64,7 +65,18 @@ export function providerTitle(name: string | undefined) {
 
 /** Opción actual del plan: en awaiting_approval, la que espera que se apruebe su precio. */
 export function currentOption(g: Generation) {
-  return (g.plan ?? []).find((o) => o.provider === g.provider);
+  return (g.plan ?? []).find((o) => o.provider === g.provider && (g.provider_model == null || o.model === g.provider_model));
+}
+
+/** Modelo del proveedor si difiere del id del catálogo (APIMart, KIE, ElevenLabs); en Higgsfield es el mismo. */
+export function providerModel(g: Generation) {
+  return g.provider_model && g.provider_model !== g.model ? g.provider_model : null;
+}
+
+/** Costo de la generación para el historial: no se muestra en las fallidas (el proveedor no cobra o reembolsa). */
+export function generationCost(g: Generation) {
+  if (g.cost_usd == null || ["failed", "nsfw", "timed_out", "canceled"].includes(g.status)) return null;
+  return g.cost_kind === "approx" ? approxUsd(g.cost_usd) : formatUsd(g.cost_usd);
 }
 
 // Nombres legibles de los clientes habituales; cualquier otro se muestra tal cual.
@@ -182,6 +194,7 @@ export function GenerationCard({
           <Download className="size-4" />
         </IconButton>
       )}
+      <ReuseMenu g={g} className={ICON_BUTTON} />
       {onReuse && (
         <IconButton label={t.generation.reuse} onClick={() => onReuse(g)}>
           <RotateCcw className="size-4" />
@@ -218,16 +231,24 @@ export function GenerationCard({
     </div>
   );
 
+  // Proveedor, modelo en el proveedor, canal no oficial y costo: en la lista y en la cuadrícula del historial.
+  const providerChip = g.provider && (
+    <span
+      className="max-w-full truncate rounded-md bg-glass px-1.5 py-0.5"
+      title={[providerModel(g), ...(g.attempts ?? []).map((a) => `${providerTitle(a.provider)}: ${a.error}`)].filter(Boolean).join("\n") || undefined}
+    >
+      {t.cost.via(providerTitle(g.provider))}
+      {providerModel(g) && <span className="font-mono"> · {providerModel(g)}</span>}
+      {g.official === false && <span className="text-warning"> · {t.cost.unofficial}</span>}
+      {generationCost(g) && <span className="font-medium text-fg-2"> · {generationCost(g)}</span>}
+    </span>
+  );
+
   const meta = (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-fg-3">
       <span className="rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, locale, models)}</span>
       {source && <span className="rounded-md bg-lime/10 px-1.5 py-0.5 font-medium text-lime">{source}</span>}
-      {g.provider && !LOCAL_MODELS[g.model] && (
-        <span className="rounded-md bg-glass px-1.5 py-0.5" title={g.attempts?.length ? g.attempts.map((a) => `${providerTitle(a.provider)}: ${a.error}`).join("\n") : undefined}>
-          {t.cost.via(providerTitle(g.provider))}
-          {g.cost_usd != null ? ` · ${formatUsd(g.cost_usd)}` : ""}
-        </span>
-      )}
+      {providerChip}
       {["resolution", "duration", "aspect_ratio"].map((k) =>
         g.input[k] !== undefined ? (
           <span key={k} className="rounded-md bg-glass px-1.5 py-0.5">
@@ -268,6 +289,7 @@ export function GenerationCard({
         </Link>
         <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
       </div>
+      {providerChip && <div className="flex min-w-0 px-1 text-xs text-fg-3">{providerChip}</div>}
     </article>
   );
 }

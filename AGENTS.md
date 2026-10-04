@@ -43,6 +43,9 @@ owner's credits.
 - After an ambiguous error, check `list_generations` before calling `generate` again, and reuse the same
   `idempotency_key` when retrying.
 - Before generating a sound, search `list_sounds`: reusing one is free.
+- Kling 3.0 elements: `list_elements` / `create_element` (2–4 JPG/PNG images). Put their `el_…` ids in the model's
+  `elements` field and cite each as `@name` in the prompt; they run on APIMart and KIE only (KIE also needs
+  `image_url`).
 - The server instructions (in `src/hf_studio/mcp_server.py`, `INSTRUCTIONS`) are the source of truth.
 
 ## Work on the code
@@ -54,7 +57,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
 
 - Map: `api.py` (REST routes), `service.py` (generation logic), `worker.py` (queue and polling),
-  `higgsfield.py` (Higgsfield client), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
+  `higgsfield.py` (Higgsfield client), `elements.py` (Kling 3.0 elements: local images, refreshed URLs), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
   provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,

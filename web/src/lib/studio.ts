@@ -1,4 +1,4 @@
-import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -196,6 +196,23 @@ export const studio = {
   deletePreset: (slug: string) => call<void>(`/v1/presets/${slug}`, { method: "DELETE" }),
   remove: (id: string) => call<void>(`/v1/generations/${id}`, { method: "DELETE" }),
   cancel: (id: string) => call<Generation>(`/v1/generations/${id}/cancel`, { method: "POST" }),
+  elements: () => call<{ elements: StudioElement[] }>("/v1/elements"),
+  /** URL vigente de una salida propia para usarla como entrada de otra generación (gratis). */
+  useOutput: (id: string, index = 0) =>
+    call<{ url: string; kind: string; content_type: string }>(`/v1/generations/${id}/outputs/${index}/use`, {
+      method: "POST",
+    }),
+  /** 2 a 4 imágenes JPG o PNG; `name` en minúsculas (letras, dígitos y _), se cita como @name. */
+  /** `urls`: imágenes propias ya subidas (p. ej. una creación vía `useOutput`). */
+  createElement: (name: string, description: string, files: File[], urls: string[] = []) => {
+    const form = new FormData();
+    form.append("name", name);
+    form.append("description", description);
+    for (const f of files) form.append("files", f);
+    for (const u of urls) form.append("image_urls", u);
+    return call<StudioElement>("/v1/elements", { method: "POST", body: form });
+  },
+  deleteElement: (id: string) => call<void>(`/v1/elements/${id}`, { method: "DELETE" }),
   upload: async (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -220,7 +237,7 @@ export type Estimate = {
   /** Retención inicial del elegido, mayor que su costo final (se devuelve la diferencia). */
   reserve_usd?: number | null;
   options?: EstimateOption[];
-  excluded?: { provider: string; title: string; reason: string; usd?: number | null; key_url?: string; billing_url?: string }[];
+  excluded?: { provider: string; title: string; model?: string; reason: string; usd?: number | null; key_url?: string; billing_url?: string }[];
   savings_vs_higgsfield?: { usd: number; pct: number } | null;
 };
 
@@ -247,17 +264,20 @@ export function approxUsd(usd: number) {
   return text.startsWith("<") ? text : `~${text}`;
 }
 
-/** Texto corto del costo para botones: «✦ 8.57» (créditos) o «~$1.51». */
+/** Texto corto del costo para botones, siempre en USD: «$1.51» o «~$1.51» (nunca créditos de Higgsfield). */
 export function costShort(e: Estimate | null): string | null {
   if (!e) return null;
-  if (e.kind === "exact" && e.credits !== null) return `${+e.credits.toFixed(3)}`;
-  // Precio exacto de otro proveedor (APIMart, KIE): viene en USD, sin créditos de Higgsfield.
   if (e.kind === "exact" && e.usd !== null) return formatUsd(e.usd);
   if (e.kind === "approx" && e.usd !== null) return approxUsd(e.usd);
   return null;
 }
 
 /** URL reproducible de una salida: la copia local si existe (no caduca), si no la de Higgsfield. */
+/** URL del navegador para una ruta de la API (p. ej. las imágenes de un elemento). */
+export function apiSrc(path: string) {
+  return BASE + path;
+}
+
 export function outputSrc(out: { url: string; file_url?: string }) {
   return out.file_url ? BASE + out.file_url : out.url;
 }

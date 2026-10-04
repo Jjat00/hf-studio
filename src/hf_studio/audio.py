@@ -30,10 +30,15 @@ def supports_source_audio(model: dict) -> bool:
 
 def studio_notes(model: dict) -> list[str]:
     """Notas de HF Studio (no de Higgsfield) que el agente debe leer antes de generar."""
-    if not supports_source_audio(model):
-        return []
     props = model["input_schema"]["properties"]
     notes = []
+    if "elements" in props and model["id"].startswith("kling-video/v3.0/"):
+        notes.append(
+            "elements also takes HF Studio element ids (el_…, see list_elements / create_element): cite each in "
+            "the prompt as @name. They run only on APIMart and KIE (KIE also needs image_url), never on Higgsfield."
+        )
+    if not supports_source_audio(model):
+        return notes
     if "generate_audio" in props:
         notes.append(
             "generate_audio=false returns a SILENT video: it does not keep the audio of the source video. "

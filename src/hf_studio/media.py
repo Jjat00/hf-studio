@@ -49,7 +49,7 @@ def is_media_container(head: bytes) -> bool:
     )
 
 
-async def _download(url: str, client: httpx.AsyncClient, max_bytes: int, dest: Path) -> bool:
+async def download(url: str, client: httpx.AsyncClient, max_bytes: int, dest: Path) -> bool:
     """Descarga controlada: solo HTTPS, sin seguir redirecciones, con tope de tamaño."""
     if not url.startswith("https://"):
         return False
@@ -84,7 +84,7 @@ async def cached_source(url: str, storage: Path, client: httpx.AsyncClient, max_
     os.close(fd)
     tmp = Path(name)
     try:
-        if not await _download(url, client, max_bytes, tmp):
+        if not await download(url, client, max_bytes, tmp):
             return None
         if not is_media_container(_head(tmp)):
             return None
@@ -105,7 +105,7 @@ async def local_duration(
     """Descarga `url` (HTTPS, sin seguir redirecciones, con tope de tamaño) y mide su duración en local."""
     with tempfile.TemporaryDirectory(prefix="hfs-probe-") as tmp:
         path = Path(tmp) / "media"
-        if not await _download(url, client, max_bytes, path):
+        if not await download(url, client, max_bytes, path):
             return None
         head = _head(path)
         if not matches_type(head, "video/mp4") and head[:4] != b"\x1a\x45\xdf\xa3":

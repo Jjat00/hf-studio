@@ -32,6 +32,17 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   Seedance 2.0 a 720p y 5 s costaba 0,71 USD en APIMart, 1,025 en KIE y 1,51 en Higgsfield.
 - **El mismo modelo, nunca un sustituto.** Un ajuste que un proveedor no puede reproducir (una semilla fija, un
   bitrate, una relación de aspecto…) deja fuera a ese proveedor en vez de descartarse.
+- **Canales no oficiales, señalados.** Un proveedor puede vender además un canal no oficial más barato del mismo
+  modelo (p. ej. `grok-imagine-1.5-video-ext` de APIMart para Grok Imagine 1.5, unas 6 veces más barato). Es una
+  opción más, marcada como «canal no oficial»; si falla, el oficial es el respaldo con la regla de aprobación de
+  siempre, y una vez apruebas un canal, se envía ese.
+- **Cada generación dice cuánto costó.** El historial muestra el proveedor, el modelo en el proveedor (y si el canal
+  es no oficial) y el costo en USD (`~` si es estimado); las fallidas no muestran costo.
+- **Elementos de Kling 3.0.** Guarda personajes, productos o lugares en la página **Elementos** (o con
+  `create_element`): nombre, descripción y de 2 a 4 imágenes JPG/PNG, guardadas en local y compartidas entre la UI y
+  tus agentes. Elígelos en Kling 3.0 (hasta 3) y cítalos en el prompt con `@nombre`. Salen por APIMart y KIE (KIE
+  además pide fotograma inicial); la API pública de Higgsfield no permite crear ni leer elementos, así que esos
+  pedidos no van por Higgsfield.
 - **Respaldo sin cobros dobles.** Si un proveedor rechaza el pedido o la tarea falla sin cobrar, el siguiente se
   prueba solo si cuesta lo mismo o menos que lo aprobado; si no, la generación espera tu aprobación. Un envío que pudo
   llegar al proveedor (timeout, respuesta dudosa) nunca se reintenta en ninguno.
@@ -262,6 +273,7 @@ Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
 | GET | `/v1/voice/voices?search=&library=` | Voces de la cuenta o de la biblioteca pública |
 | POST | `/v1/voice/estimate` · `/v1/voice/changes` | Cambio de voz en un tramo: cotiza (`voice_quote`) y lanza con ella |
 | GET/PATCH | `/v1/sounds?category=&q=` · `/v1/sounds/{id}` | Sonoteca con recuento por categoría; corregir título, categoría y etiquetas |
+| GET/POST/DELETE | `/v1/elements` · `/v1/elements/{id}` | Elementos de Kling 3.0: listar, crear (multipart `name`, `description`, 2 a 4 `files` o `image_urls` propias) y borrar |
 | POST | `/v1/sounds/import-elevenlabs` | Trae a la sonoteca las voces del historial de ElevenLabs (gratis) |
 | POST | `/v1/audio/{servicio}/estimate` · `/v1/audio/{servicio}` | `text-to-speech`, `sound-effects`, `music`, `voice-isolator`: cotiza (`audio_quote`) y lanza con ella |
 
@@ -307,11 +319,6 @@ uv run pytest            # Higgsfield y ElevenLabs simulados con httpx.MockTrans
 uv run ruff check src tests
 cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
-
-## Revisiones
-
-El código pasó por 13 rondas de revisión adversarial con Codex (gpt-6-sol), con veredicto de aprobado en las rondas
-5, 8 y 12, y la 13 corregida después. Están en [`docs/revisiones/`](docs/revisiones/).
 
 ## Licencia
 

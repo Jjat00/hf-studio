@@ -12,6 +12,7 @@ from .audio import supports_source_audio
 from .catalog import Catalog
 from .config import Settings
 from .db import ACTIVE, ApiClient, Job, Upload, utcnow
+from .elements import check_available
 
 # «No se indicó» frente a None explícito («sin tope», revisión 32).
 UNSET: object = object()
@@ -61,6 +62,34 @@ async def trusted_media(session: AsyncSession, owner: ApiClient, url: str) -> bo
     return any(o.get("url") == url for outputs in await session.scalars(jobs) for o in outputs or [])
 
 
+def request_digest(
+    model_id: str, arguments: dict, keep_source_audio: bool = False, provider: str | None = None
+) -> str:
+    """Huella de una petición de generación (deduplicado e idempotencia)."""
+    # La opción cambia el resultado, así que forma parte de la huella.
+    marked = {**arguments, "__keep_source_audio": True} if keep_source_audio else dict(arguments)
+    if provider:
+        # Forzar un proveedor es otra petición: no se deduplica con la misma entrada en otro proveedor.
+        marked["__provider"] = provider
+    return input_hash(model_id, marked)
+
+
+async def job_for_key(
+    session: AsyncSession, owner: ApiClient, idempotency_key: str | None, digest: str
+) -> Job | None:
+    """El trabajo ya creado con esta Idempotency-Key (o None). La misma clave con otra petición es 409."""
+    if not idempotency_key:
+        return None
+    existing = await session.scalar(
+        select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
+    )
+    if existing and existing.input_hash != digest:
+        raise ServiceError(
+            409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"
+        )
+    return existing
+
+
 async def create_generation(
     session: AsyncSession,
     settings: Settings,
@@ -91,25 +120,10 @@ async def create_generation(
             "untrusted_source",
             "keep_source_audio needs a video_url from /v1/uploads (upload_media) or from one of your generations",
         )
-    # La opción cambia el resultado, así que forma parte de la huella (deduplicado e idempotencia).
-    marked = {**arguments, "__keep_source_audio": True} if keep_source_audio else dict(arguments)
-    if provider:
-        # Forzar un proveedor es otra petición: no se deduplica con la misma entrada en otro proveedor.
-        marked["__provider"] = provider
-    digest = input_hash(model["id"], marked)
-
-    if idempotency_key:
-        existing = await session.scalar(
-            select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
-        )
-        if existing:
-            if existing.input_hash != digest:
-                raise ServiceError(
-                    409,
-                    "idempotency_conflict",
-                    "This Idempotency-Key was already used for a different request",
-                )
-            return existing, False
+    digest = request_digest(model["id"], arguments, keep_source_audio, provider)
+    existing = await job_for_key(session, owner, idempotency_key, digest)
+    if existing:
+        return existing, False
     if not allow_duplicate:
         since = utcnow() - timedelta(seconds=settings.dedupe_window_seconds)
         existing = await session.scalar(
@@ -135,6 +149,9 @@ async def create_generation(
             f"You have {active} active generations (maximum {settings.max_active_jobs_per_client})",
         )
 
+    # Los elementos se vuelven a comprobar justo antes de insertar (sin red entre medias): un borrado durante
+    # la cotización da 404 en vez de un trabajo huérfano (revisión 44).
+    await check_available(session, arguments.get("elements"))
     job = Job(
         owner_id=owner.id,
         model=model["id"],

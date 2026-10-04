@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, Loader2, Pause, Play, Search, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2, Pause, Play, Search } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useGenerations } from "@/components/generations/use-generations";
@@ -317,7 +317,7 @@ export function VoiceStudio() {
             {submitting ? <Loader2 className="size-6 animate-spin" /> : v.open}
             {!submitting && short && (
               <span className="flex items-center gap-1 text-[19px]">
-                <Sparkles className="size-4 fill-ink" /> {short}
+                {short}
               </span>
             )}
           </button>

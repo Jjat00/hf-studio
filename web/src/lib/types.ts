@@ -77,11 +77,16 @@ export type Generation = {
   source?: string;
   /** Proveedor que la ejecuta (higgsfield, apimart, kie…), su precio y lo aprobado. */
   provider?: string;
+  /** Id del modelo en ese proveedor (el canal exacto) y si es un canal oficial. */
+  provider_model?: string | null;
+  official?: boolean;
+  /** Precio cotizado de la opción en curso: al completarse, lo que costó (aproximado si cost_kind es approx). */
   cost_usd?: number | null;
+  cost_kind?: string | null;
   max_usd?: number | null;
   max_reserve_usd?: number | null;
   reserve_usd?: number | null;
-  plan?: { provider: string; usd: number | null; kind?: string | null; reserve_usd?: number | null }[];
+  plan?: { provider: string; model?: string | null; official?: boolean; usd: number | null; kind?: string | null; reserve_usd?: number | null }[];
   attempts?: { provider: string; error_kind: string | null; error: string | null; at: string }[];
 };
 
@@ -186,4 +191,15 @@ export type Sound = {
   file_url: string;
   created_at: string;
   source?: string;
+};
+
+/** Elemento de HF Studio para Kling 3.0 (APIMart y KIE): se cita en el prompt con `mention` (@nombre). */
+export type StudioElement = {
+  id: string;
+  name: string;
+  description: string;
+  mention: string;
+  /** Rutas de la API (/v1/elements/{id}/images/{n}); en el navegador van por el proxy. */
+  images: string[];
+  created_at: string;
 };

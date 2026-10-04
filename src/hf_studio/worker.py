@@ -20,6 +20,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .audio import SOURCE_KEY, apply_to_files
 from .config import Settings
 from .db import Job, utcnow
+from .elements import ElementError, purge_deleted
 from .elevenlabs_audio import AUDIO_MODELS
 from .media import cached_source
 from .providers.base import TERMINAL_STATUSES, Polled, Provider, ProviderError
@@ -29,6 +30,9 @@ from .voice import VOICE_MODEL
 
 # Trabajos locales (ElevenLabs): no ocupan concurrencia de los proveedores.
 LOCAL_MODELS = (VOICE_MODEL, *AUDIO_MODELS)
+PREPARE_RETRY_SECONDS = (
+    30  # espera antes de reintentar un envío que no se pudo preparar (p. ej. subir imágenes)
+)
 
 log = logging.getLogger("hf_studio.worker")
 
@@ -92,6 +96,7 @@ class Worker:
 
     async def tick(self) -> None:
         await self.expire()
+        await self.purge_elements()
         await self.submit_pending()
         await self.poll_due()
 
@@ -145,7 +150,22 @@ class Worker:
             if claimed.rowcount != 1:
                 return True
             job = await session.get(Job, job_id)
-            if not await self.refresh_quote(job):
+            # Preparar el envío (recotizar, resolver elementos, renovar sus imágenes) ocurre antes de cualquier
+            # POST de generación: un fallo aquí nunca es ambiguo (revisión 44).
+            try:
+                ready = await self.refresh_quote(job)
+            except ElementError as exc:
+                self._finish(job, "failed", "element_missing", exc.message)
+                await self.commit(session, job_id)
+                return True
+            except Exception as exc:
+                log.exception("Trabajo %s: no se pudo preparar el envío", job_id)
+                job.status, job.error_kind = "pending", "preparing"
+                job.error = f"Could not prepare the request yet (retrying): {exc}"[:300]
+                job.next_check_at = utcnow() + timedelta(seconds=PREPARE_RETRY_SECONDS)
+                await self.commit(session, job_id)
+                return True
+            if not ready:
                 await self.commit(session, job_id)
                 return True
             job.attempts += 1
@@ -319,7 +339,8 @@ class Worker:
         if model is None:
             return True
         first_try = job.plan_index == 0 and not job.attempts_log
-        if first_try and not option.get("forced") and not option.get("unknown_accepted"):
+        chosen = option.get("forced") or option.get("unknown_accepted") or option.get("approved")
+        if first_try and not chosen:
             return await self.replan(job, model, option)
         provider = self.providers.get(option["provider"])
         # Con tabla local, recotizar es gratis: se hace siempre (una tarifa nueva ya conocida manda). Las
@@ -467,6 +488,11 @@ class Worker:
         job.files = files
 
     # --- Timeout -------------------------------------------------------------------------------
+
+    async def purge_elements(self) -> None:
+        """Borra del todo los elementos borrados que ya no usa ningún trabajo activo (mantenimiento)."""
+        async with self.sessions() as session:
+            await purge_deleted(session, self.settings.storage_dir)
 
     async def expire(self) -> None:
         limit = utcnow() - timedelta(seconds=self.settings.job_timeout_seconds)

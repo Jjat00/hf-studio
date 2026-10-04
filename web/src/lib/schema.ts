@@ -9,7 +9,8 @@ export type Field =
   | { kind: "number"; key: string; schema: JSONSchema; required: boolean; integer: boolean }
   | { kind: "toggle"; key: string; schema: JSONSchema; required: boolean }
   | { kind: "text"; key: string; schema: JSONSchema; required: boolean; multiline: boolean }
-  | { kind: "json"; key: string; schema: JSONSchema; required: boolean };
+  | { kind: "json"; key: string; schema: JSONSchema; required: boolean }
+  | { kind: "elements"; key: string; schema: JSONSchema; required: boolean };
 
 /** Orden en que aparecen los ajustes, imitando a Higgsfield: calidad, duración, formato, audio. */
 const ORDER = ["mode", "resolution", "quality", "duration", "aspect_ratio", "generate_audio", "sound", "seed"];
@@ -30,7 +31,12 @@ export function requiredKeys(schema: JSONSchema): Set<string> {
   return new Set(schema.required ?? []);
 }
 
-export function fieldsFor(schema: JSONSchema): Field[] {
+/** Modelos cuyo campo `elements` acepta elementos de HF Studio (APIMart y KIE); en los demás, ids de Higgsfield. */
+export function takesStudioElements(modelId: string) {
+  return modelId.startsWith("kling-video/v3.0/");
+}
+
+export function fieldsFor(schema: JSONSchema, modelId = ""): Field[] {
   const props = schema.properties ?? {};
   const req = requiredKeys(schema);
   const fields: Field[] = [];
@@ -38,7 +44,10 @@ export function fieldsFor(schema: JSONSchema): Field[] {
     const required = req.has(key);
     const type = typeOf(s);
     const media = mediaKind(key);
-    if (key === "prompt" && type === "string") {
+    if (key === "elements" && type === "array" && takesStudioElements(modelId)) {
+      // Kling 3.0: elementos de HF Studio (selector propio) en vez de ids de Higgsfield escritos a mano.
+      fields.push({ kind: "elements", key, schema: s, required });
+    } else if (key === "prompt" && type === "string") {
       fields.push({ kind: "prompt", key, schema: s, required });
     } else if (media) {
       const multiple = type === "array";

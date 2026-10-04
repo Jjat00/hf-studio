@@ -20,7 +20,7 @@ const es = {
   stats: [
     { value: "82", label: "modelos de video e imagen" },
     { value: "3", label: "proveedores, el más barato primero" },
-    { value: "27", label: "herramientas MCP" },
+    { value: "31", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
   ],
   promo: {
@@ -38,7 +38,7 @@ const es = {
     items: [
       { art: "text-to-video", title: "Texto a video", desc: "Seedance, Kling, Wan, Hailuo, LTX, Grok Imagine…" },
       { art: "frames", title: "Inicio y final", desc: "Das el primer y el último fotograma; el modelo anima el resto." },
-      { art: "references", title: "Referencias", desc: "Personajes, productos y lugares que se mantienen en cada toma." },
+      { art: "references", title: "Referencias", desc: "Personajes, productos y lugares que se mantienen en cada toma, también como elementos @nombre en Kling 3.0." },
       { art: "video-edit", title: "Editar video", desc: "Cambia el estilo o la escena conservando cortes y movimiento." },
       { art: "video-extend", title: "Extender", desc: "Alarga un clip con continuidad de cámara y de acción." },
       { art: "motion", title: "Motion control", desc: "Copia el movimiento de un video a tu personaje." },
@@ -59,6 +59,8 @@ const es = {
       { title: "Respaldo sin cobros dobles", desc: "Si el más barato falla sin cobrar, prueba el siguiente solo si no cuesta más de lo que aprobaste. Si cuesta más, te pregunta." },
       { title: "Precio comprobado antes de enviar", desc: "Recotiza antes de generar (APIMart y KIE siempre; Higgsfield si la cotización tiene más de 15 min). Si supera lo aprobado, espera tu OK." },
       { title: "Añadir una clave, dos comandos", desc: "hf-studio providers --open apimart abre la página de la clave; --add apimart la pide, la valida gratis y la guarda. Higgsfield es la única obligatoria." },
+      { title: "Canales no oficiales, señalados", desc: "Si un proveedor vende el mismo modelo por un canal no oficial más barato (Grok Imagine 1.5 en APIMart sale unas 6 veces más barato), aparece como otra opción, marcada." },
+      { title: "El costo en USD, no en créditos", desc: "La cotización en dólares (exacta o aproximada, según el proveedor) antes de generar y guardada en el historial, con el proveedor y el modelo exacto que la hizo." },
     ],
   },
   audio: {
@@ -111,7 +113,9 @@ const es = {
     title: "Y todo lo demás",
     items: [
       { icon: "library", title: "Biblioteca", desc: "Todo lo que generas desde la UI y desde los agentes, con su origen y su configuración completa." },
-      { icon: "coins", title: "Costo antes de generar", desc: "Al lado del botón en la UI y obligatorio en el MCP." },
+      { icon: "coins", title: "Costo en USD antes de generar", desc: "La cotización al lado del botón en la UI, obligatoria en el MCP y guardada en el historial." },
+      { icon: "shapes", title: "Elementos para Kling 3.0", desc: "Guarda un personaje, producto o lugar con 2 a 4 imágenes, elígelo en Kling 3.0 y cítalo con @nombre en el prompt (por APIMart o KIE)." },
+      { icon: "repeat", title: "Tus creaciones como punto de partida", desc: "Anima una imagen, úsala de referencia o edita y extiende un video que ya generaste, con un clic." },
       { icon: "layers", title: "Presets y lotes", desc: "Recetas con variables y variantes con un costo total." },
       { icon: "sparkles", title: "Recomendador", desc: "Dices lo que quieres, en español o inglés, y te sugiere modelos con su precio." },
       { icon: "book", title: "12 casos de uso", desc: "Tutoriales paso a paso para la UI y para tus agentes." },
@@ -122,7 +126,7 @@ const es = {
   start: {
     kicker: "Empieza en un minuto",
     title: "Instálalo en tu máquina",
-    body: "Clona el repo y ejecuta el script: te pide la clave de Higgsfield (y, si quieres, la de ElevenLabs), la valida sin gastar créditos y abre el estudio en localhost:3000.",
+    body: "Clona el repo y ejecuta el script: te pide la clave de Higgsfield (y, si quieres, las de ElevenLabs, APIMart y KIE), la valida sin gastar créditos y abre el estudio en localhost:3000.",
     reqs: ["Python 3.12 y uv", "Node.js 20 y pnpm", "ffmpeg para el audio", "Clave de la API de Higgsfield", "Opcional: claves de APIMart y KIE"],
     note: "Sin suscripción: usa las APIs de Higgsfield, APIMart y KIE, así que pagas solo lo que generas, y al precio más bajo.",
     copy: "Copiar",
@@ -155,7 +159,7 @@ const en: Dict = {
   stats: [
     { value: "82", label: "video and image models" },
     { value: "3", label: "providers, cheapest first" },
-    { value: "27", label: "MCP tools" },
+    { value: "31", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
   ],
   promo: {
@@ -173,7 +177,7 @@ const en: Dict = {
     items: [
       { art: "text-to-video", title: "Text to video", desc: "Seedance, Kling, Wan, Hailuo, LTX, Grok Imagine…" },
       { art: "frames", title: "First & last frame", desc: "Give the first and last frame; the model animates the rest." },
-      { art: "references", title: "References", desc: "Characters, products and places that stay consistent across shots." },
+      { art: "references", title: "References", desc: "Characters, products and places that stay consistent across shots, also as @name elements in Kling 3.0." },
       { art: "video-edit", title: "Video edit", desc: "Change the style or the scene while keeping cuts and motion." },
       { art: "video-extend", title: "Extend", desc: "Make a clip longer with continuous camera and action." },
       { art: "motion", title: "Motion control", desc: "Copy the motion from a video onto your character." },
@@ -194,6 +198,8 @@ const en: Dict = {
       { title: "Fallback without double charges", desc: "If the cheapest fails without charging, the next one runs only if it costs no more than you approved. If it costs more, it asks you." },
       { title: "Price checked before sending", desc: "It re-quotes before generating (APIMart and KIE always; Higgsfield if the quote is over 15 min old). If it goes over what you approved, it waits for your OK." },
       { title: "Add a key in two commands", desc: "hf-studio providers --open apimart opens the key page; --add apimart asks for the key, checks it for free and saves it. Higgsfield is the only required one." },
+      { title: "Unofficial channels, labeled", desc: "When a provider sells the same model through a cheaper unofficial channel (Grok Imagine 1.5 on APIMart is about 6× cheaper), it shows up as one more option, clearly marked." },
+      { title: "Cost in USD, not in credits", desc: "The quote in dollars (exact or approximate, depending on the provider) before you generate, kept in the history with the provider and the exact model that made it." },
     ],
   },
   audio: {
@@ -246,7 +252,9 @@ const en: Dict = {
     title: "And everything else",
     items: [
       { icon: "library", title: "Library", desc: "Everything you generate from the UI and from agents, with its origin and full configuration." },
-      { icon: "coins", title: "Cost before generating", desc: "Next to the button in the UI, and required over MCP." },
+      { icon: "coins", title: "Cost in USD before generating", desc: "The quote next to the button in the UI, required over MCP and kept in the history." },
+      { icon: "shapes", title: "Elements for Kling 3.0", desc: "Save a character, product or place with 2 to 4 images, pick it in Kling 3.0 and cite it as @name in the prompt (via APIMart or KIE)." },
+      { icon: "repeat", title: "Your creations as a starting point", desc: "Animate an image, use it as a reference, or edit and extend a video you already made, in one click." },
       { icon: "layers", title: "Presets and batches", desc: "Recipes with variables, and variants with a total price." },
       { icon: "sparkles", title: "Recommender", desc: "Say what you want, in English or Spanish, and get models with their price." },
       { icon: "book", title: "12 use cases", desc: "Step-by-step tutorials for the UI and for your agents." },
@@ -257,7 +265,7 @@ const en: Dict = {
   start: {
     kicker: "Up and running in a minute",
     title: "Install it on your machine",
-    body: "Clone the repo and run the script: it asks for your Higgsfield key (and, optionally, ElevenLabs), validates it without spending credits and opens the studio at localhost:3000.",
+    body: "Clone the repo and run the script: it asks for your Higgsfield key (and, optionally, ElevenLabs, APIMart and KIE), validates it without spending credits and opens the studio at localhost:3000.",
     reqs: ["Python 3.12 and uv", "Node.js 20 and pnpm", "ffmpeg for audio", "A Higgsfield API key", "Optional: APIMart and KIE keys"],
     note: "No subscription: it uses the Higgsfield, APIMart and KIE APIs, so you only pay for what you generate, at the lowest price.",
     copy: "Copy",

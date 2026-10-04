@@ -143,7 +143,8 @@ async def test_kie_credit_balance_and_invalid_key():
 async def test_kie_errors_come_inside_http_200():
     def handler(request):
         return httpx.Response(
-            200, json={"code": 500, "msg": "resolution is not within the range of allowed options", "data": None}
+            200,
+            json={"code": 500, "msg": "resolution is not within the range of allowed options", "data": None},
         )
 
     with pytest.raises(ProviderError) as info:

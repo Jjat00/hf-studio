@@ -48,6 +48,16 @@ the cheapest provider that offers **the exact same model and settings**:
   720p for 5 s cost 0.71 USD on APIMart, 1.025 on KIE and 1.51 on Higgsfield.
 - **Same model, never a substitute.** A setting a provider cannot reproduce (a fixed seed, a bitrate, an aspect
   ratio…) leaves that provider out instead of being dropped.
+- **Unofficial channels, labeled.** A provider may also sell a cheaper unofficial channel of the same model (e.g.
+  APIMart's `grok-imagine-1.5-video-ext` for Grok Imagine 1.5, about 6× cheaper). It is one more option, marked
+  "unofficial channel"; if it fails, the official one is the fallback under the usual approval rule, and once you
+  approve a channel that is the one sent.
+- **Every generation says what it cost.** The history shows the provider, the provider's model (and whether the
+  channel is unofficial) and the cost in USD (`~` when estimated); failed generations show no cost.
+- **Kling 3.0 elements.** Save characters, products or locations on the **Elements** page (or with
+  `create_element`): a name, a description and 2 to 4 JPG/PNG images, stored locally and shared by the UI and your
+  agents. Pick them in Kling 3.0 (up to 3) and cite them in the prompt as `@name`. They run on APIMart and KIE
+  (KIE also needs a first frame); Higgsfield's public API cannot create or read elements, so those requests skip it.
 - **Fallback without double charges.** If a provider rejects the request or the task fails without charging, the
   next one is tried on its own only if it costs the same or less than what you approved; otherwise the generation
   waits for your approval. A submission that may have reached the provider (timeout, unclear answer) is never
@@ -266,6 +276,7 @@ Every `/v1` route requires `Authorization: Bearer hfs_…`. Interactive docs at 
 | GET | `/v1/voice/voices?search=&library=` | Account voices or the public library |
 | POST | `/v1/voice/estimate` · `/v1/voice/changes` | Voice change on a segment: quote (`voice_quote`) and run with it |
 | GET/PATCH | `/v1/sounds?category=&q=` · `/v1/sounds/{id}` | Sound library with counts per category; fix title, category and tags |
+| GET/POST/DELETE | `/v1/elements` · `/v1/elements/{id}` | Kling 3.0 elements: list, create (multipart `name`, `description`, 2–4 `files` or own `image_urls`) and delete |
 | POST | `/v1/sounds/import-elevenlabs` | Imports the voices in your ElevenLabs history (free) |
 | POST | `/v1/audio/{service}/estimate` · `/v1/audio/{service}` | `text-to-speech`, `sound-effects`, `music`, `voice-isolator`: quote (`audio_quote`) and run with it |
 
@@ -304,9 +315,6 @@ uv run pytest            # Higgsfield and ElevenLabs are mocked with httpx.MockT
 uv run ruff check src tests
 cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
-
-The code went through 13 rounds of adversarial review with Codex; the reports are in
-[`docs/revisiones/`](docs/revisiones/) (in Spanish).
 
 ## Contributing
 

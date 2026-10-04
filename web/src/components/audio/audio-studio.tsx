@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioPlayer } from "@/components/generations/generation-card";
@@ -306,7 +306,7 @@ export function AudioStudio() {
             {submitting ? <Loader2 className="size-6 animate-spin" /> : a.generate}
             {!submitting && short && (
               <span className="flex items-center gap-1 text-[19px]">
-                <Sparkles className="size-4 fill-ink" /> {short}
+                {short}
               </span>
             )}
           </button>

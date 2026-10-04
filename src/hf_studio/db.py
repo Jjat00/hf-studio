@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -64,6 +65,8 @@ class ApiClient(Base):
 
 class Upload(Base):
     __tablename__ = "uploads"
+    # Una sola copia vigente por dueño y salida reutilizada (revisión 47).
+    __table_args__ = (Index("ix_uploads_owner_source", "owner_id", "source", unique=True),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
@@ -72,6 +75,9 @@ class Upload(Base):
     size: Mapped[int] = mapped_column(Integer)
     url: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # Solo el servidor lo escribe: `generation:<job>:<índice>` si es la copia de una salida propia (None en
+    # las subidas normales; el nombre de archivo lo elige el cliente y no sirve como prueba).
+    source: Mapped[str | None] = mapped_column(String(80))
 
 
 class Job(Base):
@@ -151,6 +157,8 @@ ADDED_COLUMNS = {
         "attempts_log": "JSON",
         "version": "INTEGER NOT NULL DEFAULT 1",
     },
+    "elements": {"deleted_at": "DATETIME"},
+    "uploads": {"source": "VARCHAR(80)"},
 }
 
 
@@ -169,6 +177,10 @@ async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        # Bases creadas antes de la columna `source`: create_all no añade índices a tablas existentes.
+        await conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS ix_uploads_owner_source ON uploads (owner_id, source)")
+        )
 
 
 def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
@@ -222,3 +234,22 @@ class Sound(Base):
     file_name: Mapped[str] = mapped_column(String(200))  # relativo a storage_dir
     duration: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class Element(Base):
+    """Elemento de referencia (personaje, producto, lugar) para Kling 3.0 en APIMart y KIE: un nombre que se
+    cita en el prompt con `@nombre`, una descripción y de 2 a 4 imágenes. Las imágenes viven en local
+    (`storage_dir/elements/<id>/`); `images[].url` es su copia en Higgsfield, que caduca a los ~7 días y se
+    renueva antes de usarla (`elements.fresh_urls`). Se comparten entre todos los clientes de la instalación."""
+
+    __tablename__ = "elements"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)  # el_ + 12 hex
+    name: Mapped[str] = mapped_column(String(32), unique=True)
+    description: Mapped[str] = mapped_column(Text)
+    images: Mapped[list] = mapped_column(JSON)  # [{file, content_type, url}]
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_by: Mapped[str] = mapped_column(ForeignKey("api_clients.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    # Borrado lógico: deja de ofrecerse, pero sus imágenes siguen hasta que no lo use ningún trabajo activo.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)

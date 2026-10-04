@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowRight, BookOpen, Check, Coins, Copy, Globe, Layers, Library, Play, ShieldCheck, Sparkles, Star, Terminal } from "lucide-react";
+import { ArrowRight, BookOpen, Check, Coins, Copy, Globe, Layers, Library, Play, Repeat, Shapes, ShieldCheck, Sparkles, Star, Terminal } from "lucide-react";
 import { useState } from "react";
 import { REPO, AUTHOR } from "@/lib/dict";
 import { useI18n } from "./i18n";
@@ -412,7 +412,7 @@ function Agents() {
   );
 }
 
-const MORE_ICONS = { library: Library, coins: Coins, layers: Layers, sparkles: Sparkles, book: BookOpen, shield: ShieldCheck };
+const MORE_ICONS = { library: Library, coins: Coins, layers: Layers, sparkles: Sparkles, book: BookOpen, shield: ShieldCheck, shapes: Shapes, repeat: Repeat };
 
 function More() {
   const { t } = useI18n();

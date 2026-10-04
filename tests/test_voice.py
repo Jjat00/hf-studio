@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -134,6 +135,7 @@ async def test_voice_change_end_to_end_with_library_voice(voice_env):
     assert video.status_code == 200
     out = app.state.settings.storage_dir / "outputs" / done["id"] / "0-video.mp4"
     assert streams(out) == ["audio", "video"]
+    assert done["provider"] == "elevenlabs" and done["cost_usd"] == 0.005 and done["provider_model"]
     # Repetir con la misma clave no lanza otro cambio.
     again = await http.post("/v1/voice/changes", json=body, headers={"Idempotency-Key": "k1"})
     assert again.status_code == 200 and again.json()["id"] == done["id"]
@@ -311,6 +313,10 @@ async def test_audio_service_quote_then_run(voice_env, service, body, usd, upstr
     assert done["status"] == "completed", done["error"]
     assert done["outputs"][0]["kind"] == "audio"
     assert (await http.get(done["outputs"][0]["file_url"])).status_code == 200
+    # El historial dice quién lo generó, con qué modelo y cuánto costó.
+    assert done["provider"] == "elevenlabs" and done["cost_usd"] == usd and done["cost_kind"] == "approx"
+    sent = next(json.loads(c.content) for c in fake.calls if c.url.path == upstream)
+    assert done["provider_model"] == sent["model_id"]  # el modelo que de verdad se envió
     # Cotización de un solo uso.
     again = await http.post(f"/v1/audio/{service}", json={**body, "audio_quote": est["audio_quote"]})
     assert again.json()["error"]["code"] == "quote_invalid"
@@ -326,6 +332,7 @@ async def test_isolate_voice_from_a_library_video(voice_env):
     done = (await http.get(f"/v1/generations/{job.json()['id']}")).json()
     assert done["status"] == "completed", done["error"]
     assert [c.url.path for c in fake.calls].count("/v1/audio-isolation") == 1
+    assert done["provider"] == "elevenlabs" and done["provider_model"] is None  # aislar no envía modelo
 
 
 async def test_tts_rejects_text_over_the_model_limit(voice_env):

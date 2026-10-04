@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, Info, Loader2, Sparkles } from "lucide-react";
+import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { costBasis, costMissing } from "@/lib/i18n/cost";
 import { approxUsd, formatUsd, type Estimate } from "@/lib/studio";
@@ -40,20 +40,11 @@ export function CostPanel({
     value = <span className="text-warning">{t.cost.unavailable}</span>;
     detail = error ?? t.cost.fixFields;
     warn = true;
-  } else if (estimate.kind === "exact" && estimate.credits === null) {
-    value = (
-      <span className="flex items-center gap-2">
-        <Sparkles className="size-4 fill-lime text-lime" />
-        {formatUsd(estimate.usd!)}
-      </span>
-    );
-    detail = basis;
   } else if (estimate.kind === "exact") {
+    // Siempre en USD: los créditos de Higgsfield no dicen cuánto cuesta.
     value = (
       <span className="flex items-center gap-2">
-        <Sparkles className="size-4 fill-lime text-lime" />
-        {+estimate.credits!.toFixed(3)} {t.cost.credits}
-        <span className="font-normal text-fg-3">· {formatUsd(estimate.usd!)}</span>
+        {formatUsd(estimate.usd!)} <span className="text-sm font-normal text-fg-3">USD</span>
         {estimate.discount_pct ? (
           <span className="rounded-md bg-pink px-1.5 py-0.5 text-[11px] font-bold text-white">−{+estimate.discount_pct}%</span>
         ) : null}
@@ -129,8 +120,8 @@ function ProviderComparison({ estimate }: { estimate: Estimate }) {
           <ul className="mt-1 space-y-0.5">
             {options.map((o, i) => (
               <li
-                key={o.provider}
-                title={o.notes.join("\n") || undefined}
+                key={`${o.provider}:${o.model}`}
+                title={[o.model, ...o.notes].join("\n")}
                 className={clsx("flex justify-between gap-3", i === 0 ? "text-fg" : "text-fg-2")}
               >
                 <span>
@@ -141,7 +132,7 @@ function ProviderComparison({ estimate }: { estimate: Estimate }) {
               </li>
             ))}
             {excluded.map((x) => (
-              <li key={x.provider} className="flex justify-between gap-3 text-fg-3">
+              <li key={`${x.provider}:${x.model ?? ""}`} className="flex justify-between gap-3 text-fg-3">
                 <span className="truncate" title={x.reason}>
                   {x.title} · {costBasis(x.reason, locale)}
                 </span>

@@ -1,5 +1,6 @@
 import { l, type L } from "./i18n";
 import type { ModelSummary } from "./types";
+import { takesStudioElements } from "./schema";
 
 export type Mode = {
   key: string;
@@ -74,7 +75,8 @@ export const VIDEO_TABS: Tab[] = [
         defaultModel: "bytedance/seedance-2.0/reference-to-video",
         filter: (m) =>
           isVideo(m) &&
-          (has(m, "reference-to-video") || /(video|image)-reference/.test(m.id) || m.id.includes("cinema-studio")),
+          (has(m, "reference-to-video") || /(video|image)-reference/.test(m.id) || m.id.includes("cinema-studio") ||
+            takesStudioElements(m.id)), // Kling 3.0: referencias con tus elementos (@nombre)
         hero: { title: l("Referencias de video", "Video references"), subtitle: l("Copia la cámara, el estilo y los personajes de tus clips", "Copy camera, style and characters from your clips"), tone: "violet", art: "/art/references.webp" },
         labels: {
           video_urls: [l("Añadir videos de referencia", "Add reference videos"), l("Cámara, movimiento o estilo a seguir · hasta 15 s cada uno", "Camera, motion or style to follow · up to 15s each")],

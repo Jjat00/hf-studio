@@ -34,16 +34,29 @@ class Fakes:
         self.kie_credits = 1000.0
         self.apimart_balance = 50.0
         self.hf_usd = "1.510"
+        self.upload_down = False  # Higgsfield responde 503 a las subidas
+        self.uploads: list[bytes] = []  # bytes subidos a Higgsfield (cada uno con su URL cdn.test/up-N)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         host, path = request.url.host, request.url.path
         if host == "cdn.test":
+            if path.startswith("/up-"):
+                return httpx.Response(200, content=self.uploads[int(path[4:].split(".")[0])])
             return httpx.Response(200, content=b"MP4", headers={"content-type": "video/mp4"})
+        if host == "storage.test":
+            self.uploads.append(request.content)
+            return httpx.Response(200)
         if host == "api.higgsfield.test":
             if path.startswith("/estimate/"):
                 return httpx.Response(200, json={"type": "estimate", "credits": "24", "usd": self.hf_usd})
             if path.startswith("/requests/") and path.endswith("/status"):
                 return httpx.Response(404, json={"detail": "not found"})
+            if path == "/files/generate-upload-url":
+                if self.upload_down:
+                    return httpx.Response(503, json={"detail": "Service Unavailable"})
+                n = len(self.uploads)
+                return httpx.Response(200, json={"public_url": f"https://cdn.test/up-{n}.png",
+                                                 "upload_url": f"https://storage.test/put-{n}"})  # fmt: skip
             self.sent["higgsfield"].append(json.loads(request.content))
             return httpx.Response(200, json={"status": "queued", "request_id": "hf-1"})
         if host == "api.apimart.ai":
@@ -216,7 +229,8 @@ async def test_forcing_a_provider(env):
         await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "provider": "higgsfield"})
     ).json()
     assert job["provider"] == "higgsfield"
-    assert job["plan"] == [{"provider": "higgsfield", "usd": 1.51, "kind": "exact", "reserve_usd": None}]
+    assert job["plan"] == [{"provider": "higgsfield", "model": T2V, "official": True, "usd": 1.51, "kind": "exact",
+                            "reserve_usd": None}]  # fmt: skip
     await tick(app)
     assert fakes.sent["higgsfield"][0] == VIDEO  # Higgsfield recibe la entrada tal cual
 
@@ -384,7 +398,8 @@ async def test_the_reserve_survives_the_plan_and_needs_approval(env):
     est = (await http.post("/v1/estimate", json=body)).json()
     assert est["provider"] == "higgsfield" and est["options"][1]["reserve_usd"] == 4.9248
     job = (await http.post("/v1/generations", json={**body, "max_usd": 3.0})).json()
-    assert job["plan"][1] == {"provider": "apimart", "usd": 2.0736, "kind": "approx", "reserve_usd": 4.9248}
+    assert job["plan"][1] == {"provider": "apimart", "model": "seedance-2.5", "official": True, "usd": 2.0736,
+                              "kind": "approx", "reserve_usd": 4.9248}  # fmt: skip
     async with app.state.sessions() as s:  # Higgsfield rechaza el envío sin cobrar
         row = await s.get(Job, job["id"])
         app.state.worker.fallback(row, "unavailable", "model locked")
@@ -593,3 +608,71 @@ async def test_a_kie_internal_error_never_falls_back(env, message):
     state = (await http.get(f"/v1/generations/{job['id']}")).json()
     assert state["status"] == "failed" and state["error_kind"] == "submission_ambiguous"
     assert len(fakes.sent["kie"]) == 1 and fakes.sent["apimart"] == [] and fakes.sent["higgsfield"] == []
+
+
+GROK = "xai/grok-imagine-video/v1.5/reference-to-video"
+GROK_INPUT = {
+    "prompt": "A neon koi swimming through fog",
+    "duration": 6,
+    "resolution": "480p",
+    "aspect_ratio": "16:9",
+}
+
+
+async def test_an_unofficial_channel_is_its_own_cheaper_option(env):
+    """APIMart tiene Grok 1.5 oficial y un canal -ext seis veces más barato: son dos opciones del plan."""
+    _, http, _ = env
+    body = (await http.post("/v1/estimate", json={"model": GROK, "input": GROK_INPUT})).json()
+    apimart = [o for o in body["options"] if o["provider"] == "apimart"]
+    assert [(o["model"], o["official"]) for o in apimart] == [
+        ("grok-imagine-1.5-video-ext", False),
+        ("grok-imagine-video-1.5", True),
+    ]
+    assert body["options"][0]["model"] == "grok-imagine-1.5-video-ext" and body["usd"] == 0.0612
+    assert apimart[1]["usd"] == 0.384
+    assert any(e["provider"] == "kie" for e in body["excluded"])  # KIE pide al menos una imagen
+
+
+async def test_a_failed_unofficial_channel_falls_back_to_the_official_one_with_approval(env):
+    """Si el canal -ext falla, el oficial del mismo proveedor es el respaldo; cuesta más, así que pide permiso,
+    y la aprobación recotiza ese canal (no vuelve en silencio al -ext más barato)."""
+    app, http, fakes = env
+    job = (await http.post("/v1/generations", json={"model": GROK, "input": GROK_INPUT})).json()
+    assert job["plan"][0]["model"] == "grok-imagine-1.5-video-ext" and job["plan"][0]["official"] is False
+    await tick(app)
+    sent = fakes.sent["apimart"][0]
+    assert (
+        sent["model"] == "grok-imagine-1.5-video-ext"
+        and sent["size"] == "16:9"
+        and "aspect_ratio" not in sent
+    )
+    fakes.apimart_task = "failed"
+    await tick(app)
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert (
+        state["status"] == "awaiting_approval"
+        and state["provider"] == "apimart"
+        and state["cost_usd"] == 0.384
+    )
+    fakes.apimart_task = "processing"
+    approved = (await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 0.4})).json()
+    assert approved["status"] == "pending" and approved["cost_usd"] == 0.384
+    await tick(app)
+    assert fakes.sent["apimart"][1]["model"] == "grok-imagine-video-1.5"
+
+
+async def test_an_approved_channel_is_sent_even_if_another_gets_cheaper(env):
+    """Revisión 41: el replan del primer envío pide aprobar el oficial; aprobado, se envía ese canal aunque el
+    -ext vuelva a ser más barato antes del envío."""
+    app, http, fakes = env
+    prices = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    job = (await http.post("/v1/generations", json={"model": GROK, "input": GROK_INPUT})).json()
+    app.state.prices.store("apimart", {**prices, "grok-imagine-1.5-video-apimart|480P": 0.1})
+    await tick(app)
+    state = (await http.get(f"/v1/generations/{job['id']}")).json()
+    assert state["status"] == "awaiting_approval" and state["provider_model"] == "grok-imagine-video-1.5"
+    approved = (await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 0.384})).json()
+    assert approved["provider_model"] == "grok-imagine-video-1.5"
+    app.state.prices.store("apimart", prices)  # el -ext vuelve a su tarifa barata
+    await tick(app)
+    assert [s["model"] for s in fakes.sent["apimart"]] == ["grok-imagine-video-1.5"]

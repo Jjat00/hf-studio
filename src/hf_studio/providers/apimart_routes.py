@@ -10,7 +10,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from .routes import Route, Spec, only_default, per_second, per_unit, unsupported, video_seconds
+from .routes import (
+    Route,
+    Routes,
+    Spec,
+    kling_elements,
+    only_default,
+    per_second,
+    per_unit,
+    unsupported,
+    video_seconds,
+)
 
 P = "apimart"
 
@@ -194,9 +204,9 @@ def kling() -> dict[str, Route]:
             spec = Spec(
                 P, "kling-v3",
                 keep=("prompt", "duration", "aspect_ratio", "multi_prompt", "image_url", "last_image_url"),
-                rename={"sound": "audio"},
+                rename={"sound": "audio", "elements": "element_list"},
                 convert={"sound": lambda v: v == "on", "cfg_scale": only_default("cfg_scale", 0.5),
-                         "elements": _no_list("elements"), "multi_shots": lambda v: None},
+                         "elements": kling_elements(P), "multi_shots": lambda v: None},
                 fixed={"mode": mode}, build=_kling_build(image),
             )  # fmt: skip
             routes[f"kling-video/v3.0/{tier}/{kind}"] = Route(P, "kling-v3", spec, _kling_price(tier))
@@ -317,7 +327,7 @@ def wan() -> dict[str, Route]:
 # --- HappyHorse, MiniMax, Hailuo, Grok, PixVerse ----------------------------------------------------
 
 
-def others() -> dict[str, Route]:
+def others() -> Routes:
     routes = {}
     for version, model in (("", "happyhorse-1.0"), ("v1.1/", "happyhorse-1.1")):
         price = _res_price(model)
@@ -407,12 +417,43 @@ def others() -> dict[str, Route]:
         extra = per_unit(p, "grok-imagine-video-1.5|input:image", images) or 0.0
         return None if base is None else round(base + extra, 4)
 
-    routes["xai/grok-imagine-video/v1.5/reference-to-video"] = Route(
-        P, "grok-imagine-video-1.5",
-        Spec(P, "grok-imagine-video-1.5", keep=("prompt", "duration", "resolution", "aspect_ratio", "image_url",
-                                                 "image_urls"),
-             convert={"audio_url": _no_list("audio_url")}, build=grok),
-        grok_price,
+    def grok_ext(source: dict, out: dict) -> dict:
+        """Canal no oficial (docs «Grok Imagine 1.5 Video Generation»): con imágenes el formato sale de la
+        imagen, sin ellas `size` es explícito y su valor por defecto (16:9) no equivale a `auto`."""
+        out = grok(source, out)
+        ratio = out.pop("aspect_ratio", "auto")
+        if len(out.get("image_urls") or []) > 7:
+            raise unsupported(P, "APIMart's ext channel accepts at most 7 images")
+        if out.get("image_urls"):
+            if ratio != "auto":
+                raise unsupported(P, "APIMart's ext channel takes the aspect ratio from the image")
+        elif ratio == "auto":
+            raise unsupported(P, "APIMart's ext channel needs an explicit aspect ratio without images")
+        else:
+            out["size"] = ratio
+        return out
+
+    ext = "grok-imagine-1.5-video-ext"
+    routes["xai/grok-imagine-video/v1.5/reference-to-video"] = (
+        Route(
+            P, "grok-imagine-video-1.5",
+            Spec(P, "grok-imagine-video-1.5", keep=("prompt", "duration", "resolution", "aspect_ratio", "image_url",
+                                                     "image_urls"),
+                 convert={"audio_url": _no_list("audio_url")}, build=grok),
+            grok_price,
+        ),
+        # La tabla lo lista como `grok-imagine-1.5-video-apimart` (alias `-ext`); se envía con el alias.
+        Route(
+            P, ext,
+            Spec(P, ext, keep=("prompt", "duration", "resolution", "aspect_ratio", "image_url", "image_urls"),
+                 convert={"audio_url": _no_list("audio_url")},
+                 allowed={"duration": range(6, 16), "resolution": {"480p", "720p"},
+                          "aspect_ratio": {"auto", "16:9", "9:16", "1:1", "3:2", "2:3"}},
+                 build=grok_ext),
+            _res_price("grok-imagine-1.5-video-apimart"),
+            official=False,
+            notes=("Unofficial APIMart channel: much cheaper, may be less stable",),
+        ),
     )  # fmt: skip
 
     def pixverse_price(i: dict, h: dict, p: dict) -> float | None:
@@ -450,5 +491,5 @@ def others() -> dict[str, Route]:
     return routes
 
 
-def apimart_routes() -> dict[str, Route]:
+def apimart_routes() -> Routes:
     return {**seedance(), **kling(), **wan(), **others()}

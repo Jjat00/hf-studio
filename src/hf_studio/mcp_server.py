@@ -55,7 +55,13 @@ Más audio de ElevenLabs con el mismo patrón (sin quote_id cotiza; con él, lan
 sound_effect, compose_music e isolate_voice. elevenlabs_account muestra el plan y los créditos que quedan.
 Al generar audio, pasa title, category (voice, scream, laugh, creature, ambience, impact, foley, transition,
 music, other) y tags para que quede bien ordenado en la sonoteca. Antes de generar un sonido, busca en
-list_sounds si ya existe uno que sirva: reutilizarlo es gratis."""
+list_sounds si ya existe uno que sirva: reutilizarlo es gratis.
+Elementos (Kling 3.0): personajes, productos o lugares reutilizables con nombre, descripción y 2 a 4 imágenes
+JPG/PNG. create_element los guarda; list_elements los muestra. Para usarlos, pon sus ids (el_…) en el campo
+elements de un modelo Kling 3.0 y cítalos en el prompt con @nombre (p. ej. "@zorro corre por la nieve").
+Solo salen por APIMart y KIE (KIE además exige image_url); nunca por Higgsfield.
+Para partir de una creación anterior (animar una imagen, usarla de referencia, editar o extender un video),
+use_output(generation_id) da su URL vigente; no reutilices URLs viejas de outputs, pueden haber caducado."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
 # Cada herramienta declara las cuatro pistas para que el cliente avise antes de invocarla: solo lectura
@@ -80,7 +86,7 @@ def _call(method: str, path: str, **kwargs: Any) -> Any:
     except httpx.TransportError as exc:
         raise ToolError(f"HF Studio no responde ({exc}); ¿está corriendo `hf-studio serve`?") from exc
     if response.is_success:
-        return response.json()
+        return response.json() if response.content else {"ok": True}
     try:
         error = response.json().get("error") or response.json()
     except ValueError:
@@ -419,6 +425,66 @@ def isolate_voice(
     return _call(
         "POST", "/v1/audio/voice-isolator", json={**body, "audio_quote": audio_quote}, headers=headers
     )
+
+
+@mcp.tool(
+    title="Use a generation as input",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
+def use_output(generation_id: str, index: int = 0) -> dict:
+    """URL vigente de una salida de una generación terminada (index 0 = la primera), para usarla como
+    entrada de otra: fotograma inicial (image_url), referencia (image_urls / video_urls), video a editar o
+    extender (video_url), o imagen de un elemento (create_element con image_urls). No gasta créditos."""
+    return _call("POST", f"/v1/generations/{generation_id}/outputs/{index}/use")
+
+
+@mcp.tool(
+    title="List elements",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def list_elements() -> dict:
+    """Elementos de HF Studio para Kling 3.0: id (el_…), nombre para citar en el prompt (mention, @nombre),
+    descripción y sus imágenes."""
+    return _call("GET", "/v1/elements")
+
+
+@mcp.tool(
+    title="Create element",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def create_element(
+    name: str, description: str, paths: list[str] | None = None, image_urls: list[str] | None = None
+) -> dict:
+    """Crea un elemento (personaje, producto o lugar) con 2 a 4 imágenes JPG o PNG: rutas locales en paths
+    (la primera, de frente) o URLs propias (de upload_media o de una generación) en image_urls. name va en
+    minúsculas, sin espacios (letras, dígitos y _), y se cita en el prompt con @name. No gasta créditos."""
+    files = []
+    for path in paths or []:
+        file = _local_path(path)
+        if not file.is_file():
+            raise ToolError(f"No existe el archivo {file}")
+        files.append(
+            ("files", (file.name, file.read_bytes(), mimetypes.guess_type(file.name)[0] or "image/jpeg"))
+        )
+    data = {"name": name, "description": description, "image_urls": image_urls or []}
+    return _call("POST", "/v1/elements", data=data, files=files or None)
+
+
+@mcp.tool(
+    title="Delete element",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    ),
+)
+def delete_element(element_id: str) -> dict:
+    """Borra un elemento y sus imágenes locales. Las generaciones hechas con él no cambian."""
+    return _call("DELETE", f"/v1/elements/{element_id}")
 
 
 @mcp.tool(

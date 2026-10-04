@@ -18,7 +18,7 @@ import httpx
 from ..config import Settings
 
 if TYPE_CHECKING:
-    from .routes import Route
+    from .routes import Routes
 
 # Estados normalizados que devuelve `poll`. Los activos son los de la cola remota.
 ACTIVE_STATUSES = ("queued", "in_progress")
@@ -168,8 +168,9 @@ class Provider(ABC):
         """Estado autoritativo de una tarea, normalizado."""
 
     @classmethod
-    def routes(cls) -> dict[str, Route]:
-        """Modelos lógicos que ofrece este proveedor: `{id del catálogo: Route}` (ver routes.py)."""
+    def routes(cls) -> Routes:
+        """Modelos lógicos que ofrece este proveedor: `{id del catálogo: Route o tupla de Route}` (ver
+        routes.py)."""
         return {}
 
     async def fetch_prices(self) -> dict[str, float]:

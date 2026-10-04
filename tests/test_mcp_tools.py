@@ -38,6 +38,10 @@ TOOLS = {
     "import_elevenlabs_history": (False, False, True, True),
     "approve_fallback": SPEND,
     "providers_status": READ_EXT,
+    "list_elements": READ,
+    "use_output": (False, False, True, True),  # sube la copia local a Higgsfield; misma URL 5 días
+    "create_element": (False, False, False, True),  # sube las imágenes a Higgsfield
+    "delete_element": (False, True, True, False),
 }
 
 
@@ -111,6 +115,9 @@ READS = [
      {"limit": 10, "category": "scream", "q": "grito"}),
     (lambda: mcp_server.label_sound("s1", title="Grito", tags=["terror"]), "PATCH", "/v1/sounds/s1", None),
     (lambda: mcp_server.import_elevenlabs_history(), "POST", "/v1/sounds/import-elevenlabs", None),
+    (lambda: mcp_server.list_elements(), "GET", "/v1/elements", None),
+    (lambda: mcp_server.use_output("g1", 1), "POST", "/v1/generations/g1/outputs/1/use", None),
+    (lambda: mcp_server.delete_element("el_1"), "DELETE", "/v1/elements/el_1", None),
 ]  # fmt: skip
 
 
@@ -222,3 +229,20 @@ def test_paid_higgsfield_tools_need_their_own_quote(calls, quote, run, path):
     method, sent_path, kw = calls[-1]
     assert (method, sent_path) == ("POST", path)
     assert kw["headers"]["Idempotency-Key"] == f"quote-{quote_id}"
+
+
+def test_create_element_sends_files_and_urls(calls, tmp_path):
+    front, side = tmp_path / "frente.png", tmp_path / "perfil.jpg"
+    front.write_bytes(b"\x89PNG")
+    side.write_bytes(b"\xff\xd8\xff")
+    mcp_server.create_element("zorro", "zorro rojo", [str(front), str(side)], ["https://cdn.test/a.png"])
+    method, path, kw = calls[-1]
+    assert (method, path) == ("POST", "/v1/elements")
+    assert [f[1][0] for f in kw["files"]] == ["frente.png", "perfil.jpg"]
+    assert kw["data"] == {
+        "name": "zorro",
+        "description": "zorro rojo",
+        "image_urls": ["https://cdn.test/a.png"],
+    }
+    with pytest.raises(ToolError, match="No existe"):
+        mcp_server.create_element("x", "y", [str(tmp_path / "no.png")])

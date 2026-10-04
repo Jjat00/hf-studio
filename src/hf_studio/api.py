@@ -4,20 +4,22 @@ import logging
 import mimetypes
 import re
 import shutil
+import tempfile
 import time
 import uuid
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
-from fastapi import Depends, FastAPI, File, Header, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +30,7 @@ from .db import (
     ACTIVE,
     TERMINAL,
     ApiClient,
+    Element,
     Job,
     Preset,
     Sound,
@@ -38,6 +41,19 @@ from .db import (
     make_sessionmaker,
     utcnow,
 )
+from .elements import (
+    MAX_IMAGES,
+    MIN_IMAGES,
+    ElementError,
+    check_image,
+    check_name,
+    element_out,
+    new_element_id,
+)
+from .elements import check_available as check_element_ids
+from .elements import folder as element_folder
+from .elements import purge_deleted as purge_deleted_elements
+from .elements import resolve as resolve_elements
 from .elevenlabs_audio import (
     AUDIO_MODELS,
     MAX_ISOLATE_SECONDS,
@@ -45,10 +61,12 @@ from .elevenlabs_audio import (
 )
 from .elevenlabs_audio import SERVICES as AUDIO_SERVICES
 from .elevenlabs_audio import estimate as audio_estimate
+from .elevenlabs_audio import remote_model as audio_remote_model
 from .elevenlabs_audio import run as run_audio_service
 from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES
 from .media import cached_source, local_duration, matches_type
+from .media import download as download_media
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, total
 from .providers import ProviderError
@@ -63,6 +81,8 @@ from .service import (
     create_generation,
     get_owned_job,
     input_hash,
+    job_for_key,
+    request_digest,
     trusted_media,
 )
 from .sounds import LABELS as SOUND_LABELS
@@ -87,7 +107,7 @@ from .voice import (
 from .voice import (
     estimate as voice_estimate,
 )
-from .worker import Worker
+from .worker import LOCAL_MODELS, Worker
 
 log = logging.getLogger("hf_studio.api")
 
@@ -245,7 +265,13 @@ def create_app(
         app.state.hf = app.state.providers[provider_registry.DEFAULT_PROVIDER]
         app.state.worker = Worker(app.state.sessions, app.state.providers, settings)
         app.state.prices = PriceBook(Path(settings.storage_dir) / "prices")
-        app.state.router = Router(app.state.providers, app.state.prices, get_catalog)
+
+        async def element_resolver(ids: list[str]) -> dict[str, dict]:
+            # Desde la base en cada plan, recotización o aprobación: URLs vigentes, nunca un snapshot viejo.
+            async with app.state.sessions() as s:
+                return await resolve_elements(s, ids, settings.storage_dir, app.state.hf.upload)
+
+        app.state.router = Router(app.state.providers, app.state.prices, get_catalog, element_resolver)
         app.state.worker.router = app.state.router
         app.state.tasks = set()
         app.state.eleven = ElevenLabsClient(settings, transport)
@@ -293,6 +319,10 @@ def create_app(
             body["details"] = exc.details
         return JSONResponse({"error": body}, status_code=exc.status)
 
+    @app.exception_handler(ElementError)
+    async def _element_error(_: Request, exc: ElementError) -> JSONResponse:
+        return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
+
     @app.exception_handler(VoiceError)
     async def _voice_error(_: Request, exc: VoiceError) -> JSONResponse:
         return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
@@ -333,6 +363,7 @@ def create_app(
         return dict((await session.execute(select(ApiClient.id, ApiClient.name))).tuples().all())
 
     def job_out(job: Job, deduplicated: bool | None = None, source: str | None = None) -> dict:
+        current = job.plan[job.plan_index] if job.plan and job.plan_index < len(job.plan) else {}
         files = {f["index"]: f for f in job.files or []}
         outputs = []
         for i, out in enumerate(job.outputs or []):
@@ -360,14 +391,22 @@ def create_app(
             "error_kind": job.error_kind,
             "request_id": job.hf_request_id,
             "correlation_id": job.correlation_id,
-            "provider": job.provider,
-            "cost_usd": (job.plan[job.plan_index].get("usd") if job.plan else None),
+            # Los trabajos de audio corren en ElevenLabs aunque la columna conserve su valor por defecto.
+            "provider": "elevenlabs" if job.model in LOCAL_MODELS else job.provider,
+            # Canal exacto en el proveedor (id de su modelo) y precio cotizado de la opción en curso: tras
+            # completarse, lo que costó la generación (aproximado si `cost_kind` es approx).
+            "provider_model": current.get("model"),
+            "official": current.get("official", True),
+            "cost_usd": current.get("usd"),
+            "cost_kind": current.get("kind"),
             "max_usd": job.max_usd,
             "max_reserve_usd": job.max_reserve_usd,
-            "reserve_usd": (job.plan[job.plan_index].get("reserve_usd") if job.plan else None),
+            "reserve_usd": current.get("reserve_usd"),
             "plan": [
                 {
                     "provider": o["provider"],
+                    "model": o.get("model"),
+                    "official": o.get("official", True),
                     "usd": o.get("usd"),
                     "kind": o.get("kind"),
                     "reserve_usd": o.get("reserve_usd"),
@@ -385,6 +424,11 @@ def create_app(
         if deduplicated is not None:
             body["deduplicated"] = deduplicated
         return body
+
+    def local_option(model: str | None, estimate: dict) -> dict:
+        """Opción única de un trabajo de ElevenLabs: guarda el modelo y lo que se cotizó para el historial."""
+        return {"provider": "elevenlabs", "model": model, "official": True, "usd": estimate.get("usd"),
+                "kind": estimate.get("kind")}  # fmt: skip
 
     def model_out(m: dict, full: bool = False) -> dict:
         keys = ("id", "title", "output", "workflow", "family", "capabilities", "docs_url")
@@ -482,6 +526,10 @@ def create_app(
         provider: str | None = None,
     ) -> Plan:  # fmt: skip
         hints = await complete_hints(request, session, owner, arguments, hints)
+        # Una petición nueva solo cita elementos vivos; sus imágenes las pone el router desde la base, nunca
+        # el cliente (las pistas no llevan elementos).
+        hints.pop("elements", None)
+        await check_element_ids(session, arguments.get("elements"))
         if provider and provider not in provider_registry.PROVIDERS:
             raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
         return await request.app.state.router.plan(model, arguments, hints, only=provider)
@@ -636,6 +684,11 @@ def create_app(
         idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
     ) -> JSONResponse:
         model = check_input(catalog, body.model, body.input)
+        # Un reintento con la misma Idempotency-Key devuelve el trabajo ya creado antes de volver a cotizar o
+        # resolver medios: un elemento borrado o un precio nuevo no lo convierten en otra petición (revisión 43).
+        digest = request_digest(model["id"], body.input, body.keep_source_audio, body.provider)
+        if existing := await job_for_key(session, owner, idempotency_key, digest):
+            return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
         plan = await make_plan(request, session, owner, model, body.input, body.hints, body.provider)
         best = plan.best
         if best is None:
@@ -883,7 +936,9 @@ def create_app(
                 409, problem[0], problem[1], {"usd": fresh["usd"], "reserve_usd": fresh.get("reserve_usd")}
             )
         plan = list(job.plan)
-        plan[index] = {**fresh, "unknown_accepted": body.accept_unknown_cost}
+        # `approved`: esta opción (proveedor y canal) la eligió el usuario; el primer envío ya no replanifica
+        # hacia otra más barata, solo la recotiza (revisión 41).
+        plan[index] = {**fresh, "unknown_accepted": body.accept_unknown_cost, "approved": True}
         # CAS sobre la versión leída: dos aprobaciones, o aprobar y cancelar a la vez, no pueden ganar ambas.
         done = await session.execute(
             update(Job)
@@ -908,7 +963,15 @@ def create_app(
             done = await session.execute(
                 update(Job)
                 .where(Job.id == job.id, Job.status.in_(("pending", "awaiting_approval")))
-                .values(status="canceled", finished_at=utcnow(), next_check_at=None, version=Job.version + 1)
+                .values(
+                    status="canceled",
+                    finished_at=utcnow(),
+                    next_check_at=None,
+                    version=Job.version + 1,
+                    # El aviso «retrying» de una preparación fallida no vale para un trabajo cancelado.
+                    error=case((Job.error_kind == "preparing", None), else_=Job.error),
+                    error_kind=case((Job.error_kind == "preparing", None), else_=Job.error_kind),
+                )
             )
             await session.commit()
             await session.refresh(job)
@@ -936,6 +999,180 @@ def create_app(
         if not entry or not path.is_file():
             raise ServiceError(404, "not_found", "Archivo no encontrado")
         return FileResponse(path, media_type=entry.get("content_type"), filename=name)
+
+    REUSE_FRESH = timedelta(days=5)  # las URLs de Higgsfield duran ~7 días; se vuelve a subir pasados 5
+    # Candados por (dueño, salida); se sueltan solos cuando ninguna petición los usa (revisión 48).
+    reuse_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
+
+    @app.post("/v1/generations/{job_id}/outputs/{index}/use", tags=["generaciones"])
+    async def use_output(job_id: str, index: int, request: Request, session: Session, owner: Owner) -> dict:
+        """URL pública y vigente de una salida propia, para usarla como entrada de otra generación (fotograma
+        inicial, referencia, video a editar…). Sube la copia local a Higgsfield (gratis) y la registra como
+        subida propia; si ya se subió hace menos de 5 días, devuelve esa misma URL."""
+        job = await get_owned_job(session, owner, job_id)
+        entry = next((f for f in job.files or [] if f["index"] == index), None)
+        if job.status != "completed" or entry is None:
+            raise ServiceError(404, "not_found", "That output is not available (finished generations only)")
+        path = Path(settings.storage_dir) / "outputs" / job.id / entry["name"]
+        if not path.is_file():
+            raise ServiceError(404, "not_found", "The local copy of that output is missing")
+        content_type = (entry.get("content_type") or "").split(";")[0].strip().lower()
+        if content_type not in UPLOAD_CONTENT_TYPES:
+            raise ServiceError(
+                415, "unsupported_media", f"{content_type or 'This output'} cannot be used as an input"
+            )
+        # La asociación salida → subida vive en `Upload.source`, que solo escribe el servidor (revisión 47). Una
+        # fila por dueño y salida (índice único); el candado evita dos subidas simultáneas en este proceso.
+        source = f"generation:{job.id}:{index}"
+        # Valores propios, no del ORM: un rollback por conflicto expira los objetos cargados (revisión 48).
+        owner_id, generation_id, kind = owner.id, job.id, entry["kind"]
+        lock = reuse_locks.get((owner_id, source))
+        if lock is None:
+            lock = reuse_locks[(owner_id, source)] = asyncio.Lock()
+        async with lock:
+            row = await session.scalar(  # lectura fresca dentro del candado
+                select(Upload)
+                .where(Upload.owner_id == owner_id, Upload.source == source)
+                .execution_options(populate_existing=True)
+            )
+            if row is None or row.created_at < utcnow() - REUSE_FRESH:
+                data = path.read_bytes()
+                if len(data) > settings.max_upload_bytes:
+                    raise ServiceError(
+                        413, "too_large", f"Maximum {settings.max_upload_bytes // (1024 * 1024)} MB"
+                    )
+                if not matches_type(data[:16], content_type):
+                    raise ServiceError(415, "content_mismatch", f"The output is not a valid {content_type}")
+                url = await request.app.state.hf.upload(data, content_type)
+                if row is not None:
+                    # La copia anterior pasa a historial (sin `source`): su URL sigue siendo un medio propio
+                    # mientras funcione (revisión 48). La vigente es una fila nueva.
+                    row.source = None
+                    await session.flush()
+                row = Upload(owner_id=owner_id, filename=entry["name"], content_type=content_type,
+                             size=len(data), url=url, source=source)  # fmt: skip
+                session.add(row)
+                try:
+                    await session.commit()
+                except IntegrityError:
+                    # Otro proceso registró la misma salida a la vez: vale la suya (la subida extra no cobra).
+                    await session.rollback()
+                    row = await session.scalar(
+                        select(Upload).where(Upload.owner_id == owner_id, Upload.source == source)
+                    )
+            url = row.url
+        return {"url": url, "kind": kind, "content_type": content_type,
+                "generation_id": generation_id, "index": index}  # fmt: skip
+
+    # --- Elementos (Kling 3.0 en APIMart y KIE) ------------------------------------------------
+
+    async def element_image(
+        session: AsyncSession, owner: ApiClient, source: UploadFile | str
+    ) -> tuple[bytes, str]:
+        """Bytes y tipo real de una imagen de elemento: un archivo subido o una URL propia (subida o salida de
+        una generación; nunca una URL arbitraria, SSRF)."""
+        if isinstance(source, str):
+            if not await trusted_media(session, owner, source):
+                raise ServiceError(
+                    422, "untrusted_source", "Element images must come from /v1/uploads or your generations"
+                )
+            with tempfile.TemporaryDirectory(prefix="hfs-element-") as tmp:
+                path = Path(tmp) / "image"
+                if not await download_media(source, app.state.hf.plain, settings.max_upload_bytes, path):
+                    raise ServiceError(422, "invalid_source", f"Could not download {source}")
+                data = path.read_bytes()
+        else:
+            data = await source.read()
+        if not data:
+            raise ServiceError(422, "empty_file", "An element image is empty")
+        return data, check_image(data, "")
+
+    @app.post("/v1/elements", status_code=201, tags=["elementos"])
+    async def create_element(
+        request: Request,
+        session: Session,
+        owner: Owner,
+        name: Annotated[str, Form()],
+        description: Annotated[str, Form(min_length=1, max_length=500)],
+        files: Annotated[list[UploadFile], File()] = [],  # noqa: B006
+        image_urls: Annotated[list[str], Form()] = [],  # noqa: B006
+    ) -> dict:
+        """Crea un elemento con 2 a 4 imágenes JPG o PNG (archivos o URLs propias). Se cita con @nombre."""
+        name = check_name(name)
+        description = description.strip()
+        if not description:
+            raise ServiceError(422, "invalid_description", "The description cannot be empty")
+        await purge_deleted_elements(session, settings.storage_dir)
+        sources: list = [*files, *image_urls]
+        if not MIN_IMAGES <= len(sources) <= MAX_IMAGES:
+            raise ServiceError(422, "image_count", f"An element needs {MIN_IMAGES} to {MAX_IMAGES} images")
+        taken = await session.scalar(select(Element).where(Element.name == name))
+        if taken:
+            message = f"There is already an element called @{name}"
+            if taken.deleted_at:
+                message = f"@{name} was deleted recently or a running generation still uses it; try again in a few minutes"
+            raise ServiceError(409, "name_taken", message)
+        images = [await element_image(session, owner, src) for src in sources]
+        element_id = new_element_id()
+        target = element_folder(settings.storage_dir, element_id)
+        target.mkdir(parents=True, exist_ok=True)
+        stored = []
+        try:
+            for i, (data, kind) in enumerate(images):
+                file = f"{i}{'.png' if kind == 'image/png' else '.jpg'}"
+                (target / file).write_bytes(data)
+                stored.append(
+                    {"file": file, "content_type": kind, "url": await request.app.state.hf.upload(data, kind)}
+                )
+            element = Element(id=element_id, name=name, description=description, images=stored,
+                              created_by=owner.id)  # fmt: skip
+            session.add(element)
+            await session.commit()
+        except IntegrityError:
+            # Otra creación simultánea ganó el mismo nombre (revisión 43): 409, no 500.
+            await session.rollback()
+            shutil.rmtree(target, ignore_errors=True)
+            if await session.scalar(select(Element.id).where(Element.name == name)):
+                raise ServiceError(409, "name_taken", f"There is already an element called @{name}") from None
+            raise
+        except BaseException:
+            shutil.rmtree(target, ignore_errors=True)
+            raise
+        return element_out(element)
+
+    @app.get("/v1/elements", tags=["elementos"])
+    async def list_elements(session: Session, owner: Owner) -> dict:
+        rows = await session.scalars(
+            select(Element).where(Element.deleted_at.is_(None)).order_by(Element.created_at.desc())
+        )
+        return {"elements": [element_out(e) for e in rows]}
+
+    async def get_element_or_404(session: AsyncSession, element_id: str) -> Element:
+        element = await session.get(Element, element_id)
+        if element is None or element.deleted_at is not None:
+            raise ServiceError(404, "element_not_found", f"Unknown element: {element_id}")
+        return element
+
+    @app.get("/v1/elements/{element_id}", tags=["elementos"])
+    async def get_element(element_id: str, session: Session, owner: Owner) -> dict:
+        return element_out(await get_element_or_404(session, element_id))
+
+    @app.get("/v1/elements/{element_id}/images/{index}", tags=["elementos"])
+    async def element_image_file(element_id: str, index: int, session: Session, owner: Owner) -> FileResponse:
+        element = await get_element_or_404(session, element_id)
+        if not 0 <= index < len(element.images):
+            raise ServiceError(404, "not_found", "Image not found")
+        image = element.images[index]
+        return FileResponse(element_folder(settings.storage_dir, element.id) / image["file"],
+                            media_type=image["content_type"])  # fmt: skip
+
+    @app.delete("/v1/elements/{element_id}", status_code=204, tags=["elementos"])
+    async def delete_element(element_id: str, session: Session, owner: Owner) -> None:
+        """Deja de ofrecerlo al momento; sus imágenes se borran cuando ya no lo use ningún trabajo activo."""
+        element = await get_element_or_404(session, element_id)
+        element.deleted_at = utcnow()
+        await session.commit()
+        await purge_deleted_elements(session, settings.storage_dir)
 
     async def find_preset(session: AsyncSession, owner: ApiClient, slug: str) -> dict:
         for p in BUILTIN:
@@ -1240,6 +1477,7 @@ def create_app(
                     f"You have {active} active jobs (maximum {settings.max_active_jobs_per_client})",
                 )
             args = {**request_args, "start": start, "end": end}
+            cost = voice_estimate(end - start, settings)
             job = Job(
                 owner_id=owner.id,
                 model=VOICE_MODEL,
@@ -1248,6 +1486,7 @@ def create_app(
                 idempotency_key=idempotency_key,
                 status="in_progress",
                 submitted_at=utcnow(),
+                plan=[local_option(settings.elevenlabs_sts_model, cost)],
             )
             session.add(job)
             try:
@@ -1432,6 +1671,7 @@ def create_app(
                     idempotency_key=idempotency_key,
                     status="in_progress",
                     submitted_at=utcnow(),
+                    plan=[local_option(audio_remote_model(body), est)],
                 )
                 session.add(job)
                 try:

@@ -1,7 +1,8 @@
 """Plan de una generación: qué proveedores pueden hacerla, con qué entrada y a qué precio.
 
 El plan ordena las opciones de la más barata a la más cara (a igual precio gana la oficial y, después,
-el orden del registro, con Higgsfield primero). El worker envía la primera y, si falla sin cobrar, salta a
+el orden del registro, con Higgsfield primero). Un proveedor con varios canales del mismo modelo (oficial y
+no oficial) aporta una opción por canal; cada opción se identifica por `(provider, model)`. El worker envía la primera y, si falla sin cobrar, salta a
 la siguiente: sola si cuesta lo mismo o menos que lo aprobado, y con una nueva aprobación si cuesta más.
 """
 
@@ -12,11 +13,12 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .catalog import Catalog
+from .elements import element_ids, is_element_id
 from .pricing import fill_placeholders, quote
 from .providers.base import Provider, ProviderError
 from .providers.prices import PriceBook
 from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
-from .providers.routes import with_defaults
+from .providers.routes import Route, routes_for, with_defaults
 
 BALANCE_TTL = 60.0
 OUTDATED_PRICES = 3 * 24 * 3600  # una tabla sin poder actualizarse en 3 días ya no da precios exactos
@@ -88,16 +90,19 @@ class Plan:
     def stored(self) -> list[dict[str, Any]]:
         """Lo que se guarda en el trabajo para el worker."""
         now = time.time()
-        return [{"provider": o.provider, "model": o.model, "input": o.input, "usd": o.usd, "kind": o.kind,
-                 "reserve_usd": o.reserve_usd, "quoted_at": now, "hints": self.hints, "forced": self.forced}
+        return [{"provider": o.provider, "model": o.model, "official": o.official, "input": o.input, "usd": o.usd,
+                 "kind": o.kind, "reserve_usd": o.reserve_usd, "quoted_at": now, "hints": self.hints,
+                 "forced": self.forced}
                 for o in self.options]  # fmt: skip
 
 
 class Router:
-    def __init__(self, providers: dict[str, Provider], prices: PriceBook, catalog_getter):
+    def __init__(self, providers: dict[str, Provider], prices: PriceBook, catalog_getter, elements=None):
         self.providers = providers
         self.prices = prices
         self.catalog_getter = catalog_getter
+        # `async (ids) -> {id: {name, description, image_urls}}`: elementos de HF Studio con URLs vigentes.
+        self.elements = elements
         self._balances: dict[str, tuple[float, float | None, bool | None]] = {}
 
     @property
@@ -123,9 +128,15 @@ class Router:
         hints: dict | None = None,
         only: str | None = None,
         check_balance: bool = True,
+        route: str | None = None,
     ) -> Plan:
+        """`only` limita el plan a un proveedor; `route`, además, a uno de sus canales (id del modelo en el
+        proveedor): así una opción guardada se recotiza en el mismo canal y no salta a otro en silencio."""
         hints = dict(hints or {})
+        hints.pop("elements", None)  # planes guardados antes de la revisión 43: nunca se usa ese snapshot
         logical = with_defaults(model["input_schema"], arguments)
+        ids = element_ids(arguments.get("elements"))
+        elements = await self.elements(ids) if ids and self.elements else {}
         options: list[Option] = []
         excluded: list[dict[str, Any]] = []
         names = [only] if only else list(PROVIDERS)
@@ -133,59 +144,98 @@ class Router:
             provider = self.providers.get(name)
             if provider is None:
                 raise ProviderError("unsupported", f"Unknown provider {name!r}", provider=name)
-            info = {"provider": name, "title": provider.title}
-            option = await self._option(provider, model, arguments, logical, hints, info, excluded)
-            if option is None:
-                continue
-            if not provider.configured:
-                excluded.append({**info, "reason": f"no key ({provider.env_var})", "usd": option.usd,
-                                 "key_url": provider.key_url, "signup_url": provider.signup_url})  # fmt: skip
-                continue
-            needed = max(option.usd or 0, option.reserve_usd or 0) or None
-            if check_balance and needed is not None and provider.has_price_table:
-                balance, valid = await self.balance(name)
-                if valid is False:
-                    excluded.append(
-                        {**info, "reason": "invalid key", "usd": option.usd, "key_url": provider.key_url}
-                    )
-                    continue
-                if balance is not None and balance < needed:
-                    excluded.append({**info, "reason": f"insufficient balance ({balance:.2f} USD)", "usd": option.usd,
-                                     "billing_url": provider.billing_url})  # fmt: skip
-                    continue
-            options.append(option)
+            for option in await self._options(
+                provider, model, arguments, logical, hints, excluded, route, elements
+            ):
+                await self._admit(provider, option, check_balance, options, excluded)
         order = {name: i for i, name in enumerate(PROVIDERS)}
         options.sort(key=lambda o: (o.usd is None, o.usd or 0, not o.official, order.get(o.provider, 99)))
         return Plan(model["id"], options, excluded, hints, forced=only is not None)
 
-    async def _option(
+    async def _admit(
+        self, provider: Provider, option: Option, check_balance: bool, options: list, excluded: list
+    ) -> None:
+        """Añade la opción al plan si el proveedor tiene clave válida y saldo; si no, la deja en `excluded`."""
+        info = {"provider": provider.name, "title": provider.title, "model": option.model}
+        if not provider.configured:
+            excluded.append({**info, "reason": f"no key ({provider.env_var})", "usd": option.usd,
+                             "key_url": provider.key_url, "signup_url": provider.signup_url})  # fmt: skip
+            return
+        needed = max(option.usd or 0, option.reserve_usd or 0) or None
+        if check_balance and needed is not None and provider.has_price_table:
+            balance, valid = await self.balance(provider.name)
+            if valid is False:
+                excluded.append(
+                    {**info, "reason": "invalid key", "usd": option.usd, "key_url": provider.key_url}
+                )
+                return
+            if balance is not None and balance < needed:
+                excluded.append({**info, "reason": f"insufficient balance ({balance:.2f} USD)", "usd": option.usd,
+                                 "billing_url": provider.billing_url})  # fmt: skip
+                return
+        options.append(option)
+
+    async def _options(
         self,
         provider: Provider,
         model: dict,
         arguments: dict,
         logical: dict,
         hints: dict,
-        info: dict,
         excluded: list,
-    ) -> Option | None:
+        route: str | None = None,
+        elements: dict | None = None,
+    ) -> list[Option]:
+        """Una opción por canal del proveedor que puede hacer el pedido (los que no, van a `excluded`)."""
+        info = {"provider": provider.name, "title": provider.title}
         if provider.name == DEFAULT_PROVIDER:
+            if route is not None and route != model["id"]:
+                return []
+            if any(is_element_id(v) for v in arguments.get("elements") or []):
+                excluded.append({**info, "model": model["id"],
+                                 "reason": "HF Studio elements only run on APIMart and KIE"})  # fmt: skip
+                return []
             priced = await quote(provider, self.catalog, model, arguments, hints)
             if priced["kind"] == "unavailable" and priced.get("errors"):
-                excluded.append({**info, "reason": priced["basis"]})
-                return None
-            return Option(
+                excluded.append({**info, "model": model["id"], "reason": priced["basis"]})
+                return []
+            return [Option(
                 provider.name, provider.title, model["id"], arguments, priced["usd"], priced["kind"],
                 priced["basis"], credits=priced.get("credits"), discount_pct=priced.get("discount_pct"),
                 missing=priced.get("missing") or [], description=priced.get("description"),
-            )  # fmt: skip
-        route = provider.routes().get(model["id"])
-        if route is None:
-            return None
+            )]  # fmt: skip
+        options = []
+        for candidate in routes_for(provider.routes(), model["id"]):
+            if route is not None and candidate.model != route:
+                continue
+            option = self._route_option(
+                provider, candidate, model, arguments, logical, hints, info, excluded, elements or {}
+            )
+            if option is not None:
+                options.append(option)
+        return options
+
+    def _route_option(
+        self,
+        provider: Provider,
+        route: Route,
+        model: dict,
+        arguments: dict,
+        logical: dict,
+        hints: dict,
+        info: dict,
+        excluded: list,
+        elements: dict,
+    ) -> Option | None:
         filled, placeholders = fill_placeholders(model["input_schema"], arguments)
+        if filled.get("elements"):
+            # Elementos de HF Studio resueltos desde la base (nombre, descripción e imágenes), que el traductor
+            # envía en línea. Un id de Higgsfield queda como texto.
+            filled = {**filled, "elements": [elements.get(v, v) for v in filled["elements"]]}
         try:
             translated = route.translate(with_defaults(model["input_schema"], filled), frozenset(arguments))
         except ProviderError as exc:
-            excluded.append({**info, "reason": exc.message})
+            excluded.append({**info, "model": route.model, "reason": exc.message})
             return None
         prices = self.prices.prices(provider.name)
         usd = route.price(logical, hints, prices) if route.price else None
@@ -232,10 +282,12 @@ async def requote(router: Router, model: dict, arguments: dict, option: dict) ->
     """Vuelve a cotizar una opción guardada en su proveedor (con los mismos datos de cotización). None si
     ese proveedor ya no puede hacer el pedido."""
     hints = option.get("hints") or {}
-    fresh = (await router.plan(model, arguments, hints, only=option["provider"])).best
+    # Mismo canal (`model`): si un proveedor tiene uno oficial y otro no, no se cambia de uno a otro aquí.
+    plan = await router.plan(model, arguments, hints, only=option["provider"], route=option["model"])
+    fresh = plan.best
     if fresh is None:
         return None
     priced = fresh.usd is not None and not fresh.missing
-    return {**option, "model": fresh.model, "input": fresh.input or option["input"],
+    return {**option, "model": fresh.model, "official": fresh.official, "input": fresh.input or option["input"],
             "usd": fresh.usd if priced else None, "kind": fresh.kind, "reserve_usd": fresh.reserve_usd,
             "quoted_at": time.time()}  # fmt: skip

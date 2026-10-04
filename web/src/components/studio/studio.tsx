@@ -23,7 +23,8 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
 import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
-import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
+import { ElementPicker } from "@/components/studio/element-picker";
+import { cleanInput, defaultsFor, fieldsFor, takesStudioElements, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
 import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
@@ -119,7 +120,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     };
   }, [modelId]);
 
-  const fields = useMemo(() => (detail ? fieldsFor(detail.input_schema) : []), [detail]);
+  const fields = useMemo(() => (detail ? fieldsFor(detail.input_schema, detail.id) : []), [detail]);
   // Si el modo define etiquetas, sus ranuras salen en ese orden (p. ej. movimiento antes que personaje).
   const labelOrder = Object.keys(mode.labels ?? {});
   const rankMedia = (k: string) => (labelOrder.includes(k) ? labelOrder.indexOf(k) : labelOrder.length);
@@ -127,6 +128,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     .filter((f): f is Extract<Field, { kind: "media" }> => f.kind === "media")
     .sort((a, b) => rankMedia(a.key) - rankMedia(b.key));
   const prompt = fields.find((f) => f.kind === "prompt");
+  const elementsField = fields.find((f) => f.kind === "elements");
   const settings = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
   // Opción de HF Studio (no de Higgsfield): mismo criterio que audio.supports_source_audio en la API.
   const canKeepAudio = detail?.output === "video" && "video_url" in (detail.input_schema.properties ?? {});
@@ -226,6 +228,32 @@ export function Studio({ output }: { output: "video" | "image" }) {
   useEffect(() => {
     if (promptParam) onPromptParam(promptParam);
   }, [promptParam, detail]);
+
+  // ?elements=el_a,el_b desde la página Elementos: se eligen en cuanto el modelo los admite (Kling 3.0).
+  const elementsParam = reuseId ? null : params.get("elements");
+  const appliedElements = useRef<string | null>(null);
+  const onElementsParam = useEffectEvent((ids: string) => {
+    if (!detail || !takesStudioElements(detail.id) || appliedElements.current === ids) return;
+    appliedElements.current = ids;
+    setValues((v) => ({ ...v, elements: ids.split(",").filter(Boolean).slice(0, 3) }));
+  });
+  useEffect(() => {
+    if (elementsParam) onElementsParam(elementsParam);
+  }, [elementsParam, detail]);
+
+  // ?use=<url>&as=image|video desde «Usar en…» de una creación: va a la primera casilla de ese tipo.
+  const useParam = reuseId ? null : params.get("use");
+  const useKind = params.get("as");
+  const appliedUse = useRef<string | null>(null);
+  const onUseParam = useEffectEvent((url: string) => {
+    const slot = media.find((f) => f.media === useKind);
+    if (!detail || !slot || appliedUse.current === `${detail.id}|${url}`) return;
+    appliedUse.current = `${detail.id}|${url}`;
+    setValues((v) => ({ ...v, [slot.key]: slot.multiple ? [url] : url }));
+  });
+  useEffect(() => {
+    if (useParam) onUseParam(useParam);
+  }, [useParam, detail]);
 
   // ?model=<id> desde el catálogo: si el modo actual no lo admite, salta al que sí.
   useEffect(() => {
@@ -381,6 +409,18 @@ export function Studio({ output }: { output: "video" | "image" }) {
                   </div>
                   {errors.prompt && <p className="mt-1 text-xs text-danger">{errors.prompt}</p>}
                 </div>
+              )}
+
+              {elementsField && (
+                <ElementPicker
+                  key={`${detail.id}/elements`}
+                  value={values.elements as string[] | undefined}
+                  onChange={(v) => setValue("elements", v.length ? v : undefined)}
+                  onPick={(el) => {
+                    const text = (values.prompt as string) ?? "";
+                    if (!text.includes(el.mention)) setValue("prompt", text ? `${text.trimEnd()} ${el.mention}` : el.mention);
+                  }}
+                />
               )}
 
               <ModelRow model={byId.get(detail.id)} onClick={() => setPickerOpen(true)} />
@@ -575,7 +615,6 @@ function GenerateButton({
       )}
       {!busy && !confirming && short && (
         <span className="flex items-center gap-1 text-[19px]">
-          {estimate?.kind === "exact" && <Sparkles className="size-5 fill-ink" />}
           {short}
         </span>
       )}

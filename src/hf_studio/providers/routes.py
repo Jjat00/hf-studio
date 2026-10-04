@@ -1,8 +1,9 @@
 """Mapa de modelos: qué proveedores ofrecen cada modelo lógico y cómo se le traduce la entrada.
 
 El modelo lógico es el id del catálogo (el de Higgsfield): no cambia presets, UI ni historial. Cada
-proveedor declara en `Provider.routes()` una `Route` por modelo lógico que ofrece. Higgsfield ofrece todo
-el catálogo con la entrada tal cual.
+proveedor declara en `Provider.routes()` una `Route` por modelo lógico que ofrece, o una tupla si tiene
+varios canales del mismo modelo (p. ej. el oficial y uno no oficial más barato): cada ruta es una opción
+del plan con su precio. Higgsfield ofrece todo el catálogo con la entrada tal cual.
 
 Regla de fidelidad: un traductor nunca cambia lo que se pide. Si un valor no tiene equivalente exacto
 (una duración o una relación de aspecto que el proveedor no admite, un campo sin traducción), lanza
@@ -36,6 +37,17 @@ class Route:
     # El cobro final se liquida después (p. ej. por tokens): el precio es aproximado, no exacto.
     settles_later: bool = False
     notes: tuple[str, ...] = field(default_factory=tuple)
+
+
+Routes = dict[str, Route | tuple[Route, ...]]
+
+
+def routes_for(routes: Routes, model_id: str) -> tuple[Route, ...]:
+    """Las rutas de un modelo lógico en un proveedor (ninguna, una o varias)."""
+    found = routes.get(model_id)
+    if found is None:
+        return ()
+    return found if isinstance(found, tuple) else (found,)
 
 
 def unsupported(provider: str, message: str) -> ProviderError:
@@ -118,6 +130,32 @@ class Spec:
                 )
         out.update(self.fixed)
         return self.build(source, out) if self.build else out
+
+
+def kling_elements(provider: str, needs_frame: bool = False) -> Callable[[Any], Any]:
+    """Traductor del campo `elements` de Kling 3.0 a la forma en línea de APIMart y KIE: `{name, description,
+    element_input_urls}`. Solo admite elementos de HF Studio ya resueltos por el router (dicts); un id de
+    elemento de Higgsfield (texto) no tiene imágenes que enviar. `needs_frame`: el proveedor solo los acepta
+    con fotograma inicial (KIE), así que en texto a video son `unsupported`."""
+
+    def convert(values: Any) -> Any:
+        if not values:
+            return None
+        if needs_frame:
+            raise ProviderError(
+                "unsupported", f"{provider} only takes elements with a first frame", provider=provider
+            )
+        if any(not isinstance(v, dict) for v in values):
+            raise ProviderError(
+                "unsupported", f"Higgsfield element ids cannot be sent to {provider}; use HF Studio elements",
+                provider=provider,
+            )  # fmt: skip
+        if len(values) > 3:
+            raise ProviderError("unsupported", f"{provider} takes at most 3 elements", provider=provider)
+        return [{"name": v["name"], "description": v["description"], "element_input_urls": list(v["image_urls"])}
+                for v in values]  # fmt: skip
+
+    return convert
 
 
 def first(values: list[str] | None) -> str | None:

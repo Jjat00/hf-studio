@@ -10,3 +10,6 @@ __pycache__/
 data/
 .smoke/
 .smoke.log
+
+# Informes de revisión de Codex: solo en local, fuera del repo
+.revisiones/

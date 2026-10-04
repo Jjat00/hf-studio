@@ -29,6 +29,7 @@ const SECONDARY: Item[] = [
   { href: "/voices", label: "voices", match: (p) => p.startsWith("/voices") },
   { href: "/audio", label: "audio", match: (p) => p.startsWith("/audio") },
   { href: "/sounds", label: "sounds", match: (p) => p.startsWith("/sounds") },
+  { href: "/elements", label: "elements", match: (p) => p.startsWith("/elements") },
   { href: "/history", label: "history", match: (p) => p.startsWith("/history") },
   { href: "/providers", label: "providers", match: (p) => p.startsWith("/providers") },
 ];

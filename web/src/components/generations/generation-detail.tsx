@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
-import { AudioPlayer, IconButton, StatusPill, modelName, sourceLabel } from "@/components/generations/generation-card";
+import { AudioPlayer, IconButton, StatusPill, generationCost, modelName, providerModel, providerTitle, sourceLabel } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
 import { outputSrc, reuseHref, studio } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
@@ -201,6 +201,30 @@ export function GenerationDetail({ id }: { id: string }) {
                 <>
                   <dt className="text-fg-3">{d.sourceAudio}</dt>
                   <dd>{d.sourceAudioState[g.outputs.find((o) => o.audio)?.audio ?? "pending"] ?? d.sourceAudioState.pending}</dd>
+                </>
+              )}
+              {g.provider && (
+                <>
+                  <dt className="text-fg-3">{d.provider}</dt>
+                  <dd>
+                    {providerTitle(g.provider)}
+                    {g.official === false && <span className="text-warning"> · {t.cost.unofficial}</span>}
+                  </dd>
+                </>
+              )}
+              {providerModel(g) && (
+                <>
+                  <dt className="text-fg-3">{d.providerModel}</dt>
+                  <dd className="font-mono text-xs break-all">{providerModel(g)}</dd>
+                </>
+              )}
+              {generationCost(g) && (
+                <>
+                  <dt className="text-fg-3">{g.terminal ? d.cost : d.costEstimated}</dt>
+                  <dd>
+                    {generationCost(g)}
+                    {g.cost_kind === "approx" && <span className="text-fg-3"> · {d.costApprox}</span>}
+                  </dd>
                 </>
               )}
               <dt className="text-fg-3">{d.created}</dt>

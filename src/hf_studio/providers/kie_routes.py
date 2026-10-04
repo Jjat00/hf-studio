@@ -7,9 +7,19 @@ precios, revisados el 2026-10-03. Las claves de precio son `modelDescription` no
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from .routes import Route, Spec, only_default, per_second, per_unit, unsupported, video_seconds
+from .routes import (
+    Route,
+    Spec,
+    kling_elements,
+    only_default,
+    per_second,
+    per_unit,
+    unsupported,
+    video_seconds,
+)
 
 P = "kie"
 
@@ -91,11 +101,30 @@ def seedance() -> dict[str, Route]:
 # --- Kling 3.0 ----------------------------------------------------------------------------------
 
 
+SHOT_MAX_CHARS = 500  # docs de Kling 3.0 en KIE: por plano
+MENTION_CHARS = 37  # cada @elemento ocupa 37 caracteres del plano
+
+
+def _shot_length(prompt: str, names: list[str]) -> int:
+    """Longitud que KIE cuenta en un plano: cada mención @nombre de un elemento vale 37 caracteres."""
+    length = len(prompt)
+    for name in names:
+        hits = len(re.findall(rf"@{re.escape(name)}(?![A-Za-z0-9_])", prompt))
+        length += hits * (MENTION_CHARS - len(name) - 1)
+    return length
+
+
 def _kling_build(image: bool):
     def build(source: dict, out: dict) -> dict:
         shots = source.get("multi_prompt") or []
         if len(shots) > 5:
             raise unsupported(P, "KIE allows at most 5 shots")
+        names = [e["name"] for e in source.get("elements") or [] if isinstance(e, dict)]
+        for shot in shots:
+            if _shot_length(str(shot.get("prompt", "")), names) > SHOT_MAX_CHARS:
+                raise unsupported(
+                    P, f"KIE allows {SHOT_MAX_CHARS} characters per shot (each @element counts as 37)"
+                )
         out["multi_shots"] = bool(source.get("multi_shots"))
         out["multi_prompt"] = shots
         if not out["multi_shots"] and not source.get("prompt"):
@@ -130,8 +159,9 @@ def kling() -> dict[str, Route]:
             spec = Spec(
                 P, "kling-3.0/video",
                 keep=("prompt", "aspect_ratio", "multi_shots", "multi_prompt", "image_url", "last_image_url"),
+                rename={"elements": "kling_elements"},
                 convert={"sound": lambda v: v == "on", "duration": _str, "cfg_scale": only_default("cfg_scale", 0.5),
-                         "elements": _no_list("elements")},
+                         "elements": kling_elements(P, needs_frame=not image)},
                 drop=(), fixed={"mode": mode, **({"aspect_ratio": "16:9"} if image else {})},
                 build=_kling_build(image),
             )  # fmt: skip

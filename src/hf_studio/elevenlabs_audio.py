@@ -192,6 +192,21 @@ def estimate(body: BaseModel, source_seconds: float | None = None) -> dict:
     )
 
 
+SFX_REMOTE_MODEL = "eleven_text_to_sound_v2"
+MUSIC_REMOTE_MODEL = "music_v2"
+
+
+def remote_model(body: BaseModel) -> str | None:
+    """Modelo que se envía a ElevenLabs (lo que muestra el historial); el aislamiento no envía ninguno."""
+    if isinstance(body, TextToSpeechIn):
+        return body.model_id
+    if isinstance(body, SoundEffectIn):
+        return SFX_REMOTE_MODEL
+    if isinstance(body, MusicIn):
+        return MUSIC_REMOTE_MODEL
+    return None
+
+
 async def run(client: ElevenLabsClient, body: BaseModel, out: Path, source: str | None = None) -> None:
     """Genera el MP3 del servicio en `out`. Lanza VoiceError si ElevenLabs o ffmpeg fallan."""
     if isinstance(body, TextToSpeechIn):
@@ -208,12 +223,12 @@ async def run(client: ElevenLabsClient, body: BaseModel, out: Path, source: str 
     elif isinstance(body, SoundEffectIn):
         data = await client.sound_effect(
             {"text": body.text, "duration_seconds": body.duration_seconds,
-             "prompt_influence": body.prompt_influence, "loop": body.loop, "model_id": "eleven_text_to_sound_v2"}
+             "prompt_influence": body.prompt_influence, "loop": body.loop, "model_id": SFX_REMOTE_MODEL}
         )  # fmt: skip
     elif isinstance(body, MusicIn):
         data = await client.music(
             {"prompt": body.prompt, "music_length_ms": int(body.seconds * 1000),
-             "force_instrumental": body.force_instrumental, "model_id": "music_v2"}
+             "force_instrumental": body.force_instrumental, "model_id": MUSIC_REMOTE_MODEL}
         )  # fmt: skip
     else:
         if not source or not await has_audio(source):

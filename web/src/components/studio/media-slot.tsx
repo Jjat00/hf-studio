@@ -1,8 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { AudioLines, ImageIcon, Link2, Loader2, Plus, Video, X } from "lucide-react";
+import { AudioLines, History, ImageIcon, Link2, Loader2, Plus, Video, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { CreationsPicker } from "@/components/studio/creations-picker";
 import { useI18n } from "@/components/i18n-provider";
 import { probeDuration } from "@/lib/media";
 import { studio } from "@/lib/studio";
@@ -74,6 +75,7 @@ export function MediaSlot({
   const [busy, setBusy] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [pasting, setPasting] = useState(false);
+  const [picking, setPicking] = useState(false);
   const urls = Array.isArray(value) ? value : value ? [value] : [];
   const Icon = ICON[kind];
   const full = urls.length >= max;
@@ -198,16 +200,34 @@ export function MediaSlot({
           </form>
         ) : (
           !full && (
-            <button
-              type="button"
-              onClick={() => setPasting(true)}
-              className="flex items-center gap-1 text-xs text-fg-3 hover:text-fg-2"
-            >
-              <Link2 className="size-3.5" /> {t.media.pasteUrl}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setPasting(true)}
+                className="flex items-center gap-1 text-xs text-fg-3 hover:text-fg-2"
+              >
+                <Link2 className="size-3.5" /> {t.media.pasteUrl}
+              </button>
+              {kind !== "audio" && (
+                <button
+                  type="button"
+                  onClick={() => setPicking(true)}
+                  className="flex items-center gap-1 text-xs text-fg-3 hover:text-fg-2"
+                >
+                  <History className="size-3.5" /> {t.reuseAs.fromCreations}
+                </button>
+              )}
+            </>
           )
         )}
       </div>
+      {picking && kind !== "audio" && (
+        <CreationsPicker
+          kind={kind}
+          onClose={() => setPicking(false)}
+          onPick={(url) => set(multiple ? [...urls, url].slice(0, max) : [url])}
+        />
+      )}
       {(uploadError || error) && <p className="px-1 text-xs text-danger">{uploadError ?? error}</p>}
     </div>
   );
