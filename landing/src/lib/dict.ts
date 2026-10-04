@@ -24,8 +24,8 @@ const es = {
     { value: "0", label: "suscripciones" },
   ],
   promo: {
-    title: "48 segundos hechos con HF Studio",
-    body: "La música, la voz del locutor y las escenas de este video salieron del propio estudio.",
+    title: "69 segundos hechos con HF Studio",
+    body: "La voz del narrador (Zabra, de ElevenLabs) y la música salieron del propio estudio, y las pantallas son la interfaz real.",
   },
   examples: {
     kicker: "Ejemplos reales",
@@ -163,8 +163,8 @@ const en: Dict = {
     { value: "0", label: "subscriptions" },
   ],
   promo: {
-    title: "48 seconds made with HF Studio",
-    body: "The music, the voiceover and the shots in this video all came out of the studio itself (voiceover in Spanish).",
+    title: "69 seconds made with HF Studio",
+    body: "The narrator's voice (Zabra, from ElevenLabs) and the music came out of the studio itself, and the screens are the real interface (narration in Spanish).",
   },
   examples: {
     kicker: "Real examples",
