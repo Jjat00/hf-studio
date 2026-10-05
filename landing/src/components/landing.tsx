@@ -405,6 +405,24 @@ function Agents() {
             <p className="mt-3 flex gap-2 text-[14px] leading-snug text-fg-3">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-lime" /> {g.rule}
             </p>
+            <p className="mt-2 flex gap-2 text-[14px] leading-snug text-fg-3">
+              <Terminal className="mt-0.5 size-4 shrink-0 text-lime" />
+              <span>
+                {g.forAgents.split(/(\{llms\}|\{agents\})/).map((part, i) =>
+                  part === "{llms}" ? (
+                    <a key={i} href="/llms.txt" className="font-mono text-fg-2 underline underline-offset-2 hover:text-lime">
+                      llms.txt
+                    </a>
+                  ) : part === "{agents}" ? (
+                    <a key={i} href={`${REPO}/blob/main/AGENTS.md`} className="font-mono text-fg-2 underline underline-offset-2 hover:text-lime">
+                      AGENTS.md
+                    </a>
+                  ) : (
+                    part
+                  ),
+                )}
+              </span>
+            </p>
           </div>
         </div>
       </div>

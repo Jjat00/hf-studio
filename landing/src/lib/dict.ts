@@ -101,6 +101,7 @@ const es = {
     body: "HF Studio también es un servidor MCP. Conéctalo a Claude Code, Codex, Claude Desktop o ChatGPT y tu agente busca el modelo, te dice cuánto cuesta, espera tu OK y genera.",
     rule: "La regla: un agente no puede gastar créditos sin cotizar antes esa misma petición. Cada generación exige un quote_id de un solo uso. Si al enviar el precio supera tu tope, la generación espera y el agente te pide el OK otra vez.",
     connect: "Conecta tu agente con un comando",
+    forAgents: "¿Eres un agente de IA? Lee {llms} o {agents}: cómo instalarlo, pedir las claves y conectarte.",
     chat: {
       user: "Hazme un video de 5 s de tinta de colores en agua, en cámara lenta",
       tools: ["recommend_models", "get_model", "estimate_cost"],
@@ -240,6 +241,7 @@ const en: Dict = {
     body: "HF Studio is also an MCP server. Connect it to Claude Code, Codex, Claude Desktop or ChatGPT and your agent finds the model, tells you the price, waits for your OK and generates.",
     rule: "The rule: an agent cannot spend credits without first quoting that exact request. Every generation requires a single-use quote_id. If at send time the price goes over your cap, the generation waits and the agent asks for your OK again.",
     connect: "Connect your agent with one command",
+    forAgents: "Are you an AI agent? Read {llms} or {agents}: how to install it, ask for the keys and connect yourself.",
     chat: {
       user: "Make me a 5 s slow-motion video of colorful ink in water",
       tools: ["recommend_models", "get_model", "estimate_cost"],
