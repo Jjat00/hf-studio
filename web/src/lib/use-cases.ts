@@ -1,23 +1,26 @@
 /** Casos de uso: qué se puede hacer con HF Studio, desde la UI y desde el MCP, con mini tutorial y prompts. */
 import { l, type L } from "./i18n";
+import type { AudioService } from "./studio";
 
 export type Channel = "ui" | "mcp";
 
 export type Step = { title: L; body?: L; tool?: string };
 
-export type Category = "Cinematic" | "Product" | "Animate" | "Motion" | "Edit" | "Social" | "Agents";
+export type Category = "Cinematic" | "Product" | "Animate" | "Motion" | "Edit" | "Audio" | "Social" | "Agents";
 
 export type UseCase = {
   slug: string;
   title: L;
   tagline: L;
   category: Category;
-  output: "video" | "image";
+  output: "video" | "image" | "audio";
   channels: Channel[];
   art: string;
   model: string;
-  /** Entrada de ejemplo para cotizar en vivo (el costo se muestra siempre antes de generar). */
-  sample: Record<string, unknown>;
+  /** Entrada de ejemplo para cotizar en vivo (el costo se muestra siempre antes de generar). Sin ella, se cotiza con tus medios. */
+  sample?: Record<string, unknown>;
+  /** Casos de ElevenLabs: se cotizan con su servicio de audio, no con el catálogo de Higgsfield. */
+  audio?: { service: AudioService; body: Record<string, unknown> };
   /** Qué cubre el costo de ejemplo cuando el caso tiene varias etapas. */
   costNote?: L;
   /** Estudio de la UI (sin el prompt): `?prompt=` se añade al usar un ejemplo. */
@@ -375,6 +378,378 @@ export const USE_CASES: UseCase[] = [
     tips: [
       l("Extiende varias veces seguidas para construir planos más largos.", "Extend a few times in a row to build longer shots."),
       l("Mantén las mismas palabras de estilo que el prompt original.", "Keep the same style words as the original prompt."),
+    ],
+  },
+  {
+    slug: "ugc-ad",
+    title: l("Anuncio UGC sin rodar", "UGC ad without a shoot"),
+    tagline: l("Un video vertical estilo «grabado con el móvil» de alguien que recomienda tu producto.", "A vertical, shot-on-phone style video of someone recommending your product."),
+    category: "Product",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/object-swap.webp",
+    model: "bytedance/seedance-2.5/reference-to-video",
+    sample: { prompt: "cost preview", image_urls: ["https://example.com/a.png"], duration: 10, resolution: "480p", aspect_ratio: "9:16" },
+    uiHref: studioHref("video", "create", "references", "bytedance/seedance-2.5/reference-to-video"),
+    ui: [
+      { title: l("Abre Video › Referencias con Seedance 2.5", "Open Video › References with Seedance 2.5"), body: l("Añade la foto del producto y, si quieres, la de la persona y la del lugar. Seedance 2.5 admite hasta 30 imágenes.", "Add the product photo and, if you want, the person and the location. Seedance 2.5 takes up to 30 images.") },
+      { title: l("Escribe el guion dentro del prompt", "Put the script inside the prompt"), body: l("Gancho en la primera frase, lo que dice entre comillas y cómo sostiene el producto. Pide el look de móvil: cámara en mano, luz de ventana, sin música.", "Hook in the first line, what they say in quotes and how they hold the product. Ask for the phone look: handheld, window light, no music.") },
+      { title: l("9:16, 10 s y 480p para probar", "9:16, 10 s and 480p to test"), body: l("Deja el audio activado: Seedance genera la voz y el sonido del ambiente.", "Keep audio on: Seedance generates the voice and the room sound.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Saca 3 o 4 ganchos distintos con el mismo producto y quédate con el que más retenga.", "Make 3 or 4 different hooks with the same product and keep the one that holds attention best.") },
+    ],
+    ask: l(
+      "Con ./producto.png haz tres anuncios UGC verticales de 10 s, cada uno con un gancho distinto, estilo grabado con el móvil y voz en español. Cotiza el lote antes de generar.",
+      "Using ./product.png make three 10 s vertical UGC ads, each with a different hook, shot-on-phone style with English voice. Quote the batch before generating.",
+    ),
+    mcp: [
+      { title: l("Sube el producto", "Upload the product"), tool: "upload_media" },
+      { title: l("Escribe los ganchos", "Write the hooks"), body: l("El agente redacta tres guiones cortos (gancho, beneficio, cierre) y los mete en el prompt.", "The agent writes three short scripts (hook, benefit, close) and puts them in the prompt.") },
+      { title: l("Cotiza el lote", "Quote the batch"), body: l("Un ítem por gancho, con la misma referencia de producto.", "One item per hook, same product reference."), tool: "generate_batch (dry_run)" },
+      { title: l("Genera con tu OK y descarga", "Generate on your OK and download"), tool: "generate_batch → wait_generations → download_outputs" },
+    ],
+    prompts: [
+      { label: l("Reseña en la cocina", "Kitchen review"), text: "Authentic UGC smartphone talking-head video, vertical. A young woman in her kitchen holds the product from the reference image up to the camera and says: \"Nobody tells you this about cold brew.\" Handheld phone camera, natural window light, she blinks naturally and moves like a real filmed person, five fingers on every hand, room sound only, no music" },
+      { label: l("Unboxing POV", "POV unboxing"), text: "Vertical POV unboxing video, camera fixed like a phone on a stand, hands enter the frame and open a cardboard box revealing the product from the reference image, soft daylight, slow, calm and ASMR-like pacing, paper and box sounds only" },
+      { label: l("Antes y después", "Before and after"), text: "Vertical selfie video of a man showing the product from the reference image, he says: \"Two weeks ago I didn't believe this either.\" Bathroom mirror light, slight handheld shake, casual tone, ambient sound, no music" },
+    ],
+    tips: [
+      l("Higgsfield recomienda varias piezas cortas en vez de un video largo: prueba ganchos, no duraciones.", "Higgsfield recommends several short pieces over one long video: test hooks, not lengths."),
+      l("Frases como «five fingers on every hand» o «moves like a real filmed person» reducen los fallos de manos y de rigidez.", "Lines like “five fingers on every hand” or “moves like a real filmed person” reduce hand glitches and stiffness."),
+      l("Pon entre comillas lo que dice y en qué idioma: Seedance genera la voz con el video.", "Quote what they say and in which language: Seedance generates the voice with the video."),
+    ],
+  },
+  {
+    slug: "product-ad-image",
+    title: l("Foto de producto lista para anuncio", "Ad-ready product photo"),
+    tagline: l("Pon tu producto real en una escena de campaña sin estudio de fotos, con Marketing Studio.", "Place your real product in a campaign scene without a photo studio, with Marketing Studio."),
+    category: "Product",
+    output: "image",
+    channels: ["ui", "mcp"],
+    art: "/art/image-edit.webp",
+    model: "marketing-studio/image",
+    sample: { prompt: "cost preview", image_urls: ["https://example.com/a.png"], resolution: "2k", aspect_ratio: "3:4" },
+    uiHref: studioHref("image", "create", "edit", "marketing-studio/image"),
+    ui: [
+      { title: l("Abre Imagen › Editar imagen", "Open Image › Edit image"), body: l("Elige Marketing Studio en el selector de modelo y sube la foto del producto (mejor sobre fondo liso).", "Pick Marketing Studio in the model chip and upload the product photo (ideally on a plain background).") },
+      { title: l("Describe la escena", "Describe the scene"), body: l("Superficie, luz, ambiente y formato del anuncio. Di que el producto no cambia: forma, etiqueta y colores.", "Surface, light, mood and ad format. Say the product must not change: shape, label and colors.") },
+      { title: l("Formato y resolución", "Format and resolution"), body: l("3:4 o 4:5 para el feed, 9:16 para historias. 2K basta para redes.", "3:4 or 4:5 for the feed, 9:16 for stories. 2K is enough for social.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Desde la Biblioteca, «Usar en…» la lleva a Video para animarla.", "From the Library, “Use in…” takes it to Video to animate it.") },
+    ],
+    ask: l(
+      "Con ./lata.png crea tres imágenes de anuncio: sobre hielo picado, en una mesa de picnic al atardecer y flotando con gotas de agua. 3:4, sin texto. Cotiza primero.",
+      "Using ./can.png create three ad images: on crushed ice, on a picnic table at sunset and floating with water droplets. 3:4, no text. Quote first.",
+    ),
+    mcp: [
+      { title: l("Sube el producto", "Upload the product"), tool: "upload_media" },
+      { title: l("Lee las notas del modelo", "Read the model notes"), body: l("Marketing Studio acepta hasta 16 imágenes de referencia.", "Marketing Studio takes up to 16 reference images."), tool: "get_model" },
+      { title: l("Cotiza las escenas", "Quote the scenes"), tool: "generate_batch (dry_run)" },
+      { title: l("Genera con tu OK y descarga", "Generate on your OK and download"), tool: "generate_batch → wait_generations → download_outputs" },
+    ],
+    prompts: [
+      { label: l("Hielo", "Ice"), text: "The product from the reference image resting on crushed ice, condensation droplets, cold blue rim light, dark background, commercial beverage photography, keep the product shape, label and colors exactly the same, no text" },
+      { label: l("Picnic", "Picnic"), text: "The product from the reference image on a wooden picnic table at golden hour, blurred friends laughing in the background, warm lifestyle campaign photo, keep the label unchanged, no text" },
+      { label: l("Flotando", "Floating"), text: "The product from the reference image floating in mid air with water splashes frozen around it, bright seamless color background, high-speed flash photography, keep the label unchanged, no text" },
+    ],
+    tips: [
+      l("Pide siempre que la etiqueta y los colores no cambien: es lo que más se deforma.", "Always ask to keep the label and colors unchanged: it is what distorts most."),
+      l("Para muchas variantes, cambia solo la escena y deja igual el resto del prompt.", "For many variants, change only the scene and keep the rest of the prompt the same."),
+    ],
+  },
+  {
+    slug: "director-scene",
+    title: l("Escena con controles de director", "Scene with director controls"),
+    tagline: l("Género, lente, cámara, época y paleta de color como en un set, con Cinema Studio 4.0.", "Genre, lens, camera, era and color palette like on set, with Cinema Studio 4.0."),
+    category: "Cinematic",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/text-to-video.webp",
+    model: "higgsfield/cinema-studio/4.0",
+    sample: { prompt: "cost preview", duration: 5, resolution: "480p", aspect_ratio: "21:9", genre: "noir", camera_lens: "anamorphic", generate_audio: false },
+    uiHref: studioHref("video", "create", "references", "higgsfield/cinema-studio/4.0"),
+    ui: [
+      { title: l("Abre Video › Referencias con Cinema Studio 4.0", "Open Video › References with Cinema Studio 4.0"), body: l("Sin referencias funciona como texto a video; con imágenes, videos o audio usa tus referencias (hasta 30 imágenes).", "Without references it works as text to video; with images, videos or audio it follows your references (up to 30 images).") },
+      { title: l("Elige los controles", "Pick the controls"), body: l("Género, época, cámara (35 mm, 8 mm, DV), lente, apertura, movimiento (dolly, crane, bullet time…), luz, ritmo y una de sus 50 paletas. Deja vacío lo que quieras que decida el director.", "Genre, era, camera (35mm, 8mm, DV), lens, aperture, move (dolly, crane, bullet time…), light, pacing and one of its 50 palettes. Leave empty whatever you want the director to choose.") },
+      { title: l("Escribe solo la acción", "Write only the action"), body: l("Quién, dónde y qué pasa. El estilo ya lo ponen los controles.", "Who, where and what happens. The controls already set the style.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Hasta 30 s por clip. Prueba con 5 s a 480p.", "Up to 30 s per clip. Test with 5 s at 480p.") },
+    ],
+    ask: l(
+      "Hazme una escena noir de 8 s en 21:9: un detective enciende un cigarro bajo la lluvia. Lente anamórfica, cámara de 35 mm, dolly-in, época de los 60. Cotiza primero.",
+      "Make me an 8 s noir scene in 21:9: a detective lights a cigarette in the rain. Anamorphic lens, 35mm film camera, dolly-in, 1960s. Quote first.",
+    ),
+    mcp: [
+      { title: l("Lee los controles", "Read the controls"), body: l("El agente ve los valores válidos de género, lente, movimiento y paleta.", "The agent sees the valid values for genre, lens, move and palette."), tool: "get_model" },
+      { title: l("Cotiza", "Quote"), tool: "estimate_cost" },
+      { title: l("Genera con tu OK", "Generate on your OK"), tool: "generate → get_generation" },
+      { title: l("Descarga", "Download"), tool: "download_outputs" },
+    ],
+    prompts: [
+      { label: l("Detective noir", "Noir detective"), text: "A detective in a wet trench coat lights a cigarette under a flickering street lamp, rain pouring, he looks up as a car passes" },
+      { label: l("Cocina de los 80", "80s kitchen"), text: "A family argues around a small kitchen table, the youngest kid quietly steals the last pancake" },
+      { label: l("Persecución", "Chase"), text: "A courier on a bicycle weaves through traffic in a crowded market, chased by two men on foot" },
+    ],
+    tips: [
+      l("No escribas «auto»: deja el campo vacío para que el director elija.", "Don't write “auto”: leave the field empty and the director chooses."),
+      l("Para citar una referencia en el prompt usa <<<image_1>>>, <<<video_1>>>…", "To cite a reference in the prompt use <<<image_1>>>, <<<video_1>>>…"),
+    ],
+  },
+  {
+    slug: "asset-first-spot",
+    title: l("Spot cinematográfico con hojas de referencia", "Cinematic spot from reference sheets"),
+    tagline: l("Primero personaje, producto y lugar sobre fondo gris; luego el plano con un prompt por bloques.", "First the character, product and location on a grey backdrop; then the shot with a block prompt."),
+    category: "Cinematic",
+    output: "video",
+    channels: ["mcp", "ui"],
+    art: "/art/references.webp",
+    model: "bytedance/seedance-2.5/reference-to-video",
+    sample: { prompt: "cost preview", image_urls: ["https://example.com/a.png", "https://example.com/b.png"], duration: 10, resolution: "720p", aspect_ratio: "16:9" },
+    costNote: l("Solo el video. Las hojas de referencia son imágenes de céntimos y se cotizan antes.", "Video only. The reference sheets are cent-level images and are quoted first."),
+    uiHref: studioHref("video", "create", "references", "bytedance/seedance-2.5/reference-to-video"),
+    ui: [
+      { title: l("Crea las hojas", "Make the sheets"), body: l("En Imagen, genera el personaje (frente, espalda, primer plano), el producto (frente, perfil, dorso) y el lugar, siempre «on a seamless neutral grey studio backdrop».", "In Image, generate the character (front, back, close-up), the product (front, side, back) and the location, always “on a seamless neutral grey studio backdrop”.") },
+      { title: l("Llévalas a Referencias", "Take them to References"), body: l("Desde la Biblioteca, «Usar en…» › Referencia de video. Seedance 2.5 admite hasta 30 imágenes.", "From the Library, “Use in…” › Video reference. Seedance 2.5 takes up to 30 images.") },
+      { title: l("Escribe el prompt por bloques", "Write a block prompt"), body: l("Contexto, referencias activas, cámara y óptica, acción segundo a segundo, luz y audio. Usa el prompt de abajo como plantilla.", "Context, active references, camera and optics, second-by-second action, light and audio. Use the prompt below as a template.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Hasta 30 s por clip. Repite el bloque de referencias en cada plano para mantener la coherencia.", "Up to 30 s per clip. Repeat the reference block in every shot to stay consistent.") },
+    ],
+    ask: l(
+      "Quiero un spot de 15 s de un reloj de buceo: crea hojas de referencia del buzo, el reloj y un barco al amanecer sobre fondo gris, y luego el plano con Seedance 2.5 usando un prompt por bloques. Cotiza cada paso.",
+      "I want a 15 s spot for a dive watch: create reference sheets of the diver, the watch and a boat at dawn on a grey backdrop, then the shot with Seedance 2.5 using a block prompt. Quote every step.",
+    ),
+    mcp: [
+      { title: l("Cotiza y genera las hojas", "Quote and make the sheets"), body: l("Un ítem por hoja, con el mismo fondo gris.", "One item per sheet, same grey backdrop."), tool: "generate_batch → wait_generations" },
+      { title: l("Encadena las salidas", "Chain the outputs"), body: l("Toma la URL de cada hoja sin descargarla.", "Takes each sheet's URL without downloading it."), tool: "use_output" },
+      { title: l("Escribe y cotiza el plano", "Write and quote the shot"), body: l("El agente arma el prompt por bloques y lo cotiza con las referencias.", "The agent builds the block prompt and quotes it with the references."), tool: "estimate_cost" },
+      { title: l("Genera con tu OK", "Generate on your OK"), tool: "generate → get_generation → download_outputs" },
+    ],
+    prompts: [
+      { label: l("Hoja de personaje", "Character sheet"), text: "Character reference sheet of a professional diver in a black wetsuit: full-body front view, back view and head close-up, on a seamless neutral grey studio backdrop, even soft light, photoreal" },
+      { label: l("Prompt por bloques", "Block prompt"), text: "SCENE CONTEXT: 15 s premium spot for a dive watch. ACTIVE REFERENCES: image 1 is the diver, image 2 is the watch, image 3 is the boat. OPTICS: 35mm, Kodak 500T look, handheld with organic shake. ACTION TIMING: 0-4 s the diver checks the watch on the deck at dawn; 4-9 s he rolls backwards into the sea; 9-15 s underwater close-up of the watch glowing. PHYSICS: real water splashes and bubbles. LIGHTING: low warm sun, then cold blue underwater. AUDIO: SFX only, no score. LOCKS: no CGI, photoreal only, the watch keeps its exact design" },
+    ],
+    tips: [
+      l("Es la receta de los anuncios de coches y cortos 4K del blog de Higgsfield: los assets sobre gris fijan la identidad.", "It's the recipe behind the car commercials and 4K shorts on Higgsfield's blog: grey-backdrop assets lock the identity."),
+      l("Pídele a tu agente que escriba el bloque ACTION TIMING segundo a segundo: es lo que más controla el resultado.", "Ask your agent to write the ACTION TIMING block second by second: it controls the result the most."),
+    ],
+  },
+  {
+    slug: "kling-elements",
+    title: l("Personaje recurrente con elementos de Kling", "Recurring character with Kling elements"),
+    tagline: l("Guarda un personaje o producto una vez y cítalo como @nombre en todos tus videos de Kling 3.0.", "Save a character or product once and cite it as @name in all your Kling 3.0 videos."),
+    category: "Cinematic",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/frames.webp",
+    model: "kling-video/v3.0/std/image-to-video",
+    sample: { prompt: "cost preview", image_url: "https://example.com/a.png", duration: 5, sound: "off" },
+    uiHref: studioHref("video", "create", "references", "kling-video/v3.0/std/image-to-video"),
+    ui: [
+      { title: l("Crea el elemento", "Create the element"), body: l("En Elementos, sube de 2 a 4 fotos JPG o PNG del personaje o producto y ponle un nombre corto.", "In Elements, upload 2 to 4 JPG or PNG photos of the character or product and give it a short name.") },
+      { title: l("Úsalo en el estudio", "Use it in the studio"), body: l("Desde el elemento, «Usar en el estudio» abre Kling 3.0 con él elegido (hasta 3 por video).", "From the element, “Use in the studio” opens Kling 3.0 with it selected (up to 3 per video).") },
+      { title: l("Cítalo en el prompt", "Cite it in the prompt"), body: l("Escribe @nombre donde aparece. Añade el fotograma inicial: Kling 3.0 parte de una imagen.", "Write @name where it appears. Add the start frame: Kling 3.0 starts from an image.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Los elementos salen solo por APIMart o KIE, que suelen ser más baratos que Higgsfield.", "Elements run only on APIMart or KIE, which are usually cheaper than Higgsfield.") },
+    ],
+    ask: l(
+      "Crea un elemento «mila» con las fotos de ./mila y haz un video de 5 s con Kling 3.0 donde @mila pasea por un mercado, partiendo de ./mercado.png. Cotiza primero.",
+      "Create an element “mila” with the photos in ./mila and make a 5 s Kling 3.0 video where @mila walks through a market, starting from ./market.png. Quote first.",
+    ),
+    mcp: [
+      { title: l("Crea el elemento", "Create the element"), body: l("Con 2 a 4 imágenes; devuelve un id el_…", "With 2 to 4 images; returns an el_… id."), tool: "create_element" },
+      { title: l("Sube el fotograma inicial", "Upload the start frame"), tool: "upload_media" },
+      { title: l("Cotiza", "Quote"), body: l("Pone el id en elements y cita @mila en el prompt; compara APIMart y KIE.", "Puts the id in elements and cites @mila in the prompt; compares APIMart and KIE."), tool: "estimate_cost" },
+      { title: l("Genera con tu OK", "Generate on your OK"), tool: "generate → get_generation → download_outputs" },
+      { title: l("Reutilízalo", "Reuse it"), body: l("El elemento queda guardado para los siguientes videos.", "The element stays saved for the next videos."), tool: "list_elements" },
+    ],
+    prompts: [
+      { label: l("Mercado", "Market"), text: "@mila walks through a busy fruit market, picks up an orange and smiles at the vendor, handheld camera following at shoulder height" },
+      { label: l("Producto en mano", "Product in hand"), text: "@mila holds @bottle up to the camera in a sunny park and takes a sip, slow push-in" },
+      { label: l("Multiplano", "Multi-shot"), text: "Wide shot of @mila entering a café, then medium shot of her ordering at the counter, then close-up of her first sip" },
+    ],
+    tips: [
+      l("Las fotos del elemento con ángulos distintos (frente, perfil, cuerpo entero) dan más coherencia.", "Element photos from different angles (front, side, full body) give more consistency."),
+      l("Con multi_shots, Kling 3.0 hace hasta 6 planos en una sola generación.", "With multi_shots, Kling 3.0 makes up to 6 shots in a single generation."),
+    ],
+  },
+  {
+    slug: "genjutsu-recast",
+    title: l("Cambia el reparto de un video", "Recast a video"),
+    tagline: l("Conserva el movimiento, la cámara y el ritmo de un clip y cambia quién sale y dónde.", "Keep a clip's motion, camera and timing, and change who is in it and where."),
+    category: "Motion",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/motion.webp",
+    model: "higgsfiled/genjutsu/motion-transfer/v1.0",
+    sample: { video_url: "https://example.com/a.mp4", image_urls: ["https://example.com/a.png"], resolution: "480p" },
+    uiHref: studioHref("video", "genjutsu", "motion", "higgsfiled/genjutsu/motion-transfer/v1.0"),
+    ui: [
+      { title: l("Abre Genjutsu › Transferir movimiento", "Open Genjutsu › Motion transfer"), body: l("Sube el clip original, de 4 a 30 s.", "Upload the original clip, 4 to 30 s.") },
+      { title: l("Añade el nuevo reparto", "Add the new cast"), body: l("Hasta 8 imágenes: personajes, lugar o vestuario.", "Up to 8 images: characters, location or wardrobe.") },
+      { title: l("Prompt opcional", "Optional prompt"), body: l("Úsalo para el estilo (anime, live-action, otra época). Vacío también funciona.", "Use it for the style (anime, live-action, another era). Empty works too.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Se cobra por la duración del clip: recórtalo al mejor tramo.", "It's priced by the clip length: trim it to the best part.") },
+    ],
+    ask: l(
+      "Toma ./baile.mp4 y rehazlo con el personaje de ./robot.png en una azotea al atardecer, conservando el movimiento. 480p. Cotiza con la duración real.",
+      "Take ./dance.mp4 and redo it with the character in ./robot.png on a rooftop at sunset, keeping the motion. 480p. Quote with the real length.",
+    ),
+    mcp: [
+      { title: l("Sube el clip y el reparto", "Upload the clip and the cast"), tool: "upload_media" },
+      { title: l("Cotiza con la duración", "Quote with the length"), tool: "estimate_cost (input_video_seconds)" },
+      { title: l("Genera con tu OK", "Generate on your OK"), tool: "generate → get_generation" },
+      { title: l("Descarga", "Download"), tool: "download_outputs" },
+    ],
+    prompts: [
+      { label: l("De live-action a anime", "Live-action to anime"), text: "Recreate the scene as a hand drawn anime with the character from the reference, keep every movement and the camera" },
+      { label: l("Cambio de vestuario", "Wardrobe change"), text: "Same person and motion, now wearing the outfit from the reference image, keep lighting and camera" },
+      { label: l("Otro mercado", "Another market"), text: "Recast the ad with the person from the reference image in a Tokyo street at night, keep the timing of every gesture" },
+    ],
+    tips: [
+      l("Higgsfield lo usa para adaptar un mismo anuncio a otros mercados sin volver a rodar.", "Higgsfield uses it to adapt one ad to other markets without reshooting."),
+      l("Si solo quieres cambiar un objeto, usa el Multiplicador de anuncios (Cambiar objetos).", "If you only want to swap one object, use the Ad multiplier (Objects swap)."),
+    ],
+  },
+  {
+    slug: "image-edit",
+    title: l("Edita una foto con instrucciones", "Edit a photo with instructions"),
+    tagline: l("Cambia el fondo, la ropa o un texto de una foto con una frase, sin máscaras.", "Change the background, the outfit or a text in a photo with one sentence, no masks."),
+    category: "Edit",
+    output: "image",
+    channels: ["ui", "mcp"],
+    art: "/art/video-edit.webp",
+    model: "alibaba/qwen-image-3/edit",
+    sample: { prompt: "cost preview", image_urls: ["https://example.com/a.png"], resolution: "1k" },
+    uiHref: studioHref("image", "create", "edit", "alibaba/qwen-image-3/edit"),
+    ui: [
+      { title: l("Abre Imagen › Editar imagen", "Open Image › Edit image"), body: l("Sube la foto. Puedes añadir hasta 2 referencias más (una prenda, un logo).", "Upload the photo. You can add up to 2 more references (a garment, a logo).") },
+      { title: l("Da una instrucción directa", "Give a direct instruction"), body: l("«Cambia el fondo por…», «Reemplaza la camiseta por…». Di qué debe quedar igual.", "“Change the background to…”, “Replace the T-shirt with…”. Say what must stay the same.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Cuesta céntimos: itera hasta que quede bien y luego anímala.", "It costs cents: iterate until it's right, then animate it.") },
+    ],
+    ask: l(
+      "Edita ./retrato.jpg: cambia el fondo por un café de París de noche y conserva la cara y la luz. Cotiza primero.",
+      "Edit ./portrait.jpg: change the background to a Paris café at night and keep the face and the light. Quote first.",
+    ),
+    mcp: [
+      { title: l("Sube la foto", "Upload the photo"), tool: "upload_media" },
+      { title: l("Elige el modelo de edición", "Pick the edit model"), body: l("Qwen Image 3, Grok Imagine o Ideogram 4 editan imágenes.", "Qwen Image 3, Grok Imagine or Ideogram 4 can edit images."), tool: "find_models (edit)" },
+      { title: l("Cotiza y genera con tu OK", "Quote and generate on your OK"), tool: "estimate_cost → generate → get_generation" },
+      { title: l("Descarga", "Download"), tool: "download_outputs" },
+    ],
+    prompts: [
+      { label: l("Fondo", "Background"), text: "Change the background to a Paris café at night with warm string lights, keep the person, the face and the lighting on the subject unchanged" },
+      { label: l("Ropa", "Outfit"), text: "Replace the T-shirt with a black leather jacket, keep the pose, the face and the background" },
+      { label: l("Texto del póster", "Poster text"), text: "Replace the headline on the poster with the text \"OPEN LATE\" in the same font style and color, keep everything else" },
+    ],
+    tips: [
+      l("Una sola instrucción por edición: encadena varias en lugar de pedirlo todo a la vez.", "One instruction per edit: chain several instead of asking for everything at once."),
+      l("Para colocar tu producto en una escena de anuncio, usa Marketing Studio.", "To place your product in an ad scene, use Marketing Studio."),
+    ],
+  },
+  {
+    slug: "talking-avatar",
+    title: l("Un avatar que habla con tu guion", "An avatar that speaks your script"),
+    tagline: l("Escribe el texto, elige una voz de ElevenLabs y haz que una foto lo diga.", "Write the text, pick an ElevenLabs voice and make a photo say it."),
+    category: "Animate",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/text-to-image.webp",
+    model: "wan/v2.7/image-to-video",
+    sample: { prompt: "cost preview", image_url: "https://example.com/a.png", audio_url: "https://example.com/a.mp3", duration: 10, resolution: "720p" },
+    costNote: l("Solo el video. La voz cuesta aparte (0,10 USD por 1.000 caracteres a precio de lista) y se cotiza antes.", "Video only. The voice is extra (0.10 USD per 1,000 characters at list price) and is quoted first."),
+    uiHref: studioHref("video", "create", "frames", "wan/v2.7/image-to-video"),
+    ui: [
+      { title: l("Genera la voz", "Generate the voice"), body: l("En Audio › Texto a voz, escribe el guion y elige una voz. Descarga el MP3 desde la Biblioteca.", "In Audio › Text to speech, write the script and pick a voice. Download the MP3 from the Library.") },
+      { title: l("Abre Video › Inicio y final con Wan 2.7", "Open Video › Start & End with Wan 2.7"), body: l("Sube la foto como fotograma inicial y el MP3 como audio: el video sigue esa voz.", "Upload the photo as the start frame and the MP3 as audio: the video follows that voice.") },
+      { title: l("Ajusta la duración al audio", "Match the length to the audio"), body: l("Hasta 15 s por clip; divide guiones más largos.", "Up to 15 s per clip; split longer scripts.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Si prefieres, Seedance 2.5 Referencias también acepta audio de referencia.", "If you prefer, Seedance 2.5 References also takes reference audio.") },
+    ],
+    ask: l(
+      "Haz que ./presentadora.png diga este texto con una voz femenina cálida en español: «Hoy te enseño tres trucos para…». Cotiza la voz y el video antes de generar.",
+      "Make ./host.png say this text with a warm female voice: “Today I'll show you three tricks to…”. Quote the voice and the video before generating.",
+    ),
+    mcp: [
+      { title: l("Elige la voz", "Pick the voice"), tool: "list_voices" },
+      { title: l("Cotiza y genera la voz", "Quote and make the voice"), tool: "text_to_speech → get_generation" },
+      { title: l("Encadena el audio", "Chain the audio"), body: l("Toma la URL del MP3 sin descargarlo.", "Takes the MP3 URL without downloading it."), tool: "use_output" },
+      { title: l("Sube la foto y cotiza el video", "Upload the photo and quote the video"), body: l("Wan 2.7 con image_url y audio_url.", "Wan 2.7 with image_url and audio_url."), tool: "upload_media → estimate_cost" },
+      { title: l("Genera con tu OK", "Generate on your OK"), tool: "generate → get_generation → download_outputs" },
+    ],
+    prompts: [
+      { label: l("Presentadora", "Host"), text: "The woman talks directly to the camera with natural lip movement matching the audio, small head nods and hand gestures, static medium shot, soft studio light" },
+      { label: l("Mascota de marca", "Brand mascot"), text: "The cartoon mascot speaks to the camera with expressive mouth movement synced to the audio, bouncy friendly gestures, plain background" },
+      { label: l("Voz (texto a voz)", "Voice (text to speech)"), text: "[excited] Today I'll show you three tricks to keep your plants alive. [pause] Number one is the one nobody tells you." },
+    ],
+    tips: [
+      l("Con eleven_v4 y eleven_v3, etiquetas como [excited] o [whispers] cambian la interpretación.", "With eleven_v4 and eleven_v3, tags like [excited] or [whispers] change the delivery."),
+      l("Funciona mejor una foto de frente, con la boca visible y cerrada.", "A front-facing photo with a visible, closed mouth works best."),
+      l("La página Voces tiene voces gratis en español (edge-tts) para probar el guion antes de pagar.", "The Voices page has free Spanish voices (edge-tts) to test the script before paying."),
+    ],
+  },
+  {
+    slug: "soundtrack",
+    title: l("Narración, música y efectos para tu video", "Narration, music and sound effects for your video"),
+    tagline: l("Locución, música original y efectos de ElevenLabs, guardados en tu sonoteca para reutilizarlos.", "Voice-over, original music and sound effects from ElevenLabs, saved to your sound library for reuse."),
+    category: "Audio",
+    output: "audio",
+    channels: ["ui", "mcp"],
+    art: "/art/use-cases/soundtrack.svg",
+    model: "elevenlabs/music",
+    audio: { service: "music", body: { prompt: "cost preview", seconds: 30, force_instrumental: true } },
+    costNote: l("Solo una pista de música de 30 s. La narración y los efectos se cotizan aparte, antes de generarlos.", "One 30 s music track only. Narration and effects are quoted separately, before you generate them."),
+    uiHref: "/audio?tab=music",
+    ui: [
+      { title: l("Busca primero en la Sonoteca", "Search the Sound library first"), body: l("Reutilizar un sonido que ya tienes es gratis.", "Reusing a sound you already have is free.") },
+      { title: l("Música", "Music"), body: l("Audio › Música: género, tempo, ánimo e instrumentos. Marca instrumental si va a sonar una voz encima.", "Audio › Music: genre, tempo, mood and instruments. Tick instrumental if a voice will play on top.") },
+      { title: l("Efectos", "Sound effects"), body: l("Audio › Efectos: describe el sonido en inglés, de 0,5 a 30 s; puede ser un bucle.", "Audio › Sound effects: describe the sound in English, 0.5 to 30 s; it can loop.") },
+      { title: l("Narración", "Narration"), body: l("Audio › Texto a voz con una voz de ElevenLabs, o gratis con las voces en español de la página Voces.", "Audio › Text to speech with an ElevenLabs voice, or free with the Spanish voices on the Voices page.") },
+      { title: l("Aísla la voz si hace falta", "Isolate the voice if needed"), body: l("Audio › Aislar voz quita el ruido y la música de una grabación.", "Audio › Voice isolator removes noise and music from a recording.") },
+    ],
+    ask: l(
+      "Para mi video de 30 s de una heladería: busca en la sonoteca algo que sirva; si no, crea una música alegre instrumental de 30 s, un efecto de cuchara raspando helado y una locución en español con este guion. Cotiza todo antes.",
+      "For my 30 s ice cream shop video: search the sound library for something that fits; if not, create a happy 30 s instrumental track, a spoon scraping ice cream effect and a voice-over with this script. Quote everything first.",
+    ),
+    mcp: [
+      { title: l("Busca en la sonoteca", "Search the library"), body: l("Gratis: lo ya generado (o importado de ElevenLabs) se reutiliza.", "Free: anything already generated (or imported from ElevenLabs) is reused."), tool: "list_sounds" },
+      { title: l("Cotiza y crea la música", "Quote and compose the music"), tool: "compose_music" },
+      { title: l("Cotiza y crea el efecto", "Quote and make the effect"), tool: "sound_effect" },
+      { title: l("Cotiza y crea la locución", "Quote and make the voice-over"), tool: "list_voices → text_to_speech" },
+      { title: l("Descarga y etiqueta", "Download and label"), body: l("Guarda los MP3 y ponles categoría y etiquetas para encontrarlos después.", "Saves the MP3s and gives them a category and tags to find them later."), tool: "download_outputs → label_sound" },
+    ],
+    prompts: [
+      { label: l("Música alegre", "Happy music"), text: "Upbeat summer pop instrumental, ukulele and claps, 110 bpm, bright and playful, clean ending" },
+      { label: l("Tensión", "Tension"), text: "Dark cinematic underscore, low drones and slow heartbeat percussion, building tension, no melody" },
+      { label: l("Efecto", "Sound effect"), text: "Metal spoon scraping frozen ice cream from a tub, close microphone, crisp" },
+    ],
+    tips: [
+      l("Los efectos y la música funcionan mejor descritos en inglés.", "Effects and music work best described in English."),
+      l("Todo lo que generas queda en la Sonoteca, clasificado solo, para el próximo video.", "Everything you generate lands in the Sound library, auto-classified, for the next video."),
+    ],
+  },
+  {
+    slug: "voice-swap",
+    title: l("Cambia la voz de un video", "Change the voice in a video"),
+    tagline: l("Otra voz con las mismas palabras, ritmo y emoción, en todo el clip o solo en un tramo; con efecto de monstruo o fantasma si quieres.", "Another voice with the same words, timing and emotion, in the whole clip or just a section; with a monster or ghost effect if you want."),
+    category: "Audio",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/use-cases/voice-swap.svg",
+    model: "elevenlabs/voice-changer",
+    uiHref: "/voice",
+    ui: [
+      { title: l("Abre Voz", "Open Voice"), body: l("Sube un video o elige una generación de la Biblioteca.", "Upload a video or pick a generation from the Library.") },
+      { title: l("Marca el tramo", "Mark the section"), body: l("Inicio y fin en segundos; vacío = todo el clip. Solo se cobra el tramo.", "Start and end in seconds; empty = the whole clip. Only the section is charged.") },
+      { title: l("Elige la voz y el efecto", "Pick the voice and the effect"), body: l("Una voz de tu cuenta o de la biblioteca pública, y si quieres un efecto: grave, monstruo o fantasma.", "A voice from your account or the public library, and an optional effect: deep, monster or ghost.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("El precio aparece al cargar el video (0,12 USD por minuto a precio de lista).", "The price appears once the video is loaded (0.12 USD per minute at list price).") },
+    ],
+    ask: l(
+      "En ./zombie.mp4, cambia la voz del segundo 3 al 9 por una voz grave con efecto de monstruo y deja un poco del audio original de fondo. Cotiza primero.",
+      "In ./zombie.mp4, change the voice from second 3 to 9 to a deep voice with a monster effect and keep a little of the original audio underneath. Quote first.",
+    ),
+    mcp: [
+      { title: l("Elige la voz", "Pick the voice"), tool: "list_voices" },
+      { title: l("Cotiza el tramo", "Quote the section"), body: l("Sin quote_id devuelve el precio del tramo [start, end].", "Without quote_id it returns the price of the [start, end] section."), tool: "change_voice" },
+      { title: l("Genera con tu OK", "Generate on your OK"), body: l("La misma llamada con el quote_id.", "The same call with the quote_id."), tool: "change_voice → get_generation" },
+      { title: l("Descarga", "Download"), tool: "download_outputs" },
+    ],
+    prompts: [],
+    tips: [
+      l("Si la grabación tiene ruido o música, pásala antes por Aislar voz.", "If the recording has noise or music, run it through Voice isolator first."),
+      l("Con original_volume entre 0,1 y 0,3 queda algo del audio original y suena más natural.", "With original_volume between 0.1 and 0.3 some of the original audio remains and it sounds more natural."),
     ],
   },
   {

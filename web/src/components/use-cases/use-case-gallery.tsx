@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Bot, ImageIcon, MonitorPlay, Video } from "lucide-react";
+import { AudioLines, Bot, ImageIcon, MonitorPlay, Video } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -58,7 +58,7 @@ export function UseCaseGallery() {
 
       <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {shown.map((u) => {
-          const Kind = u.output === "image" ? ImageIcon : Video;
+          const Kind = u.output === "image" ? ImageIcon : u.output === "audio" ? AudioLines : Video;
           return (
             <button key={u.slug} type="button" onClick={() => select(u.slug)} className="group block text-left">
               <div className="grain relative aspect-[16/10] overflow-hidden rounded-[18px] bg-surface-3">

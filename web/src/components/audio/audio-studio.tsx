@@ -51,19 +51,21 @@ export function AudioStudio() {
     const tab = params.get("tab");
     return (SERVICES as string[]).includes(tab ?? "") ? (tab as AudioService) : "text-to-speech";
   });
+  // ?prompt= desde un caso de uso: rellena el texto del servicio con el que se abre.
+  const promptFor = (svc: AudioService) => (service === svc && !params.get("reuse") ? (params.get("prompt") ?? "") : "");
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   // Texto a voz
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => promptFor("text-to-speech"));
   const [voice, setVoice] = useState<Voice | null>(null);
   const [ttsModel, setTtsModel] = useState<(typeof TTS_MODELS)[number]>("eleven_v4");
   const [language, setLanguage] = useState<string | null>(null);
   // Efectos
-  const [sfx, setSfx] = useState("");
+  const [sfx, setSfx] = useState(() => promptFor("sound-effects"));
   const [sfxSeconds, setSfxSeconds] = useState(5);
   const [loop, setLoop] = useState(false);
   const [influence, setInfluence] = useState(0.3);
   // Música
-  const [music, setMusic] = useState("");
+  const [music, setMusic] = useState(() => promptFor("music"));
   const [musicSeconds, setMusicSeconds] = useState(30);
   const [instrumental, setInstrumental] = useState(true);
   // Aislar voz

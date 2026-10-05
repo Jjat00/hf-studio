@@ -84,7 +84,7 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   gratis) ordenados por lo que son (voces, gritos, risas, criaturas, ambientes, golpes, objetos y pasos, transiciones,
   música) con título y etiquetas editables, para reutilizarlos sin volver a pagar.
 - **Presets** (recetas con variables), **lotes** con cotización total, **recomendador** de modelos en lenguaje
-  natural (es/en) y **12 casos de uso** con tutorial paso a paso para la UI y para los agentes.
+  natural (es/en) y **22 casos de uso** con tutorial paso a paso para la UI y para los agentes.
 - **Interfaz bilingüe:** español por defecto e inglés con un clic.
 
 | Casos de uso | Catálogo de modelos |
@@ -174,7 +174,7 @@ Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nom
 - **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave
   `hfs_…`. La clave nunca llega al cliente.
 - **Casos de uso** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): `?case=<slug>` abre uno y «Usar en el
-  estudio» abre el estudio con `?prompt=` ya relleno.
+  estudio» abre el estudio (o Audio) con `?prompt=` ya relleno.
 - **Idiomas:** el idioma se guarda en la cookie `hfs-lang`, así que las URLs no cambian. Los textos están en
   `web/src/lib/i18n/dictionaries.ts` y los datos bilingües usan `l("es", "en")`. La API y el MCP siguen en inglés,
   así que la UI traduce en el cliente los presets de serie, las frases de costo y los nombres de flujo del

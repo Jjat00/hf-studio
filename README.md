@@ -95,7 +95,7 @@ the cheapest provider that offers **the exact same model and settings**:
   kind (voices, screams, laughs, creatures, ambience, impacts, foley, transitions, music) with editable titles and tags,
   so you can reuse them instead of paying again.
 - **Presets** (recipes with variables), **batches** with a total quote, a natural-language **model recommender**
-  (English and Spanish) and **12 use cases** with step-by-step tutorials for the UI and for agents.
+  (English and Spanish) and **22 use cases** with step-by-step tutorials for the UI and for agents.
 - **Bilingual UI:** Spanish by default, English one click away.
 
 | Use cases | Model catalog |

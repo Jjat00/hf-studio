@@ -33,10 +33,12 @@ function CostHint({ useCase }: { useCase: UseCase }) {
   const { t, pick, locale } = useI18n();
   const c = t.useCases;
   const [state, setState] = useState<{ value: Estimate | null; failed: boolean }>({ value: null, failed: false });
+  // Sin entrada de ejemplo (p. ej. cambio de voz) el precio solo existe con el archivo del usuario.
+  const quotable = !!(useCase.sample || useCase.audio);
   useEffect(() => {
     let alive = true;
-    studio
-      .estimate(useCase.model, useCase.sample)
+    if (!useCase.sample && !useCase.audio) return;
+    (useCase.audio ? studio.audioEstimate(useCase.audio.service, useCase.audio.body) : studio.estimate(useCase.model, useCase.sample!))
       .then((value) => alive && setState({ value, failed: false }))
       .catch(() => alive && setState({ value: null, failed: true }));
     return () => {
@@ -46,7 +48,8 @@ function CostHint({ useCase }: { useCase: UseCase }) {
   const e = state.value;
   let text = c.checkingPrice;
   let note = useCase.costNote && pick(useCase.costNote);
-  if (state.failed) text = c.priceNA;
+  if (!quotable) text = c.pricedAfterMedia;
+  else if (state.failed) text = c.priceNA;
   else if (e?.kind === "exact" && e.usd !== null) text = formatUsd(e.usd);
   else if (e?.kind === "approx" && e.usd !== null && e.missing.length === 0) text = approxUsd(e.usd);
   else if (e?.usd != null) {
@@ -54,7 +57,7 @@ function CostHint({ useCase }: { useCase: UseCase }) {
     text = c.from(formatUsd(e.usd));
     note = c.plusMissing(costMissing(e.missing, locale));
   } else if (e) text = c.pricedAfterMedia;
-  if (state.failed || (e && e.usd == null)) note ??= c.studioShows;
+  if (state.failed || (e && e.usd == null) || !quotable) note ??= c.studioShows;
   return (
     <div className="rounded-2xl border border-line bg-surface-2 px-4 py-3">
       <p className="text-[13px] text-fg-3">{c.exampleCost}</p>
@@ -127,7 +130,8 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
       opener?.focus?.();
     };
   }, []);
-  const tryHref = (prompt?: string) => (u.uiHref ? `${u.uiHref}${prompt ? `&${new URLSearchParams({ prompt })}` : ""}` : undefined);
+  const tryHref = (prompt?: string) =>
+    u.uiHref ? `${u.uiHref}${prompt ? `${u.uiHref.includes("?") ? "&" : "?"}${new URLSearchParams({ prompt })}` : ""}` : undefined;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={title}>
@@ -226,6 +230,7 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
             </div>
           </section>
 
+          {u.prompts.length > 0 && (
           <section>
             <h3 className="headline text-[22px]">{c.examplePrompts}</h3>
             {c.promptsNote && <p className="mt-1 text-[13px] text-fg-3">{c.promptsNote}</p>}
@@ -253,6 +258,7 @@ export function UseCasePanel({ useCase: u, onClose }: { useCase: UseCase; onClos
               ))}
             </div>
           </section>
+          )}
 
           <section className="rounded-2xl bg-surface-2 p-5">
             <p className="flex items-center gap-2 text-sm font-semibold">
