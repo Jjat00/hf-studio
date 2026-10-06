@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 import httpx
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from .audio import studio_notes
 from .catalog import Catalog, get_catalog
@@ -35,6 +37,7 @@ from .db import (
     Preset,
     Sound,
     Space,
+    SpaceRun,
     Upload,
     hash_token,
     init_db,
@@ -94,6 +97,16 @@ from .sounds import clean_tags as clean_sound_tags
 from .sounds import history_kind as sound_history_kind
 from .sounds import register_job as register_sound
 from .sounds import title_from as sound_title
+from .space_runs import (
+    Hooks,
+    NodeInputError,
+    SpaceRunner,
+    is_run_key,
+    resolve_input,
+    run_scope,
+    selected_run,
+    spend_of,
+)
 from .spaces import GraphError, check_graph, check_values, empty_graph, input_kinds
 from .voice import (
     VOICE_MODEL,
@@ -234,6 +247,19 @@ class SpaceUpdate(BaseModel):
     cover: str | None = Field(None, pattern=SPACE_COVER, description="Archivo local de una salida propia")
 
 
+class RunIn(BaseModel):
+    mode: str = Field(pattern="^(downstream|workflow)$")
+    node_id: str | None = Field(None, max_length=64, description="Nodo inicial (modo downstream)")
+    version: int = Field(ge=1, description="Versión guardada del Space; la corrida usa exactamente ese grafo")
+    dry_run: bool = Field(False, description="Solo cotiza cada paso y el total, sin gastar")
+    max_total_usd: float | None = Field(None, ge=0, description="Tope aprobado para toda la corrida")
+
+
+class RunApprove(BaseModel):
+    max_total_usd: float | None = Field(None, ge=0, description="Nuevo tope (debe cubrir el paso en pausa)")
+    accept_unknown: bool = Field(False, description="Acepta que el paso en pausa no tiene precio conocido")
+
+
 class EstimateIn(BaseModel):
     model: str
     input: dict[str, Any]
@@ -305,12 +331,15 @@ def create_app(
             await s.commit()
         if not settings.hf_configured:
             log.warning("Falta HF_API_KEY (o HF_API_KEY_ID + HF_API_KEY_SECRET): los envíos fallarán")
+        app.state.space_runner = SpaceRunner(app.state.sessions, space_hooks())
         if settings.worker_enabled:
             app.state.worker.start()
+            await app.state.space_runner.resume_all()
             refresher = asyncio.create_task(refresh_prices(app), name="hf-studio-prices")
             app.state.tasks.add(refresher)
             refresher.add_done_callback(app.state.tasks.discard)
         yield
+        await app.state.space_runner.stop()
         await app.state.worker.stop()
         for provider in app.state.providers.values():
             await provider.aclose()
@@ -906,6 +935,11 @@ def create_app(
             raise ServiceError(
                 409, "not_awaiting_approval", f"Generation is {job.status}; nothing to approve"
             )
+        if is_run_key(job.idempotency_key):
+            # Un paso de una corrida de Spaces se aprueba desde la corrida: ahí se aplica su tope total.
+            raise ServiceError(
+                409, "approve_in_run", "This step belongs to a space run; approve it from the run"
+            )
         index, version = job.plan_index, job.version
         fresh = await requote(request.app.state.router, catalog.get(job.model), job.input, job.plan[index])
         if fresh is None:
@@ -1022,10 +1056,14 @@ def create_app(
     reuse_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
 
     @app.post("/v1/generations/{job_id}/outputs/{index}/use", tags=["generaciones"])
-    async def use_output(job_id: str, index: int, request: Request, session: Session, owner: Owner) -> dict:
+    async def use_output(job_id: str, index: int, session: Session, owner: Owner) -> dict:
         """URL pública y vigente de una salida propia, para usarla como entrada de otra generación (fotograma
         inicial, referencia, video a editar…). Sube la copia local a Higgsfield (gratis) y la registra como
         subida propia; si ya se subió hace menos de 5 días, devuelve esa misma URL."""
+        return await fresh_output(session, owner, job_id, index)
+
+    async def fresh_output(session: AsyncSession, owner: ApiClient, job_id: str, index: int) -> dict:
+        """Núcleo de `use_output`; también lo usan las corridas de Spaces para encadenar pasos."""
         job = await get_owned_job(session, owner, job_id)
         entry = next((f for f in job.files or [] if f["index"] == index), None)
         if job.status != "completed" or entry is None:
@@ -1060,7 +1098,7 @@ def create_app(
                     )
                 if not matches_type(data[:16], content_type):
                     raise ServiceError(415, "content_mismatch", f"The output is not a valid {content_type}")
-                url = await request.app.state.hf.upload(data, content_type)
+                url = await app.state.hf.upload(data, content_type)
                 if row is not None:
                     # La copia anterior pasa a historial (sin `source`): su URL sigue siendo un medio propio
                     # mientras funcione (revisión 48). La vigente es una fila nueva.
@@ -1365,8 +1403,289 @@ def create_app(
     async def delete_space(space_id: str, session: Session, owner: Owner) -> None:
         """Borra el lienzo; sus generaciones siguen en el historial."""
         space = await get_owned_space(session, owner, space_id)
+        await session.execute(delete(SpaceRun).where(SpaceRun.space_id == space.id))
         await session.delete(space)
         await session.commit()
+
+    # --- Corridas de Spaces (fase 2) -------------------------------------------------------------
+
+    def space_hooks() -> Hooks:
+        """El motor de corridas usa las mismas piezas que generar a mano: cotizar con el router, aprobar con
+        `authorize` y crear con `create_generation` (idempotente por corrida y nodo)."""
+        fake_request = SimpleNamespace(app=app)  # make_plan/complete_hints solo leen app.state
+
+        async def plan(session: AsyncSession, owner: ApiClient, model_id: str, arguments: dict) -> Plan:
+            model = check_input(get_catalog(), model_id, arguments)
+            return await make_plan(fake_request, session, owner, model, arguments, {})
+
+        async def create(session, owner, model_id, arguments, key, plan, usd, reserve, accept_unknown) -> Job:
+            stored, approved_usd, approved_reserve = authorize(plan, usd, reserve, accept_unknown)
+            job, _ = await create_generation(
+                session, settings, get_catalog(), owner, model_id, arguments, key, allow_duplicate=True,
+                plan=stored, max_usd=approved_usd, max_reserve_usd=approved_reserve, commit=False,
+            )  # fmt: skip
+            return job
+
+        async def trusted(session: AsyncSession, owner: ApiClient, url: str) -> bool:
+            return await trusted_media(session, owner, url)
+
+        async def output_url(session: AsyncSession, owner: ApiClient, job_id: str) -> str:
+            try:
+                return (await fresh_output(session, owner, job_id, 0))["url"]
+            except ServiceError as exc:
+                raise NodeInputError(f"A connected step has no usable output ({exc.message})") from None
+
+        def schema(model_id: str) -> dict | None:
+            model = get_catalog().get(model_id)
+            return model["input_schema"] if model else None
+
+        def output_of(model_id: str) -> str | None:
+            model = get_catalog().get(model_id)
+            return model["output"] if model else None
+
+        return Hooks(plan, create, output_url, trusted, schema, output_of, app.state.worker.wake)
+
+    async def estimate_run(session: AsyncSession, owner: ApiClient, graph: dict, order: list[str]) -> dict:
+        """Cotiza cada paso con lo que hay hoy en el lienzo. Un paso que depende de otro de la corrida sin salida
+        todavía se cotiza al llegar (`later`); si entonces no cabe en el tope, la corrida se pausa."""
+        hooks = app.state.space_runner.hooks
+        nodes = {n["id"]: n for n in graph["nodes"]}
+        items, total, reserve_total = [], 0.0, 0.0
+        for node_id in order:
+            model_id = nodes[node_id]["data"]["model"]
+            item: dict[str, Any] = {"node_id": node_id, "model": model_id}
+            in_run = [e["source"] for e in graph["edges"] if e["target"] == node_id and e["source"] in order]
+            try:
+                arguments = await resolve_input(
+                    graph, node_id, hooks.schema(model_id) or {}, hooks.output_of,
+                    lambda src: selected_run(nodes[src]["data"]),
+                    lambda job_id: hooks.output_url(session, owner, job_id),
+                )  # fmt: skip
+                plan = await hooks.plan(session, owner, model_id, arguments)
+            except (NodeInputError, ServiceError, ProviderError) as exc:
+                message = str(getattr(exc, "message", None) or exc)
+                items.append({**item, "status": "later" if in_run else "error", "error": message})
+                continue
+            best = plan.best
+            if best is None:
+                items.append({**item, "status": "error", "error": estimate_body(plan)["basis"]})
+                continue
+            unknown = best.usd is None or bool(best.missing)
+            item.update(status="unknown" if unknown else "ok", usd=best.usd, reserve_usd=best.reserve_usd,
+                        provider=best.provider, kind=best.kind)  # fmt: skip
+            if not unknown:
+                total += spend_of(best.usd, best.reserve_usd)
+            reserve_total += best.reserve_usd or 0.0
+            items.append(item)
+        return {"steps": items, "total_usd": round(total, 6), "reserve_usd": round(reserve_total, 6),
+                "pending": sum(1 for i in items if i["status"] != "ok")}  # fmt: skip
+
+    async def get_owned_run(session: AsyncSession, owner: ApiClient, space_id: str, run_id: str) -> SpaceRun:
+        run = await session.get(SpaceRun, run_id)
+        if run is None or run.owner_id != owner.id or run.space_id != space_id:
+            raise ServiceError(404, "not_found", "Run not found")
+        return run
+
+    @app.post("/v1/spaces/{space_id}/runs", tags=["spaces"])
+    async def create_run(space_id: str, body: RunIn, session: Session, owner: Owner) -> JSONResponse:
+        """Corre un nodo y lo que depende de él, o todo el lienzo, en el servidor. Primero `dry_run` (precio de
+        cada paso y total); luego la misma petición con `max_total_usd`, el tope que aprobó el usuario."""
+        space = await get_owned_space(session, owner, space_id)
+        if body.version != space.version:
+            raise ServiceError(
+                409, "space_changed", "Save the space before running it", {"version": space.version}
+            )
+        try:
+            order = run_scope(space.graph, body.mode, body.node_id)
+        except NodeInputError as exc:
+            raise ServiceError(422, "invalid_run", str(exc)) from None
+        if not order:
+            raise ServiceError(422, "nothing_to_run", "There are no generation nodes to run")
+        if body.dry_run:
+            return JSONResponse(await estimate_run(session, owner, space.graph, order))
+        if body.max_total_usd is None:
+            raise ServiceError(
+                422, "budget_required", "Approve a total budget (max_total_usd) to start the run"
+            )
+        active = await session.scalar(
+            select(SpaceRun.id).where(
+                SpaceRun.space_id == space.id, SpaceRun.status.in_(("running", "awaiting_approval"))
+            )
+        )
+        if active:
+            raise ServiceError(
+                409, "run_active", "This space already has a run in progress", {"run_id": active}
+            )
+        run = SpaceRun(
+            space_id=space.id, owner_id=owner.id, mode=body.mode, start_node=body.node_id, graph=space.graph,
+            order=order, nodes={i: {"status": "pending"} for i in order}, max_total_usd=body.max_total_usd,
+        )  # fmt: skip
+        session.add(run)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            raise ServiceError(409, "run_active", "This space already has a run in progress") from None
+        if settings.worker_enabled:
+            app.state.space_runner.start(run.id)
+        return JSONResponse(run.as_dict(), status_code=201)
+
+    @app.get("/v1/spaces/{space_id}/runs", tags=["spaces"])
+    async def list_runs(
+        space_id: str, session: Session, owner: Owner, limit: int = Query(10, ge=1, le=50)
+    ) -> dict:
+        await get_owned_space(session, owner, space_id)
+        rows = await session.scalars(
+            select(SpaceRun)
+            .where(SpaceRun.space_id == space_id)
+            .order_by(SpaceRun.created_at.desc())
+            .limit(limit)
+        )
+        return {"runs": [r.as_dict() for r in rows]}
+
+    @app.get("/v1/spaces/{space_id}/runs/{run_id}", tags=["spaces"])
+    async def get_run(space_id: str, run_id: str, session: Session, owner: Owner) -> dict:
+        return (await get_owned_run(session, owner, space_id, run_id)).as_dict()
+
+    async def approve_run_job(session: AsyncSession, run: SpaceRun, pause: dict, body: RunApprove) -> None:
+        """Aprueba el proveedor de respaldo de un paso dentro de su corrida: se recotiza ahora y el nuevo total
+        (lo comprometido sin el paso más su precio nuevo) debe caber en el tope que se aprueba. El trabajo y la
+        corrida se guardan en el mismo commit que hace quien llama (revisión 55).
+
+        Los permisos del trabajo quedan iguales a lo que cuenta la corrida (precio y retención de esta
+        cotización): una retención vieja no puede volver a usarse sin pasar por el tope (revisión 56). Si la
+        cotización nueva no cabe, se publica en la pausa y se rechaza, para que la barra ofrezca el total real."""
+        job = await session.get(Job, pause["job_id"])
+        if job is None or job.status != "awaiting_approval" or not job.plan:
+            raise ServiceError(409, "run_changed", "That step is no longer waiting for approval")
+        index, version = job.plan_index, job.version
+        fresh = await requote(app.state.router, get_catalog().get(job.model), job.input, job.plan[index])
+        if fresh is None:
+            raise ServiceError(
+                409, "provider_unavailable", "That provider can no longer run this step; stop the run"
+            )
+        fresh.pop("unknown_accepted", None)
+        unknown = fresh["usd"] is None
+        nodes = {k: dict(v) for k, v in run.nodes.items()}
+        state = nodes[pause["node"]]
+        new_spend = spend_of(fresh["usd"], fresh.get("reserve_usd"))
+        needed = round(run.committed_usd - state.get("spend", 0.0) + new_spend, 6)
+        problem = None
+        if unknown and not body.accept_unknown:
+            problem = ("unknown_not_accepted", "This step has no known price now; accept it explicitly")
+        elif body.max_total_usd is None or body.max_total_usd + COST_TOLERANCE_USD < needed:
+            problem = ("budget_too_low", f"It now needs {needed:.4f} USD in total; approve that amount")
+        plan = list(job.plan)
+        if problem:
+            # La cotización nueva queda en el trabajo (sigue esperando) y en la pausa de la corrida.
+            plan[index] = {**fresh, "unknown_accepted": bool(job.plan[index].get("unknown_accepted"))}
+            await session.execute(
+                update(Job)
+                .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version)
+                .values(plan=plan, version=Job.version + 1)
+            )
+            run.pause = {**pause, "usd": fresh["usd"], "reserve_usd": fresh.get("reserve_usd"),
+                         "needed_total_usd": needed, "unknown": unknown}  # fmt: skip
+            try:
+                await session.commit()
+            except StaleDataError:
+                await session.rollback()
+                raise ServiceError(409, "run_changed", "The run changed meanwhile; check it again") from None
+            raise ServiceError(422, problem[0], problem[1], {"needed_total_usd": needed, "unknown": unknown})
+        plan[index] = {**fresh, "unknown_accepted": unknown, "approved": True}
+        done = await session.execute(
+            update(Job)
+            .where(Job.id == job.id, Job.status == "awaiting_approval", Job.version == version, Job.plan_index == index)
+            .values(status="pending", plan=plan, max_usd=fresh["usd"], max_reserve_usd=fresh.get("reserve_usd"),
+                    error=None, error_kind=None, next_check_at=None, version=Job.version + 1)
+        )  # fmt: skip
+        if done.rowcount != 1:
+            await session.rollback()
+            raise ServiceError(409, "run_changed", "That step changed meanwhile; check it again")
+        state.update(usd=fresh["usd"], reserve_usd=fresh.get("reserve_usd"), spend=new_spend, waiting=False)
+        run.nodes = nodes
+        run.committed_usd = needed
+
+    @app.post("/v1/spaces/{space_id}/runs/{run_id}/approve", tags=["spaces"])
+    async def approve_run(
+        space_id: str, run_id: str, body: RunApprove, session: Session, owner: Owner
+    ) -> dict:
+        """Reanuda una corrida en pausa: un tope mayor que cubra el paso, o aceptar su precio desconocido."""
+        run = await get_owned_run(session, owner, space_id, run_id)
+        pause = run.pause or {}
+        if run.status != "awaiting_approval" or not pause:
+            raise ServiceError(409, "not_paused", "This run is not waiting for approval")
+        # En una pausa de respaldo el total nuevo puede bajar (una retención que desaparece): lo valida
+        # approve_run_job contra lo que de verdad queda comprometido.
+        if (
+            pause.get("reason") != "job_approval"
+            and body.max_total_usd is not None
+            and body.max_total_usd + COST_TOLERANCE_USD < run.committed_usd
+        ):
+            raise ServiceError(
+                422, "budget_too_low", "The budget cannot be lower than what is already committed"
+            )
+        if pause.get("reason") == "over_budget":
+            needed = pause.get("needed_total_usd") or 0.0
+            if body.max_total_usd is None or body.max_total_usd + COST_TOLERANCE_USD < needed:
+                raise ServiceError(
+                    422,
+                    "budget_too_low",
+                    f"Approve at least {needed:.4f} USD in total",
+                    {"needed_total_usd": needed},
+                )
+        if pause.get("reason") == "unknown_cost":
+            if not body.accept_unknown:
+                raise ServiceError(
+                    422, "unknown_not_accepted", "This step has no known price; accept it explicitly"
+                )
+            nodes = {k: dict(v) for k, v in run.nodes.items()}
+            nodes[pause["node"]]["accept_unknown"] = True
+            run.nodes = nodes
+        if pause.get("reason") == "job_approval":
+            await approve_run_job(session, run, pause, body)
+        if body.max_total_usd is not None:
+            run.max_total_usd = body.max_total_usd
+        run.status, run.pause = "running", None
+        try:
+            await session.commit()
+        except StaleDataError:
+            await session.rollback()
+            raise ServiceError(409, "run_changed", "The run changed meanwhile; check it again") from None
+        app.state.worker.wake()
+        if settings.worker_enabled:
+            app.state.space_runner.start(run.id)
+        return run.as_dict()
+
+    @app.post("/v1/spaces/{space_id}/runs/{run_id}/cancel", tags=["spaces"])
+    async def cancel_run(space_id: str, run_id: str, session: Session, owner: Owner) -> dict:
+        """Detiene la corrida: no se envían más pasos y se cancelan los que siguen en la cola local o esperan
+        aprobación (gratis).
+        Lo ya terminado se conserva; un paso que el proveedor ya está generando termina por su cuenta."""
+        run = await get_owned_run(session, owner, space_id, run_id)
+        if run.status not in ("running", "awaiting_approval"):
+            raise ServiceError(409, "not_active", "This run already finished")
+        nodes = {k: dict(v) for k, v in run.nodes.items()}
+        for state in nodes.values():
+            if state["status"] == "pending":
+                state["status"] = "canceled"
+            elif state["status"] == "running":
+                # En la cola local o esperando aprobación todavía no cuesta nada: se cancela (revisión 55).
+                await session.execute(
+                    update(Job)
+                    .where(Job.id == state["job_id"], Job.status.in_(("pending", "awaiting_approval")))
+                    .values(
+                        status="canceled", finished_at=utcnow(), next_check_at=None, version=Job.version + 1
+                    )
+                )
+        run.nodes = nodes
+        run.status, run.pause, run.finished_at = "canceled", None, utcnow()
+        try:
+            await session.commit()
+        except StaleDataError:
+            await session.rollback()
+            raise ServiceError(409, "run_changed", "The run changed meanwhile; try again") from None
+        return run.as_dict()
 
     @app.post("/v1/presets/{slug}/run", tags=["presets"])
     async def run_preset(

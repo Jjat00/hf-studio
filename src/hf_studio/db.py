@@ -160,6 +160,46 @@ class Space(Base):
         return {**self.summary(), "graph": self.graph}
 
 
+class SpaceRun(Base):
+    """Corrida de un Space en el servidor: un nodo y lo que depende de él (`downstream`) o todo el lienzo
+    (`workflow`). Trabaja sobre una copia del grafo tomada al empezar. `nodes` guarda el estado de cada
+    generador: `{id: {status, job_id?, usd?, reserve_usd?, error?, accept_unknown?}}`, con status pending,
+    running, done, failed, skipped o canceled. `max_total_usd` es el tope aprobado y `committed_usd` lo ya
+    comprometido (el mayor entre el precio y la retención inicial de cada paso enviado). Si un paso no cabe en
+    el tope o no tiene precio, la corrida queda en `awaiting_approval` con el motivo en `pause`."""
+
+    __tablename__ = "space_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    space_id: Mapped[str] = mapped_column(ForeignKey("spaces.id", ondelete="CASCADE"), index=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    mode: Mapped[str] = mapped_column(String(20))
+    start_node: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(24), index=True, default="running")
+    graph: Mapped[dict] = mapped_column(JSON)
+    order: Mapped[list] = mapped_column(JSON)
+    nodes: Mapped[dict] = mapped_column(JSON)
+    max_total_usd: Mapped[float] = mapped_column(Float)
+    committed_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    pause: Mapped[dict | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # El motor y las rutas (aprobar, detener) escriben la misma fila: bloqueo optimista como en `jobs`.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    __mapper_args__ = {"version_id_col": version}  # noqa: RUF012
+
+    def as_dict(self) -> dict:
+        def iso(dt: datetime | None) -> str | None:
+            return dt.replace(tzinfo=UTC).isoformat() if dt else None
+
+        return {"id": self.id, "space_id": self.space_id, "mode": self.mode, "start_node": self.start_node,
+                "status": self.status, "order": self.order, "nodes": self.nodes,
+                "max_total_usd": self.max_total_usd, "committed_usd": self.committed_usd, "pause": self.pause,
+                "error": self.error, "created_at": iso(self.created_at), "finished_at": iso(self.finished_at)}  # fmt: skip
+
+
 def make_engine(url: str) -> AsyncEngine:
     if url.startswith("sqlite"):
         from pathlib import Path
@@ -206,6 +246,13 @@ async def init_db(engine: AsyncEngine) -> None:
         # Bases creadas antes de la columna `source`: create_all no añade índices a tablas existentes.
         await conn.execute(
             text("CREATE UNIQUE INDEX IF NOT EXISTS ix_uploads_owner_source ON uploads (owner_id, source)")
+        )
+        # Una sola corrida activa por Space, también frente a dos peticiones simultáneas.
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_space_runs_active ON space_runs (space_id) "
+                "WHERE status IN ('running', 'awaiting_approval')"
+            )
         )
 
 

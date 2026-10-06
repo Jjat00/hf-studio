@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
-import { AlertTriangle, Check, ChevronLeft, CloudOff, ImageIcon, Loader2, Maximize, Plus, StickyNote, Type, Upload, Video } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, CloudOff, ImageIcon, Loader2, Maximize, Play, Plus, StickyNote, Type, Upload, Video } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -32,6 +32,9 @@ import {
   mediaFields,
   MAX_RUNS,
   newId,
+  RUN_ACTIVE,
+  type RunEstimate,
+  type SpaceRun,
   normalizeNode,
   outKind,
   reaches,
@@ -47,6 +50,7 @@ import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { AddMenu, type AddChoice } from "./add-menu";
 import { SpaceContext, selectedRun, type NodeEstimate, type RunState, type SpaceCtx } from "./context";
 import { Inspector } from "./inspector";
+import { RunBanner, RunDialog } from "./run-panel";
 import { GeneratorNodeView, MediaNodeView, NoteNodeView, portLabel, TextNodeView } from "./nodes";
 
 const NODE_TYPES: NodeTypes = { text: TextNodeView, media: MediaNodeView, generator: GeneratorNodeView, note: NoteNodeView };
@@ -288,6 +292,9 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       for (const port of ports) {
         const sources = (groups.get(port.key) ?? []).map((e) => ns.find((n) => n.id === e.source)).filter((n): n is SpaceNode => !!n);
         if (!sources.length) continue;
+        // Mismas reglas que las corridas del servidor: un tipo que no encaja es un error (también en el prompt)
+        // y un campo simple toma la primera conexión (revisiones 55 y 56).
+        if (sources.some((src) => outKind(src, outputOf) !== port.kind)) throw new InputError(s.wrongKind(portLabel(t, detail, port.key)));
         if (port.kind === "text") {
           const texts = sources.map((src) => (src.type === "text" ? src.data.text.trim() : "")).filter(Boolean);
           const own = typeof values[port.key] === "string" ? (values[port.key] as string).trim() : "";
@@ -295,7 +302,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           continue;
         }
         const urls: string[] = [];
-        for (const src of sources) {
+        for (const src of port.multiple ? sources : sources.slice(0, 1)) {
           const { url, local } = await sourceMedia(src);
           urls.push(url);
           if (port.kind === "video") durations.push(probeDuration(local ?? url, url));
@@ -315,7 +322,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       if (secs.length && secs.every((x) => x)) hints.input_video_seconds = secs.reduce<number>((a, x) => a + (x ?? 0), 0);
       return { model: node.data.model, input, hints };
     },
-    [sourceMedia, s, t],
+    [sourceMedia, s, t, outputOf],
   );
 
   const errorText = useCallback(
@@ -356,7 +363,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
    * hints): si no hay cotización vigente, este clic cotiza y el siguiente genera. Un precio desconocido
    * pide además confirmarlo. Si el lienzo cambia mientras se resuelve, se aborta (revisión 51).
    */
-  const run = useCallback(
+  const runNode = useCallback(
     async (nodeId: string) => {
       if (runStatesRef.current[nodeId]?.busy) return;
       const node = nodesRef.current.find((n): n is GeneratorNode => n.id === nodeId && n.type === "generator");
@@ -612,16 +619,17 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     (c: string | null | undefined) => c !== undefined && c !== savedCover.current && !(c && rejectedCovers.current.has(c)),
     [],
   );
-  const persist = useCallback(async function persist() {
-    if (conflicted.current) return;
+  /** Guarda lo pendiente. Devuelve true si al terminar el servidor tiene exactamente el lienzo actual. */
+  const persist = useCallback(async function persist(): Promise<boolean> {
+    if (conflicted.current) return false;
     if (inflight.current) {
-      setTimeout(persist, 400);
-      return;
+      await new Promise((r) => setTimeout(r, 300));
+      return persist();
     }
     const { graphJson: g, title: tt, cover: c } = latest.current;
     const snapshot = `${g}|${tt}`;
     const sendCover = coverChanged(c);
-    if (snapshot === lastSaved.current && !sendCover) return;
+    if (snapshot === lastSaved.current && !sendCover) return true;
     inflight.current = true;
     setSave("saving");
     try {
@@ -642,11 +650,15 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       } else if (e instanceof StudioError && e.code === "invalid_cover" && c) {
         // Una portada que la API no acepta (p. ej. la generación se borró) no bloquea el guardado.
         rejectedCovers.current.add(c);
-        setTimeout(persist, 0);
+        inflight.current = false;
+        return persist();
       } else setSave("error");
+      return false;
     } finally {
       inflight.current = false;
     }
+    const now = latest.current;
+    return `${now.graphJson}|${now.title}` === lastSaved.current || persist();
   }, [space.id, s.untitled, coverChanged]);
   useEffect(() => {
     if (`${graphJson}|${title}` === lastSaved.current && !coverChanged(cover)) return;
@@ -655,6 +667,143 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   }, [graphJson, title, cover, persist, coverChanged]);
   // Al salir de la página se guarda lo pendiente.
   useEffect(() => () => void persist(), [persist]);
+
+  // --- Corridas en el servidor (fase 2) --------------------------------------------------------
+  const [run, setRun] = useState<SpaceRun | null>(null);
+  const [runDialog, setRunDialog] = useState<{
+    mode: "downstream" | "workflow";
+    node_id?: string;
+    version: number;
+    estimate: RunEstimate;
+    /** Lienzo guardado que se cotizó: si cambia, la cotización deja de valer (revisión 55). */
+    snapshot: string;
+  } | null>(null);
+  const [runBusy, setRunBusy] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  /** Suma al historial de cada nodo las generaciones que creó una corrida (y elige la nueva). */
+  const mergeRun = useCallback(
+    (r: SpaceRun) => {
+      setNodes((ns) => {
+        let changed = false;
+        const next = ns.map((n) => {
+          const job = r.nodes[n.id]?.job_id;
+          if (n.type !== "generator" || !job || n.data.runs.includes(job) || n.data.runs.length >= MAX_RUNS) return n;
+          changed = true;
+          const runs = [...n.data.runs, job];
+          return { ...n, data: { ...n.data, runs, selected: runs.length - 1 } };
+        });
+        return changed ? next : ns;
+      });
+    },
+    [setNodes],
+  );
+
+  // Al abrir: las corridas recientes aportan sus generaciones; la activa se sigue mostrando.
+  useEffect(() => {
+    studio.runs(space.id, 10).then(
+      (r) => {
+        for (const x of [...r.runs].reverse()) mergeRun(x);
+        const active = r.runs.find((x) => RUN_ACTIVE.includes(x.status));
+        if (active) setRun(active);
+      },
+      () => undefined,
+    );
+  }, [space.id, mergeRun]);
+
+  const activeRunId = run && RUN_ACTIVE.includes(run.status) ? run.id : null;
+  useEffect(() => {
+    if (!activeRunId) return;
+    let alive = true;
+    const timer = setInterval(() => {
+      studio.run(space.id, activeRunId).then(
+        (r) => {
+          if (!alive) return;
+          setRun(r);
+          mergeRun(r);
+        },
+        () => undefined,
+      );
+    }, POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [activeRunId, space.id, mergeRun]);
+
+  const openRun = useCallback(
+    async (mode: "downstream" | "workflow", nodeId?: string) => {
+      setRunError(null);
+      setRunBusy(true);
+      try {
+        // La corrida usa el grafo guardado: primero se guarda lo pendiente.
+        if (!(await persist())) throw new Error(s.saveFirst);
+        const snapshot = lastSaved.current;
+        const body = { mode, ...(nodeId ? { node_id: nodeId } : {}), version: version.current };
+        const estimate = await studio.estimateRun(space.id, body);
+        if (`${latest.current.graphJson}|${latest.current.title}` !== snapshot) throw new Error(s.changed);
+        setRunDialog({ ...body, estimate, snapshot });
+      } catch (e) {
+        setRunError(errorText(e));
+      } finally {
+        setRunBusy(false);
+      }
+    },
+    [persist, space.id, errorText, s],
+  );
+
+  const startRun = useCallback(
+    async (budget: number) => {
+      if (!runDialog) return;
+      setRunBusy(true);
+      setRunError(null);
+      try {
+        // Se arranca solo el lienzo que se cotizó: si cambió desde entonces, hay que volver a cotizar.
+        if (`${latest.current.graphJson}|${latest.current.title}` !== runDialog.snapshot || lastSaved.current !== runDialog.snapshot) {
+          setRunDialog(null);
+          throw new Error(s.changed);
+        }
+        const { mode, node_id, version: v } = runDialog;
+        const r = await studio.startRun(space.id, { mode, ...(node_id ? { node_id } : {}), version: v, max_total_usd: budget });
+        setRun(r);
+        setRunDialog(null);
+      } catch (e) {
+        setRunError(errorText(e));
+      } finally {
+        setRunBusy(false);
+      }
+    },
+    [runDialog, space.id, errorText, s],
+  );
+
+  const runAction = useCallback(
+    async (action: () => Promise<SpaceRun>) => {
+      setRunBusy(true);
+      setRunError(null);
+      try {
+        const r = await action();
+        setRun(r);
+        mergeRun(r);
+      } catch (e) {
+        setRunError(errorText(e));
+        // Un 422 puede traer una cotización nueva ya publicada en la pausa: la barra la muestra al momento.
+        if (run) studio.run(space.id, run.id).then(setRun, () => undefined);
+      } finally {
+        setRunBusy(false);
+      }
+    },
+    [mergeRun, errorText, run, space.id],
+  );
+
+  const runFrom = useCallback((nodeId: string) => void openRun("downstream", nodeId), [openRun]);
+  const nameOf = useCallback(
+    (id: string) => {
+      const n = nodes.find((x) => x.id === id) ?? (space.graph.nodes.find((x) => x.id === id) as SpaceNode | undefined);
+      return n ? nodeName(n) : id;
+    },
+    [nodes, nodeName, space.graph.nodes],
+  );
+  const runNodes = useMemo(() => (run && RUN_ACTIVE.includes(run.status) ? run.nodes : {}), [run]);
 
   const styledEdges = useMemo(() => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -673,8 +822,8 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   }, [nodes]);
 
   const ctx = useMemo<SpaceCtx>(
-    () => ({ models, details, jobs, gone, edges, signatures, estimates, runStates, run, update, setValue, changeModel }),
-    [models, details, jobs, gone, edges, signatures, estimates, runStates, run, update, setValue, changeModel],
+    () => ({ models, details, jobs, gone, edges, signatures, estimates, runStates, run: runNode, update, setValue, changeModel, runFrom, runNodes, runBusy }),
+    [models, details, jobs, gone, edges, signatures, estimates, runStates, runNode, update, setValue, changeModel, runFrom, runNodes, runBusy],
   );
 
   const tools: { icon: typeof Type; label: string; onClick: () => void }[] = [
@@ -702,6 +851,15 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
             placeholder={s.untitled}
             className="min-w-0 flex-1 bg-transparent text-[15px] font-semibold outline-none placeholder:text-fg-4"
           />
+          <button
+            type="button"
+            onClick={() => openRun("workflow")}
+            disabled={runBusy || !!activeRunId || !nodes.some((n) => n.type === "generator")}
+            className="flex items-center gap-1.5 rounded-lg bg-surface-4 px-3 py-1.5 text-[13px] font-semibold hover:bg-surface-5 disabled:opacity-40"
+          >
+            {runBusy && !runDialog ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
+            {s.runAll}
+          </button>
           <span className={clsx("flex items-center gap-1.5 text-[12px]", save === "error" ? "text-danger" : "text-fg-3")}>
             {save === "saving" ? <Loader2 className="size-3.5 animate-spin" /> : save === "error" ? <CloudOff className="size-3.5" /> : save === "saved" ? <Check className="size-3.5" /> : null}
             {save === "saving" ? s.saving : save === "error" ? s.saveError : save === "saved" ? s.saved : null}
@@ -757,6 +915,23 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
               </div>
             )}
 
+            {run && (
+              <RunBanner
+                run={run}
+                name={nameOf}
+                busy={runBusy}
+                error={runDialog ? null : runError}
+                onStop={() => runAction(() => studio.cancelRun(space.id, run.id))}
+                onApprove={(body) => runAction(() => studio.approveRun(space.id, run.id, body))}
+                onClose={() => setRun(null)}
+              />
+            )}
+            {!run && !runDialog && runError && (
+              <div className="absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded-xl border border-danger/40 bg-surface-2 px-4 py-2 text-sm text-danger shadow-xl">
+                {runError}
+              </div>
+            )}
+
             {save === "conflict" && (
               <div className="absolute top-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-warning/40 bg-surface-2 px-4 py-2 text-sm shadow-xl">
                 <AlertTriangle className="size-4 text-warning" /> {s.conflict}
@@ -773,6 +948,19 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         </div>
       </div>
 
+      {runDialog && (
+        <RunDialog
+          estimate={runDialog.estimate}
+          name={nameOf}
+          busy={runBusy}
+          error={runError}
+          onStart={startRun}
+          onClose={() => {
+            setRunDialog(null);
+            setRunError(null);
+          }}
+        />
+      )}
       <AddMenu
         at={menu?.at ?? null}
         from={menu?.from?.kind ?? null}

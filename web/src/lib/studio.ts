@@ -1,4 +1,4 @@
-import type { Space, SpaceSummary } from "./spaces";
+import type { RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
 import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
@@ -230,6 +230,28 @@ export const studio = {
       body: JSON.stringify(body),
     }),
   deleteSpace: (id: string) => call<void>(`/v1/spaces/${id}`, { method: "DELETE" }),
+  /** Corrida en el servidor: `dry_run` cotiza cada paso; sin él arranca con el tope aprobado. */
+  estimateRun: (id: string, body: { mode: "downstream" | "workflow"; node_id?: string; version: number }) =>
+    call<RunEstimate>(`/v1/spaces/${id}/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, dry_run: true }),
+    }),
+  startRun: (id: string, body: { mode: "downstream" | "workflow"; node_id?: string; version: number; max_total_usd: number }) =>
+    call<SpaceRun>(`/v1/spaces/${id}/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  runs: (id: string, limit = 10) => call<{ runs: SpaceRun[] }>(`/v1/spaces/${id}/runs?limit=${limit}`),
+  run: (id: string, runId: string) => call<SpaceRun>(`/v1/spaces/${id}/runs/${runId}`),
+  approveRun: (id: string, runId: string, body: { max_total_usd?: number; accept_unknown?: boolean }) =>
+    call<SpaceRun>(`/v1/spaces/${id}/runs/${runId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  cancelRun: (id: string, runId: string) => call<SpaceRun>(`/v1/spaces/${id}/runs/${runId}/cancel`, { method: "POST" }),
   upload: async (file: File) => {
     const form = new FormData();
     form.append("file", file);

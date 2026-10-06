@@ -2,7 +2,7 @@
 
 import type { Edge } from "@xyflow/react";
 import { createContext, use } from "react";
-import type { GeneratorData, MediaData, NoteData, TextData } from "@/lib/spaces";
+import type { GeneratorData, MediaData, NoteData, RunNodeState, TextData } from "@/lib/spaces";
 import type { Estimate } from "@/lib/studio";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 
@@ -28,6 +28,11 @@ export type SpaceCtx = {
   /** Cambia un ajuste del generador sobre su estado más reciente (dos cambios seguidos no se pisan). */
   setValue: (nodeId: string, key: string, value: unknown) => void;
   changeModel: (nodeId: string, model: string) => void;
+  /** Corrida en el servidor desde este nodo (él y lo que depende de él). */
+  runFrom: (nodeId: string) => void;
+  /** Estado de cada nodo en la corrida activa. */
+  runNodes: Record<string, RunNodeState>;
+  runBusy: boolean;
 };
 
 export const SpaceContext = createContext<SpaceCtx | null>(null);

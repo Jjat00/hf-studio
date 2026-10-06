@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Loader2, MousePointerClick, Play } from "lucide-react";
+import { ExternalLink, FastForward, Loader2, MousePointerClick, Play } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -122,6 +122,14 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
           {state.busy ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-4 fill-current" />}
           {confirming ? s.runAnyway : s.run}
           {!state.busy && !confirming && short && <span>{short}</span>}
+        </button>
+        <button
+          type="button"
+          onClick={() => ctx.runFrom(id)}
+          disabled={ctx.runBusy || !detail || Object.keys(ctx.runNodes).length > 0}
+          className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-line-2 text-[14px] font-semibold text-fg-2 transition hover:border-lime/50 hover:text-fg disabled:opacity-40"
+        >
+          <FastForward className="size-4" /> {s.runFrom}
         </button>
         {state.error && <p className="mt-2 text-[12px] text-danger">{state.error}</p>}
       </div>

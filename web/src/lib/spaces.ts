@@ -161,3 +161,49 @@ export function normalizeNode(n: SpaceNode): SpaceNode {
 export function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
+
+/** Paso de una corrida cotizada en seco: `later` se cotiza al llegar (depende de otro paso de la corrida). */
+export type RunStep = {
+  node_id: string;
+  model: string;
+  status: "ok" | "unknown" | "later" | "error";
+  usd?: number | null;
+  reserve_usd?: number | null;
+  provider?: string;
+  error?: string;
+};
+export type RunEstimate = { steps: RunStep[]; total_usd: number; reserve_usd: number; pending: number };
+
+export type RunNodeState = {
+  status: "pending" | "running" | "done" | "failed" | "skipped" | "canceled";
+  job_id?: string;
+  usd?: number | null;
+  reserve_usd?: number | null;
+  error?: string;
+  waiting?: boolean;
+  spend?: number;
+};
+export type SpaceRun = {
+  id: string;
+  space_id: string;
+  mode: "downstream" | "workflow";
+  start_node: string | null;
+  status: "running" | "awaiting_approval" | "completed" | "partial" | "failed" | "canceled";
+  order: string[];
+  nodes: Record<string, RunNodeState>;
+  max_total_usd: number;
+  committed_usd: number;
+  pause: {
+    node: string;
+    reason: "over_budget" | "unknown_cost" | "job_approval";
+    usd?: number | null;
+    reserve_usd?: number | null;
+    needed_total_usd?: number;
+    job_id?: string;
+    unknown?: boolean;
+  } | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+};
+export const RUN_ACTIVE = ["running", "awaiting_approval"];

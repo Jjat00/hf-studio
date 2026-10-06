@@ -195,7 +195,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps<MediaNode>) {
 export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNode>) {
   const { t, locale } = useI18n();
   const s = t.spaces;
-  const { models, details, jobs, gone, edges, estimates, signatures, runStates, run, update, setValue } = useSpace();
+  const { models, details, jobs, gone, edges, estimates, signatures, runStates, run, update, setValue, runNodes } = useSpace();
   const updateInternals = useUpdateNodeInternals();
   const summary = models.get(data.model);
   const detail = details[data.model];
@@ -310,8 +310,11 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
             {!state.busy && !confirming && short && <span className="opacity-80">· {short}</span>}
           </button>
           {state.error && <p className="mt-1.5 text-[12px] text-danger">{state.error}</p>}
+          {runNodes[id]?.status === "pending" && <p className="mt-1.5 text-[12px] text-lime">{s.inRun}</p>}
+          {runNodes[id]?.status === "skipped" && <p className="mt-1.5 text-[12px] text-warning">{s.skipped}</p>}
+          {runNodes[id]?.status === "failed" && runNodes[id]?.error && <p className="mt-1.5 text-[12px] text-danger">{runNodes[id].error}</p>}
           {confirming && <p className="mt-1.5 text-[12px] text-warning">{s.unknownCost}</p>}
-          {job && !job.terminal && job.status === "awaiting_approval" && (
+          {job && !job.terminal && job.status === "awaiting_approval" && !runNodes[id] && (
             <Link href={`/history/${job.id}`} className="nodrag mt-1.5 block text-[12px] text-lime hover:underline">
               {s.openInHistory}
             </Link>

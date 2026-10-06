@@ -104,8 +104,12 @@ async def create_generation(
     max_usd: float | None | object = UNSET,
     max_reserve_usd: float | None | object = UNSET,
     provider: str | None = None,
+    commit: bool = True,
 ) -> tuple[Job, bool]:
     """Crea un trabajo en cola local. Devuelve (trabajo, creado); creado=False si se reutilizó uno existente.
+
+    `commit=False` solo lo añade a la sesión (flush): quien llama lo confirma junto con otros cambios, o lo
+    descarta con un rollback (las corridas de Spaces lo guardan en la misma transacción que su estado).
 
     `plan` (routing.Plan.stored) dice por qué proveedores probar y en qué orden; sin él va a Higgsfield.
     `max_usd` es lo aprobado: un respaldo que cueste más pedirá una nueva aprobación."""
@@ -170,6 +174,9 @@ async def create_generation(
         attempts_log=[],
     )
     session.add(job)
+    if not commit:
+        await session.flush()
+        return job, True
     try:
         await session.commit()
     except IntegrityError:
