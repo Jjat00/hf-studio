@@ -28,6 +28,8 @@ export type ModelSummary = {
   family: string;
   capabilities: string[];
   docs_url: string;
+  /** Tipos que aceptan sus puertos (prompt = text, campos *_url = image, video o audio). */
+  inputs?: ("text" | "image" | "video" | "audio")[];
 };
 
 export type ModelDetail = ModelSummary & {

@@ -1,3 +1,4 @@
+import type { Space, SpaceSummary } from "./spaces";
 import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
@@ -213,6 +214,22 @@ export const studio = {
     return call<StudioElement>("/v1/elements", { method: "POST", body: form });
   },
   deleteElement: (id: string) => call<void>(`/v1/elements/${id}`, { method: "DELETE" }),
+  spaces: () => call<{ spaces: SpaceSummary[] }>("/v1/spaces"),
+  space: (id: string) => call<Space>(`/v1/spaces/${id}`),
+  createSpace: (title?: string) =>
+    call<Space>("/v1/spaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(title ? { title } : {}),
+    }),
+  /** Guarda con la versión leída; si otra pestaña guardó antes, 409 version_conflict. */
+  saveSpace: (id: string, body: { version: number; title?: string; graph?: unknown; cover?: string | null }) =>
+    call<Space>(`/v1/spaces/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteSpace: (id: string) => call<void>(`/v1/spaces/${id}`, { method: "DELETE" }),
   upload: async (file: File) => {
     const form = new FormData();
     form.append("file", file);

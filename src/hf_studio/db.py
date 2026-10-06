@@ -134,6 +134,32 @@ class Job(Base):
     __mapper_args__ = {"version_id_col": version}  # noqa: RUF012
 
 
+class Space(Base):
+    """Lienzo de nodos (Spaces): un grafo de pasos que se generan uno a uno. El grafo es JSON validado en
+    `spaces.check_graph`; las salidas de cada nodo son trabajos (`jobs`) referenciados por su id. `version`
+    evita que dos pestañas se pisen: cada guardado exige la versión leída."""
+
+    __tablename__ = "spaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    graph: Mapped[dict] = mapped_column(JSON)
+    cover: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    def summary(self) -> dict:
+        nodes = self.graph.get("nodes", [])
+        return {"id": self.id, "title": self.title, "cover": self.cover, "version": self.version,
+                "nodes": len(nodes), "created_at": self.created_at.replace(tzinfo=UTC).isoformat(),
+                "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+
+    def as_dict(self) -> dict:
+        return {**self.summary(), "graph": self.graph}
+
+
 def make_engine(url: str) -> AsyncEngine:
     if url.startswith("sqlite"):
         from pathlib import Path

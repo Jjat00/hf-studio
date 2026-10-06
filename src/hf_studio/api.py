@@ -34,6 +34,7 @@ from .db import (
     Job,
     Preset,
     Sound,
+    Space,
     Upload,
     hash_token,
     init_db,
@@ -93,6 +94,7 @@ from .sounds import clean_tags as clean_sound_tags
 from .sounds import history_kind as sound_history_kind
 from .sounds import register_job as register_sound
 from .sounds import title_from as sound_title
+from .spaces import GraphError, check_graph, check_values, empty_graph, input_kinds
 from .voice import (
     VOICE_MODEL,
     VOICE_QUOTE_TTL,
@@ -215,6 +217,21 @@ class PresetRun(BaseModel):
         False, description="El usuario aceptó explícitamente un precio desconocido (solo para esta opción)"
     )
     max_reserve_usd: float | None = Field(None, ge=0, description=RESERVE_FIELD)
+
+
+SPACE_COVER = r"^/v1/generations/[A-Za-z0-9-]{1,64}/files/[A-Za-z0-9._-]{1,200}$"
+
+
+class SpaceIn(BaseModel):
+    title: str = Field("Untitled space", min_length=1, max_length=120)
+    graph: dict[str, Any] | None = None
+
+
+class SpaceUpdate(BaseModel):
+    version: int = Field(ge=1, description="Versión leída; si otro guardado la cambió, 409 version_conflict")
+    title: str | None = Field(None, min_length=1, max_length=120)
+    graph: dict[str, Any] | None = None
+    cover: str | None = Field(None, pattern=SPACE_COVER, description="Archivo local de una salida propia")
 
 
 class EstimateIn(BaseModel):
@@ -432,7 +449,7 @@ def create_app(
 
     def model_out(m: dict, full: bool = False) -> dict:
         keys = ("id", "title", "output", "workflow", "family", "capabilities", "docs_url")
-        base = {k: m[k] for k in keys}
+        base = {**{k: m[k] for k in keys}, "inputs": input_kinds(m["input_schema"])}
         return (
             {
                 **base,
@@ -1251,6 +1268,104 @@ def create_app(
         if not own:
             raise ServiceError(404, "not_found", "Only your own presets can be deleted")
         await session.delete(own)
+        await session.commit()
+
+    # --- Spaces (lienzo de nodos) -----------------------------------------------------------------
+
+    def valid_graph(raw: Any, catalog: Catalog) -> dict:
+        try:
+            graph = check_graph(raw)
+            models = {n["data"]["model"] for n in graph["nodes"] if n["type"] == "generator"}
+            schemas = {m: catalog.get(m)["input_schema"] for m in models if catalog.get(m)}
+            return check_values(graph, schemas)
+        except GraphError as exc:
+            raise ServiceError(422, "invalid_graph", str(exc)) from None
+
+    async def valid_cover(session: AsyncSession, owner: ApiClient, cover: str | None) -> str | None:
+        """La portada es una imagen terminada de una generación visible para el cliente (o null para quitarla)."""
+        if cover is None:
+            return None
+        _, _, _, job_id, _, name = cover.split("/", 5)
+        job = await session.get(Job, job_id)
+        entry = next((f for f in (job.files or []) if f.get("name") == name), None) if job else None
+        if (
+            job is None
+            or (job.owner_id != owner.id and not owner.sees_all)  # misma regla que leer sus archivos
+            or job.status != "completed"
+            or entry is None
+            or entry.get("kind") != "image"
+            # La misma copia local que sirve GET /files: sin ella la portada saldría rota (revisión 52).
+            or not (Path(settings.storage_dir) / "outputs" / job.id / name).is_file()
+        ):
+            raise ServiceError(
+                422, "invalid_cover", "The cover must be an image from one of your finished generations"
+            )
+        return cover
+
+    async def get_owned_space(session: AsyncSession, owner: ApiClient, space_id: str) -> Space:
+        space = await session.get(Space, space_id)
+        if space is None or space.owner_id != owner.id:
+            raise ServiceError(404, "not_found", "Space not found")
+        return space
+
+    @app.get("/v1/spaces", tags=["spaces"])
+    async def list_spaces(session: Session, owner: Owner) -> dict:
+        rows = await session.scalars(
+            select(Space).where(Space.owner_id == owner.id).order_by(Space.updated_at.desc())
+        )
+        return {"spaces": [s.summary() for s in rows]}
+
+    @app.post("/v1/spaces", tags=["spaces"], status_code=201)
+    async def create_space(body: SpaceIn, session: Session, owner: Owner, catalog: CatalogDep) -> dict:
+        graph = valid_graph(body.graph, catalog) if body.graph is not None else empty_graph()
+        space = Space(owner_id=owner.id, title=body.title, graph=graph)
+        session.add(space)
+        await session.commit()
+        return space.as_dict()
+
+    @app.get("/v1/spaces/{space_id}", tags=["spaces"])
+    async def get_space(space_id: str, session: Session, owner: Owner) -> dict:
+        return (await get_owned_space(session, owner, space_id)).as_dict()
+
+    @app.put("/v1/spaces/{space_id}", tags=["spaces"])
+    async def update_space(
+        space_id: str, body: SpaceUpdate, session: Session, owner: Owner, catalog: CatalogDep
+    ) -> dict:
+        """Guarda título, grafo o portada. Exige la versión leída: si otra pestaña guardó antes, 409 con la
+        versión vigente, para que el cliente recargue en vez de pisar cambios."""
+        await get_owned_space(session, owner, space_id)
+        values: dict[str, Any] = {"version": Space.version + 1, "updated_at": utcnow()}
+        if body.title is not None:
+            values["title"] = body.title
+        if body.graph is not None:
+            values["graph"] = valid_graph(body.graph, catalog)
+        if "cover" in body.model_fields_set:
+            values["cover"] = await valid_cover(session, owner, body.cover)
+        result = await session.execute(
+            update(Space)
+            .where(Space.id == space_id, Space.owner_id == owner.id, Space.version == body.version)
+            .values(**values)
+        )
+        if result.rowcount == 0:
+            await session.rollback()
+            current = await session.scalar(select(Space.version).where(Space.id == space_id))
+            raise ServiceError(
+                409, "version_conflict", "This space changed in another tab; reload it", {"version": current}
+            )
+        # Lo que esta escritura dejó, leído dentro de su transacción: otro guardado posterior no se cuela en
+        # la respuesta (el cliente adoptaría una versión con cambios que no vio, revisión 51).
+        mine = await session.scalar(
+            select(Space).where(Space.id == space_id).execution_options(populate_existing=True)
+        )
+        out = mine.as_dict()
+        await session.commit()
+        return out
+
+    @app.delete("/v1/spaces/{space_id}", tags=["spaces"], status_code=204)
+    async def delete_space(space_id: str, session: Session, owner: Owner) -> None:
+        """Borra el lienzo; sus generaciones siguen en el historial."""
+        space = await get_owned_space(session, owner, space_id)
+        await session.delete(space)
         await session.commit()
 
     @app.post("/v1/presets/{slug}/run", tags=["presets"])

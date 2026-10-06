@@ -108,3 +108,21 @@ body {
 input[type="range"] {
   accent-color: var(--color-lime);
 }
+
+/* Spaces: lienzo de nodos (React Flow) con la paleta del estudio. */
+.hfs-flow {
+  --xy-background-color: var(--color-page);
+  --xy-edge-stroke-selected: var(--color-lime);
+  --xy-connectionline-stroke-default: var(--color-lime);
+  --xy-controls-button-background-color: var(--color-surface-2);
+  --xy-controls-button-background-color-hover: var(--color-surface-4);
+  --xy-controls-button-border-color: var(--color-line);
+  --xy-minimap-background-color: var(--color-surface-2);
+}
+.hfs-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3;
+}
+.dotted-bg {
+  background-image: radial-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
