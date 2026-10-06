@@ -19,7 +19,8 @@ from .providers.base import Provider, ProviderError
 from .providers.prices import PriceBook
 from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
 from .providers.routes import Route, routes_for, with_defaults
-from .space_tools import TOOL_PROVIDER, is_tool
+from .space_audio import audio_quote, is_audio_node
+from .space_tools import AUDIO_PROVIDER, TOOL_PROVIDER, is_tool
 
 BALANCE_TTL = 60.0
 OUTDATED_PRICES = 3 * 24 * 3600  # una tabla sin poder actualizarse en 3 días ya no da precios exactos
@@ -140,6 +141,21 @@ class Router:
             # Herramienta local (ffmpeg): una sola opción, gratis, en el proveedor interno del worker.
             option = Option(TOOL_PROVIDER, "HF Studio (local)", model["id"], logical, 0.0, "exact",
                             basis="Local tool (ffmpeg): free")  # fmt: skip
+            return Plan(model["id"], [option], [], hints, forced=only is not None)
+        if is_audio_node(model["id"]):
+            # Nodo de audio de Spaces: ElevenLabs, a su tarifa de API (aproximada, como en /v1/audio).
+            est = audio_quote(model["id"], logical)
+            if est is None:
+                excluded = [
+                    {
+                        "provider": AUDIO_PROVIDER,
+                        "title": "ElevenLabs",
+                        "reason": "The input is not valid yet",
+                    }
+                ]
+                return Plan(model["id"], [], excluded, hints, forced=only is not None)
+            option = Option(AUDIO_PROVIDER, "ElevenLabs", model["id"], logical, est["usd"], est["kind"],
+                            basis=est["basis"])  # fmt: skip
             return Plan(model["id"], [option], [], hints, forced=only is not None)
         ids = element_ids(arguments.get("elements"))
         elements = await self.elements(ids) if ids and self.elements else {}

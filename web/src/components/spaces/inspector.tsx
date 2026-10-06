@@ -9,10 +9,11 @@ import { CostPanel } from "@/components/studio/cost-panel";
 import { ElementPicker } from "@/components/studio/element-picker";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { ModelPicker, ModelRow } from "@/components/studio/model-picker";
-import { isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
+import { isAudioNode, isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
 import { costShort } from "@/lib/studio";
 import { selectedRun, useSpace } from "./context";
 import { portLabel } from "./nodes";
+import { VoiceSelect } from "./voice-select";
 
 /** Ajustes del generador elegido: modelo, opciones del esquema, medios sin conectar, costo y Generar. */
 export function Inspector({ node }: { node: GeneratorNode | null }) {
@@ -40,7 +41,8 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
   const values = detail ? validValues(detail, data.values) : {};
   const fields = detail ? settingFields(detail) : [];
   const main = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind));
-  const advanced = fields.filter((f) => !["enum", "range", "toggle", "elements"].includes(f.kind));
+  const advanced = fields.filter((f) => !["enum", "range", "toggle", "elements"].includes(f.kind) && f.key !== "voice_id");
+  const voiceField = fields.some((f) => f.key === "voice_id");
   const loose = detail ? mediaFields(detail).filter((f) => !connected.has(f.key)) : [];
   const est = ctx.estimates[id];
   const fresh = est && est.key === ctx.signatures[id] ? est : null;
@@ -53,12 +55,12 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
-        {isTool(data.model) ? (
-          // Una herramienta no cambia de modelo: su nombre traducido va fijo.
+        {isTool(data.model) || isAudioNode(data.model) ? (
+          // Herramientas y nodos de audio no cambian de modelo: su nombre traducido va fijo.
           <div className="rounded-2xl border border-line bg-surface-3 px-4 py-3">
-            <span className="block text-[13px] text-fg-3">{s.tools}</span>
-            <span className="text-[16px] font-semibold">{s.toolNames[data.model] ?? data.model}</span>
-            <span className="mt-0.5 block text-[12px] text-fg-3">{s.toolHints[data.model]}</span>
+            <span className="block text-[13px] text-fg-3">{isTool(data.model) ? s.tools : s.audioGroup}</span>
+            <span className="text-[16px] font-semibold">{s.toolNames[data.model] ?? s.audioNames[data.model] ?? data.model}</span>
+            <span className="mt-0.5 block text-[12px] text-fg-3">{s.toolHints[data.model] ?? s.audioHints[data.model]}</span>
           </div>
         ) : (
           <ModelRow model={summary} onClick={() => setPicking(true)} />
@@ -67,6 +69,7 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
           <div className="shimmer h-40 rounded-2xl" />
         ) : (
           <>
+            {voiceField && <VoiceSelect value={values.voice_id as string | undefined} onChange={(v) => setValue("voice_id", v)} />}
             {main.map((f) => (
               <FieldControl key={`${data.model}/${f.key}`} field={f} value={values[f.key]} onChange={(v) => setValue(f.key, v)} />
             ))}

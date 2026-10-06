@@ -26,7 +26,9 @@ from .media import cached_source
 from .providers.base import TERMINAL_STATUSES, Polled, Provider, ProviderError
 from .providers.registry import DEFAULT_PROVIDER
 from .routing import requote, stale
-from .space_tools import TOOL_PROVIDER
+from .sounds import KINDS as SOUND_KINDS
+from .sounds import register_job as register_sound
+from .space_tools import BACKGROUND_PROVIDERS
 from .voice import VOICE_MODEL
 
 # Trabajos locales (ElevenLabs): no ocupan concurrencia de los proveedores.
@@ -443,11 +445,17 @@ class Worker:
             error = result.error
             # Primero la copia local y después el estado final: quien vea `completed` ya tiene
             # `file_url`. Un fallo de descarga no bloquea (queda la URL remota).
-            if status == "completed" and (self.settings.download_outputs or job.provider == TOOL_PROVIDER):
+            if status == "completed" and (
+                self.settings.download_outputs or job.provider in BACKGROUND_PROVIDERS
+            ):
                 await self.store_outputs(job)
-                if job.provider == TOOL_PROVIDER and len(job.files or []) < len(job.outputs):
+                if job.provider in BACKGROUND_PROVIDERS and len(job.files or []) < len(job.outputs):
                     # Una herramienta local no tiene URL remota: sin su copia guardada no hay salida (revisión 58).
                     status, error = "failed", "Could not save the tool output"
+                elif job.model in SOUND_KINDS:
+                    # Los nodos de audio de Spaces también llegan a la sonoteca.
+                    job.status = "completed"
+                    await register_sound(session, job, Path(self.settings.storage_dir))
             if status != "completed":
                 error = self._with_attempts(job, error)
             self._finish(job, status, None if status == "completed" else status, error)
@@ -508,11 +516,15 @@ class Worker:
                     )
                 )
             ).all()
-            local = [j.hf_request_id for j in jobs if j.provider == TOOL_PROVIDER and j.hf_request_id]
+            local = [
+                (j.provider, j.hf_request_id)
+                for j in jobs
+                if j.provider in BACKGROUND_PROVIDERS and j.hf_request_id
+            ]
             for job in jobs:
                 remote = (
                     f" The request may still finish at {job.provider}; a late webhook will update it."
-                    if job.hf_request_id and job.provider != TOOL_PROVIDER
+                    if job.hf_request_id and job.provider not in BACKGROUND_PROVIDERS
                     else ""
                 )
                 self._finish(
@@ -524,8 +536,9 @@ class Worker:
                 await session.rollback()
                 return
         # Una herramienta local vencida deja de trabajar (su ffmpeg no sigue tras el timeout, revisión 58).
-        for request_id in local:
-            await self.providers[TOOL_PROVIDER].cancel_job(request_id)
+        for provider, request_id in local:
+            if provider in self.providers:
+                await self.providers[provider].cancel_job(request_id)
 
     @staticmethod
     def _finish(job: Job, status: str, kind: str | None, error: str | None) -> None:

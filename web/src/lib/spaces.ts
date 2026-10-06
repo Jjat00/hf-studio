@@ -163,6 +163,11 @@ export function isTool(modelId: string) {
   return modelId.startsWith("hf-studio/");
 }
 
+/** Nodos de audio de ElevenLabs para Spaces (voz, efecto, música). */
+export function isAudioNode(modelId: string) {
+  return modelId === "elevenlabs/tts" || modelId === "elevenlabs/sfx" || modelId === "elevenlabs/music-gen";
+}
+
 export function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }

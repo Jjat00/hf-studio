@@ -247,7 +247,9 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   const nodeName = useCallback(
     (n: SpaceNode) => {
       if (n.type === "generator")
-        return isTool(n.data.model) ? (s.toolNames[n.data.model] ?? n.data.model) : modelLabel(models.get(n.data.model)?.title ?? n.data.model).name;
+        return isTool(n.data.model)
+          ? (s.toolNames[n.data.model] ?? n.data.model)
+          : (s.audioNames[n.data.model] ?? modelLabel(models.get(n.data.model)?.title ?? n.data.model).name);
       if (n.type === "media") return n.data.name || s.addMedia;
       return s.addText;
     },

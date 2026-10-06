@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import logging
 import mimetypes
+import os
 import re
 import shutil
 import tempfile
@@ -25,7 +26,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from .audio import studio_notes
+from .audio import _run as run_ffmpeg
+from .audio import guarded, studio_notes
 from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
 from .db import (
@@ -97,6 +99,7 @@ from .sounds import clean_tags as clean_sound_tags
 from .sounds import history_kind as sound_history_kind
 from .sounds import register_job as register_sound
 from .sounds import title_from as sound_title
+from .space_audio import ElevenLabsJobs, is_audio_node
 from .space_runs import (
     Hooks,
     NodeInputError,
@@ -107,7 +110,7 @@ from .space_runs import (
     selected_run,
     spend_of,
 )
-from .space_tools import TOOL_PROVIDER, LocalTools, is_tool, tool_media
+from .space_tools import AUDIO_PROVIDER, BACKGROUND_PROVIDERS, TOOL_PROVIDER, LocalTools, is_tool, tool_media
 from .spaces import GraphError, check_graph, check_values, empty_graph, input_kinds
 from .voice import (
     VOICE_MODEL,
@@ -310,8 +313,20 @@ def create_app(
         # El worker conoce además el proveedor interno de las herramientas locales (no se lista como proveedor).
         app.state.local_tools = LocalTools(settings, transport, plain=app.state.hf.plain)
         app.state.local_tools.sweep()
+        app.state.eleven = ElevenLabsClient(settings, transport)
+        app.state.voice_slots = asyncio.Semaphore(2)
+        app.state.audio_jobs = ElevenLabsJobs(
+            settings, app.state.eleven, transport, slots=app.state.voice_slots
+        )
+        app.state.audio_jobs.sweep()
         app.state.worker = Worker(
-            app.state.sessions, {**app.state.providers, TOOL_PROVIDER: app.state.local_tools}, settings
+            app.state.sessions,
+            {
+                **app.state.providers,
+                TOOL_PROVIDER: app.state.local_tools,
+                AUDIO_PROVIDER: app.state.audio_jobs,
+            },
+            settings,
         )
         app.state.prices = PriceBook(Path(settings.storage_dir) / "prices")
 
@@ -323,8 +338,6 @@ def create_app(
         app.state.router = Router(app.state.providers, app.state.prices, get_catalog, element_resolver)
         app.state.worker.router = app.state.router
         app.state.tasks = set()
-        app.state.eleven = ElevenLabsClient(settings, transport)
-        app.state.voice_slots = asyncio.Semaphore(2)
         app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
         async with app.state.sessions() as s:
@@ -350,6 +363,7 @@ def create_app(
         for provider in app.state.providers.values():
             await provider.aclose()
         await app.state.local_tools.aclose()
+        await app.state.audio_jobs.aclose()
         await app.state.eleven.aclose()
         await engine.dispose()
 
@@ -583,6 +597,9 @@ def create_app(
         # el cliente (las pistas no llevan elementos).
         hints.pop("elements", None)
         await check_element_ids(session, arguments.get("elements"))
+        if is_audio_node(model["id"]) and not app.state.eleven.configured:
+            # ServiceError (no VoiceError): también la entiende el motor de corridas, que marca el paso fallido.
+            raise ServiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
         if is_tool(model["id"]):
             # ffmpeg abre estos archivos en local: solo subidas o salidas propias (como keep_source_audio).
             for url in tool_media(arguments):
@@ -1046,14 +1063,14 @@ def create_app(
                 )
             return job_out(job)
         if job.hf_request_id and (
-            job.status == "queued" or (job.status == "in_progress" and job.provider == TOOL_PROVIDER)
+            job.status == "queued" or (job.status == "in_progress" and job.provider in BACKGROUND_PROVIDERS)
         ):
             # Una herramienta local sí se puede detener en curso: la tarea es nuestra (revisión 58).
             await request.app.state.worker.provider(job).cancel_job(job.hf_request_id, job.cancel_url)
             job.status, job.finished_at, job.next_check_at = "canceled", utcnow(), None
         else:
             raise ServiceError(409, "not_cancelable", f"Cannot cancel a generation in status {job.status}")
-        local = job.provider == TOOL_PROVIDER
+        local = job.provider in BACKGROUND_PROVIDERS
         for _ in range(3):
             if await request.app.state.worker.commit(session, job.id):
                 return job_out(job)
@@ -1090,6 +1107,34 @@ def create_app(
         subida propia; si ya se subió hace menos de 5 días, devuelve esa misma URL."""
         return await fresh_output(session, owner, job_id, index)
 
+    wav_locks: weakref.WeakValueDictionary[Path, asyncio.Lock] = weakref.WeakValueDictionary()
+
+    async def mp3_as_wav(path: Path) -> Path:
+        """Copia WAV (junto al MP3, una vez) de una salida de audio propia. Un candado por archivo y un temporal
+        único: dos usos a la vez no se pisan, y un fallo no deja medio archivo (revisión 62)."""
+        wav = path.with_suffix(".wav")
+        lock = wav_locks.get(wav)
+        if lock is None:
+            lock = wav_locks[wav] = asyncio.Lock()
+        async with lock:
+            if wav.is_file():
+                return wav
+            fd, name = tempfile.mkstemp(prefix=f"{wav.stem}.", suffix=".tmp.wav", dir=wav.parent)
+            os.close(fd)
+            tmp = Path(name)
+            try:
+                code, err = await run_ffmpeg(
+                    "ffmpeg", "-y", "-v", "error", *guarded(str(path)), "-c:a", "pcm_s16le", str(tmp)
+                )
+                if code != 0 or not tmp.stat().st_size:
+                    raise ServiceError(
+                        422, "audio_convert_failed", f"Could not prepare that audio as an input: {err[:200]}"
+                    )
+                tmp.replace(wav)
+            finally:
+                tmp.unlink(missing_ok=True)
+        return wav
+
     async def fresh_output(session: AsyncSession, owner: ApiClient, job_id: str, index: int) -> dict:
         """Núcleo de `use_output`; también lo usan las corridas de Spaces para encadenar pasos."""
         job = await get_owned_job(session, owner, job_id)
@@ -1100,6 +1145,11 @@ def create_app(
         if not path.is_file():
             raise ServiceError(404, "not_found", "The local copy of that output is missing")
         content_type = (entry.get("content_type") or "").split(";")[0].strip().lower()
+        if content_type == "audio/mpeg":
+            # Higgsfield no acepta MP3 (el audio de ElevenLabs): se sube una copia WAV hecha con ffmpeg, así
+            # la voz o la música generadas se pueden encadenar como entrada (Spaces, fase 2c).
+            path = await mp3_as_wav(path)
+            content_type = "audio/wav"
         if content_type not in UPLOAD_CONTENT_TYPES:
             raise ServiceError(
                 415, "unsupported_media", f"{content_type or 'This output'} cannot be used as an input"

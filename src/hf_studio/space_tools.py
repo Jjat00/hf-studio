@@ -28,6 +28,10 @@ from .providers.base import KeyCheck, Polled, Provider, ProviderError, Submitted
 log = logging.getLogger("hf_studio.space_tools")
 
 TOOL_PROVIDER = "hf-studio"
+AUDIO_PROVIDER = "elevenlabs"
+# Proveedores internos del worker que trabajan dentro de este proceso (salidas `local://`): su copia guardada
+# es obligatoria y se pueden cancelar en curso.
+BACKGROUND_PROVIDERS = (TOOL_PROVIDER, AUDIO_PROVIDER)
 LOCAL_SCHEME = "local://"
 MAX_COMBINE = 10
 MAX_MIX_AUDIO = 4
@@ -135,21 +139,21 @@ class ToolError(Exception):
     pass
 
 
-class LocalTools(Provider):
-    """Proveedor interno del worker para las herramientas: cada envío es una tarea asyncio con ffmpeg."""
+class BackgroundProvider(Provider):
+    """Proveedor interno del worker: cada envío es una tarea asyncio de este proceso que deja su salida en
+    `storage/tool-work/<id>/`. Se puede cancelar en curso, se cierra al apagar, limpia sus parciales y su
+    salida se copia a almacenamiento propio antes de borrarla. Las subclases implementan `produce`."""
 
-    name = TOOL_PROVIDER
-    title = "HF Studio (local)"
     env_var = ""
     base_url = ""
     signup_url = ""
     key_url = ""
-    blurb = "Local tools (ffmpeg), free"
+    work_name = "tool-work"
 
     def __init__(self, settings: Settings, transport=None, plain=None):
         super().__init__(settings, transport)
         self.download_client = plain or self._plain  # descargas de los medios de entrada (CDN de Higgsfield)
-        self.work = Path(settings.storage_dir) / "tool-work"
+        self.work = Path(settings.storage_dir) / self.work_name
         self.tasks: dict[str, asyncio.Task] = {}
         # Tareas canceladas a propósito: un sondeo que llegue a la vez las informa como canceladas, no como
         # perdidas por un reinicio (revisión 59).
@@ -162,12 +166,19 @@ class LocalTools(Provider):
     async def check_key(self) -> KeyCheck:
         return KeyCheck(valid=True)
 
+    def accepts(self, model: str) -> bool:
+        raise NotImplementedError
+
+    async def produce(self, folder: Path, model: str, arguments: dict) -> tuple[str, str, str]:
+        """Genera la salida en `folder` y devuelve (tipo, nombre de archivo, content type)."""
+        raise NotImplementedError
+
     async def submit_job(
         self, model: str, arguments: dict[str, Any], webhook_url: str | None = None
     ) -> Submitted:
-        if model not in TOOLS:
-            raise ProviderError("unsupported", f"Unknown tool {model!r}", provider=self.name)
-        request_id = f"tool-{uuid.uuid4().hex}"
+        if not self.accepts(model):
+            raise ProviderError("unsupported", f"Unknown model {model!r}", provider=self.name)
+        request_id = f"{self.name}-{uuid.uuid4().hex}"
         self.tasks[request_id] = asyncio.create_task(self._run(request_id, model, arguments), name=request_id)
         return Submitted(request_id=request_id, status="in_progress")
 
@@ -184,13 +195,13 @@ class LocalTools(Provider):
             return Polled("canceled")
         exc = task.exception()
         if exc is not None:
-            return Polled("failed", error=str(exc) or type(exc).__name__)
+            return Polled("failed", error=str(getattr(exc, "message", None) or exc) or type(exc).__name__)
         kind, name, content_type = task.result()
         return Polled("completed", outputs=[{"kind": kind, "url": f"{LOCAL_SCHEME}{request_id}/{name}",
                                              "content_type": content_type}])  # fmt: skip
 
     async def cancel_job(self, request_id: str, cancel_url: str | None = None) -> None:
-        """Cancela la tarea (y su ffmpeg) y espera a que termine; sus archivos de trabajo se borran."""
+        """Cancela la tarea (y su subproceso) y espera a que termine; sus archivos de trabajo se borran."""
         self.canceled.add(request_id)
         task = self.tasks.pop(request_id, None)
         if task is not None and not task.done():
@@ -215,17 +226,47 @@ class LocalTools(Provider):
         """Copia la salida a almacenamiento propio. El original solo se borra después de copiarlo entero: si la
         copia falla, sigue ahí para reintentar (revisión 58)."""
         if not url.startswith(LOCAL_SCHEME):
-            raise OSError(f"Not a local tool output: {url}")
+            raise OSError(f"Not a local output: {url}")
         request_id, name = url[len(LOCAL_SCHEME) :].split("/", 1)
         if "/" in name or ".." in request_id:
-            raise OSError(f"Invalid local tool output: {url}")
+            raise OSError(f"Invalid local output: {url}")
         src = self.work / request_id / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_suffix(dest.suffix + ".part")
         shutil.copyfile(src, tmp)
         tmp.replace(dest)
         shutil.rmtree(self.work / request_id, ignore_errors=True)
-        return dest.stat().st_size, "image/png" if name.endswith(".png") else "video/mp4"
+        types = {".png": "image/png", ".mp4": "video/mp4", ".mp3": "audio/mpeg"}
+        return dest.stat().st_size, types.get(dest.suffix, "application/octet-stream")
+
+    async def _run(self, request_id: str, model: str, arguments: dict) -> tuple[str, str, str]:
+        folder = self.work / request_id
+        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            return await self.produce(folder, model, arguments)
+        except (
+            BaseException
+        ):  # fallo o cancelación: no quedan parciales (la salida buena se guarda al entregarla)
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+
+
+class LocalTools(BackgroundProvider):
+    """Herramientas locales (ffmpeg): fotograma, combinar y mezclar."""
+
+    name = TOOL_PROVIDER
+    title = "HF Studio (local)"
+    blurb = "Local tools (ffmpeg), free"
+
+    def accepts(self, model: str) -> bool:
+        return model in TOOLS
+
+    async def produce(self, folder: Path, model: str, arguments: dict) -> tuple[str, str, str]:
+        if model == "hf-studio/frame":
+            return await self._frame(folder, arguments)
+        if model == "hf-studio/combine":
+            return await self._combine(folder, arguments)
+        return await self._mix(folder, arguments)
 
     async def _local(self, url: str) -> str:
         path = await cached_source(url, Path(self.settings.storage_dir), self.download_client,
@@ -233,21 +274,6 @@ class LocalTools(Provider):
         if path is None:
             raise ToolError("A connected file could not be read as audio or video")
         return path
-
-    async def _run(self, request_id: str, model: str, arguments: dict) -> tuple[str, str, str]:
-        folder = self.work / request_id
-        folder.mkdir(parents=True, exist_ok=True)
-        try:
-            if model == "hf-studio/frame":
-                return await self._frame(folder, arguments)
-            if model == "hf-studio/combine":
-                return await self._combine(folder, arguments)
-            return await self._mix(folder, arguments)
-        except (
-            BaseException
-        ):  # fallo o cancelación: no quedan parciales (la salida buena se guarda al entregarla)
-            shutil.rmtree(folder, ignore_errors=True)
-            raise
 
     async def _frame(self, folder: Path, a: dict) -> tuple[str, str, str]:
         src = await self._local(a["video_url"])

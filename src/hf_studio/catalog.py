@@ -30,9 +30,11 @@ class Catalog:
         self.synced_at: str = data["synced_at"]
         self.models: dict[str, dict] = {m["id"]: m for m in data["models"]}
         # Herramientas locales de HF Studio (fotograma, combinar, mezclar): modelos propios, gratis.
+        # y nodos de audio de ElevenLabs para Spaces (voz, efecto, música).
+        from .space_audio import AUDIO_NODES
         from .space_tools import TOOLS
 
-        for tool_id, tool in TOOLS.items():
+        for tool_id, tool in {**TOOLS, **AUDIO_NODES}.items():
             self.models.setdefault(tool_id, tool)
         self._validators = {
             mid: Draft202012Validator(m["input_schema"], format_checker=_formats)

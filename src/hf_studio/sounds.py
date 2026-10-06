@@ -226,6 +226,10 @@ KINDS = {
     "elevenlabs/sound-effects": "sound_effect",
     "elevenlabs/music": "music",
     "elevenlabs/voice-isolator": "isolated",
+    # Nodos de audio de Spaces (space_audio).
+    "elevenlabs/tts": "speech",
+    "elevenlabs/sfx": "sound_effect",
+    "elevenlabs/music-gen": "music",
 }
 
 

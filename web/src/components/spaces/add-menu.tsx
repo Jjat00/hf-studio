@@ -1,11 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { ImageIcon, Search, StickyNote, Type, Upload, Video, Wrench } from "lucide-react";
+import { AudioLines, ImageIcon, Search, StickyNote, Type, Upload, Video, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { matchesModel, workflowLabel } from "@/lib/i18n/workflow";
-import { isTool, type PortKind } from "@/lib/spaces";
+import { isAudioNode, isTool, type PortKind } from "@/lib/spaces";
 import { modelLabel } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
@@ -46,12 +46,16 @@ export function AddMenu({
     const query = q.trim().toLowerCase();
     const nodes = base.filter((i) => !query || i.title.toLowerCase().includes(query));
     const gens = models
-      .filter((m) => m.output === "image" || m.output === "video")
+      .filter((m) => m.output === "image" || m.output === "video" || isAudioNode(m.id))
       .filter((m) => !from || (m.inputs ?? []).includes(from))
       // Las herramientas se encuentran también por el nombre y la descripción que se muestran (revisión 58).
-      .filter((m) => matchesModel(m, q.trim(), locale, isTool(m.id) ? `${s.toolNames[m.id] ?? ""} ${s.toolHints[m.id] ?? ""}` : ""))
+      .filter((m) =>
+        matchesModel(m, q.trim(), locale, `${s.toolNames[m.id] ?? s.audioNames[m.id] ?? ""} ${s.toolHints[m.id] ?? s.audioHints[m.id] ?? ""}`),
+      )
       .map<Item>((m) => {
         const { name, workflow } = modelLabel(m.title);
+        if (isAudioNode(m.id))
+          return { key: m.id, choice: { type: "generator", model: m.id }, icon: AudioLines, title: s.audioNames[m.id] ?? name, hint: s.audioHints[m.id] ?? "", group: s.audioGroup };
         if (isTool(m.id)) {
           const title = s.toolNames[m.id] ?? name;
           return { key: m.id, choice: { type: "generator", model: m.id }, icon: Wrench, title, hint: s.toolHints[m.id] ?? "", group: s.tools };
@@ -65,7 +69,7 @@ export function AddMenu({
           group: m.output === "video" ? s.addVideo : s.addImage,
         };
       });
-    const groups = [s.tools, s.addImage, s.addVideo];
+    const groups = [s.tools, s.audioGroup, s.addImage, s.addVideo];
     return [...nodes, ...groups.flatMap((g) => gens.filter((x) => x.group === g))];
   }, [from, models, q, locale, s]);
 

@@ -63,7 +63,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
   regenerated with `hf-studio sync-catalog`), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
-  internal worker-only provider).
+  internal worker-only provider), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models).
 - Every MCP tool declares `title` and all four hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`); `tests/test_mcp_tools.py` pins them. Keep them true to what the handler does.
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in
