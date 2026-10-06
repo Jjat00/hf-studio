@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from sqlalchemy import select, update
 
 from hf_studio.db import Job, SpaceRun
@@ -519,3 +521,74 @@ async def test_a_rejected_fallback_approval_publishes_the_fresh_total(env):  # n
         assert (await s.get(Job, job_id)).status == "awaiting_approval"
     ok = await http.post(f"/v1/spaces/{space_id}/runs/{run_id}/approve", json={"max_total_usd": 1.025})
     assert ok.status_code == 200
+
+
+async def test_the_same_idempotency_key_returns_the_same_run(env):  # noqa: F811
+    """Revisión 64: repetir el arranque (respuesta perdida, misma cotización) no crea otra corrida."""
+    app, http, _ = env
+    space_id, version = await make_space(http, [gen("g1", prompt="a kite", **SETTINGS)])
+    body = {"mode": "workflow", "version": version, "max_total_usd": 1}
+    headers = {"Idempotency-Key": "quote-q_1"}
+    first = await http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers)
+    assert first.status_code == 201
+    await http.post(f"/v1/spaces/{space_id}/runs/{first.json()['id']}/cancel")  # ya terminó
+    again = await http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers)
+    assert (
+        again.status_code == 200 and again.json()["id"] == first.json()["id"] and again.json()["deduplicated"]
+    )
+    other = await http.post(f"/v1/spaces/{space_id}/runs", json={**body, "max_total_usd": 2}, headers=headers)
+    assert other.status_code == 409 and other.json()["error"]["code"] == "idempotency_conflict"
+    async with app.state.sessions() as s:
+        assert len((await s.scalars(select(SpaceRun))).all()) == 1
+
+
+async def test_run_identity_survives_approval_and_checks_the_version(env):  # noqa: F811
+    """Revisión 65: la identidad es la petición original (con su versión y su tope), no el tope aprobado después."""
+    app, http, _ = env
+    space_id, version = await make_space(
+        http, [gen("g1", prompt="a kite", **SETTINGS), gen("g2", prompt="a boat", **SETTINGS)]
+    )
+    body = {"mode": "workflow", "version": version, "max_total_usd": 0.71}
+    headers = {"Idempotency-Key": "quote-q_2"}
+    run = (await http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers)).json()
+    await tick(app, run["id"])  # g2 no cabe: pausa
+    await http.post(f"/v1/spaces/{space_id}/runs/{run['id']}/approve", json={"max_total_usd": 1.42})
+    again = await http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers)
+    assert again.status_code == 200 and again.json()["id"] == run["id"]
+    other = await http.post(
+        f"/v1/spaces/{space_id}/runs", json={**body, "version": version + 1}, headers=headers
+    )
+    assert other.status_code == 409 and other.json()["error"]["code"] == "idempotency_conflict"
+
+
+async def test_two_simultaneous_starts_with_one_key_make_one_run(env):  # noqa: F811
+    app, http, _ = env
+    space_id, version = await make_space(http, [gen("g1", prompt="a kite", **SETTINGS)])
+    body = {"mode": "workflow", "version": version, "max_total_usd": 1}
+    headers = {"Idempotency-Key": "quote-q_3"}
+    a, b = await asyncio.gather(
+        *[http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers) for _ in range(2)]
+    )
+    assert sorted([a.status_code, b.status_code]) == [200, 201] and a.json()["id"] == b.json()["id"]
+    async with app.state.sessions() as s:
+        assert len((await s.scalars(select(SpaceRun))).all()) == 1
+
+
+async def test_an_existing_database_gets_the_new_run_columns(tmp_path):
+    """Revisión 66: una base previa (sin las columnas de idempotencia) se actualiza al arrancar; `jobs` no cambia."""
+    from sqlalchemy import inspect, text
+
+    from hf_studio.db import init_db, make_engine
+
+    engine = make_engine(f"sqlite+aiosqlite:///{tmp_path}/old.db")
+    await init_db(engine)
+    async with engine.begin() as conn:  # así era la tabla antes de la fase 3a
+        await conn.execute(text("DROP INDEX ix_space_runs_key"))
+        await conn.execute(text("ALTER TABLE space_runs DROP COLUMN request_hash"))
+        await conn.execute(text("ALTER TABLE space_runs DROP COLUMN idempotency_key"))
+    await init_db(engine)
+    async with engine.connect() as conn:
+        runs = await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns("space_runs")})
+        jobs = await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns("jobs")})
+    await engine.dispose()
+    assert {"idempotency_key", "request_hash"} <= runs and "request_hash" not in jobs

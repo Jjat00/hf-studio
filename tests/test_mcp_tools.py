@@ -42,6 +42,15 @@ TOOLS = {
     "use_output": (False, False, True, True),  # sube la copia local a Higgsfield; misma URL 5 días
     "create_element": (False, False, False, True),  # sube las imágenes a Higgsfield
     "delete_element": (False, True, True, False),
+    "list_spaces": READ,
+    "get_space": READ,
+    "create_space": (False, False, False, False),
+    "update_space": (False, True, False, False),
+    "estimate_space_run": (False, False, False, True),  # cotiza y puede subir salidas previas a Higgsfield
+    "run_space": SPEND,
+    "get_space_run": READ,
+    "approve_space_run": SPEND,
+    "cancel_space_run": (False, True, True, False),
 }
 
 
@@ -70,7 +79,7 @@ def test_every_tool_declares_all_four_hints(name):
 
 def test_tools_that_spend_credits_say_so_in_the_title():
     for name in ("generate", "generate_batch", "run_preset", "change_voice", "text_to_speech",
-                 "sound_effect", "compose_music", "isolate_voice"):  # fmt: skip
+                 "sound_effect", "compose_music", "isolate_voice", "run_space", "approve_space_run"):  # fmt: skip
         assert "spends credits" in _listed()[name].title
 
 
@@ -246,3 +255,77 @@ def test_create_element_sends_files_and_urls(calls, tmp_path):
     }
     with pytest.raises(ToolError, match="No existe"):
         mcp_server.create_element("x", "y", [str(tmp_path / "no.png")])
+
+
+@pytest.fixture
+def space_calls(monkeypatch):
+    seen = []
+
+    def call(method, path, **kw):
+        seen.append((method, path, kw))
+        if method == "GET" and path == "/v1/spaces/s1":
+            return {
+                "id": "s1",
+                "version": 7,
+                "graph": {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}},
+            }
+        if kw.get("json", {}).get("dry_run") is True:
+            return {"steps": [{"node_id": "g1", "status": "ok", "usd": 0.4}], "total_usd": 0.4, "pending": 0}
+        return {"ok": True}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    return seen
+
+
+def test_a_space_run_needs_its_quote_and_uses_the_quoted_total(space_calls):
+    quote = mcp_server.estimate_space_run("s1", "downstream", "g1")
+    assert (
+        space_calls[-1][:2] == ("POST", "/v1/spaces/s1/runs")
+        and space_calls[-1][2]["json"]["dry_run"] is True
+    )
+    assert quote["version"] == 7 and quote["quote_id"]
+    with pytest.raises(ToolError, match="quote_id"):
+        mcp_server.run_space("s1", "q_inventado", "downstream", "g1", version=7)
+    with pytest.raises(ToolError, match="quote_id"):  # otro modo u otra versión: otra petición
+        mcp_server.run_space("s1", quote["quote_id"], "workflow", None, version=7)
+    with pytest.raises(ToolError, match="lower"):
+        mcp_server.run_space("s1", quote["quote_id"], "downstream", "g1", version=7, max_total_usd=0.1)
+    mcp_server.run_space("s1", quote["quote_id"], "downstream", "g1", version=7)
+    key = space_calls[-1][2]["headers"]["Idempotency-Key"]
+    mcp_server.run_space("s1", quote["quote_id"], "downstream", "g1", version=7)  # reintento: misma clave
+    assert space_calls[-1][2]["headers"]["Idempotency-Key"] == key
+    assert space_calls[-1][:2] == ("POST", "/v1/spaces/s1/runs")
+    assert space_calls[-1][2]["json"] == {
+        "mode": "downstream",
+        "version": 7,
+        "max_total_usd": 0.4,
+        "node_id": "g1",
+    }
+
+
+def test_update_space_keeps_what_it_does_not_replace(space_calls):
+    node = {"id": "t", "type": "text", "position": {"x": 0, "y": 0}, "data": {"text": "hola"}}
+    mcp_server.update_space("s1", 7, nodes=[node])
+    method, path, kw = space_calls[-1]
+    assert (method, path) == ("PUT", "/v1/spaces/s1")
+    assert (
+        kw["json"]["version"] == 7
+        and kw["json"]["graph"]["edges"] == []
+        and kw["json"]["graph"]["nodes"] == [node]
+    )
+
+
+SPACE_ROUTES = [
+    (lambda: mcp_server.list_spaces(), "GET", "/v1/spaces"),
+    (lambda: mcp_server.get_space("s1"), "GET", "/v1/spaces/s1"),
+    (lambda: mcp_server.create_space("Spot"), "POST", "/v1/spaces"),
+    (lambda: mcp_server.get_space_run("s1", "r1"), "GET", "/v1/spaces/s1/runs/r1"),
+    (lambda: mcp_server.approve_space_run("s1", "r1", 1.5), "POST", "/v1/spaces/s1/runs/r1/approve"),
+    (lambda: mcp_server.cancel_space_run("s1", "r1"), "POST", "/v1/spaces/s1/runs/r1/cancel"),
+]
+
+
+@pytest.mark.parametrize(("run", "method", "path"), SPACE_ROUTES)
+def test_space_tools_hit_their_route(space_calls, run, method, path):
+    run()
+    assert space_calls[-1][:2] == (method, path)

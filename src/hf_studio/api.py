@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import hmac
+import json
 import logging
 import mimetypes
 import os
@@ -1565,9 +1567,41 @@ def create_app(
         return run
 
     @app.post("/v1/spaces/{space_id}/runs", tags=["spaces"])
-    async def create_run(space_id: str, body: RunIn, session: Session, owner: Owner) -> JSONResponse:
+    async def create_run(
+        space_id: str,
+        body: RunIn,
+        session: Session,
+        owner: Owner,
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> JSONResponse:
         """Corre un nodo y lo que depende de él, o todo el lienzo, en el servidor. Primero `dry_run` (precio de
-        cada paso y total); luego la misma petición con `max_total_usd`, el tope que aprobó el usuario."""
+        cada paso y total); luego la misma petición con `max_total_usd`, el tope que aprobó el usuario.
+        Con `Idempotency-Key`, repetirla (p. ej. tras perder la respuesta) devuelve la misma corrida, aunque ya
+        haya terminado; con otra petición, 409."""
+        owner_id = owner.id  # valor propio: un rollback expira los objetos del ORM (revisión 65)
+        request_hash = hashlib.sha256(
+            json.dumps([space_id, body.mode, body.node_id, body.version, body.max_total_usd]).encode()
+        ).hexdigest()
+
+        async def same_request() -> JSONResponse | None:
+            """La corrida que ya arrancó esta misma Idempotency-Key (o 409 si fue otra petición)."""
+            if not idempotency_key or body.dry_run:
+                return None
+            same = await session.scalar(
+                select(SpaceRun).where(
+                    SpaceRun.owner_id == owner_id, SpaceRun.idempotency_key == idempotency_key
+                )
+            )
+            if same is None:
+                return None
+            if same.request_hash != request_hash:
+                raise ServiceError(
+                    409, "idempotency_conflict", "This Idempotency-Key was already used for a different run"
+                )
+            return JSONResponse({**same.as_dict(), "deduplicated": True}, status_code=200)
+
+        if found := await same_request():
+            return found
         space = await get_owned_space(session, owner, space_id)
         if body.version != space.version:
             raise ServiceError(
@@ -1591,18 +1625,25 @@ def create_app(
             )
         )
         if active:
+            if (
+                found := await same_request()
+            ):  # la misma petición se coló entre la primera comprobación y esta
+                return found
             raise ServiceError(
                 409, "run_active", "This space already has a run in progress", {"run_id": active}
             )
         run = SpaceRun(
             space_id=space.id, owner_id=owner.id, mode=body.mode, start_node=body.node_id, graph=space.graph,
             order=order, nodes={i: {"status": "pending"} for i in order}, max_total_usd=body.max_total_usd,
+            idempotency_key=idempotency_key, request_hash=request_hash if idempotency_key else None,
         )  # fmt: skip
         session.add(run)
         try:
             await session.commit()
         except IntegrityError:
             await session.rollback()
+            if found := await same_request():  # la misma petición, a la vez: gana la primera
+                return found
             raise ServiceError(409, "run_active", "This space already has a run in progress") from None
         if settings.worker_enabled:
             app.state.space_runner.start(run.id)

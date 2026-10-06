@@ -61,7 +61,17 @@ JPG/PNG. create_element los guarda; list_elements los muestra. Para usarlos, pon
 elements de un modelo Kling 3.0 y cítalos en el prompt con @nombre (p. ej. "@zorro corre por la nieve").
 Solo salen por APIMart y KIE (KIE además exige image_url); nunca por Higgsfield.
 Para partir de una creación anterior (animar una imagen, usarla de referencia, editar o extender un video),
-use_output(generation_id) da su URL vigente; no reutilices URLs viejas de outputs, pueden haber caducado."""
+use_output(generation_id) da su URL vigente; no reutilices URLs viejas de outputs, pueden haber caducado.
+Spaces (lienzos de nodos): list_spaces, get_space, create_space y update_space leen y arman un lienzo; cada
+nodo es texto, medio, nota o generador (cualquier modelo del catálogo, incluidas las herramientas gratis
+hf-studio/frame, hf-studio/combine y hf-studio/mix y el audio elevenlabs/tts, elevenlabs/sfx y
+elevenlabs/music-gen). Una arista lleva la salida de un nodo a un campo de entrada de otro (targetHandle =
+clave del input_schema: prompt, image_url, video_url, audio_urls…). Para correrlo en el servidor:
+estimate_space_run (precio de cada paso y total, con quote_id) → dile al usuario el total y espera su OK →
+run_space con ese quote_id (si falla de forma ambigua, repítelo con el mismo quote_id: devuelve la misma
+corrida) → get_space_run hasta que termine. Si la corrida queda en awaiting_approval (un
+paso no cabe en el tope, no tiene precio o su respaldo cuesta más), dile el motivo y el nuevo total
+(pause.needed_total_usd) y, con su OK, approve_space_run; cancel_space_run la detiene."""
 
 mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
 # Cada herramienta declara las cuatro pistas para que el cliente avise antes de invocarla: solo lectura
@@ -859,6 +869,184 @@ def save_preset(generation_id: str, slug: str, title: str, description: str = ""
     """Guarda una generación como preset propio: mismos ajustes y medios, con el prompt como variable."""
     body = {"slug": slug, "title": title, "description": description}
     return _call("POST", f"/v1/presets/from-generation/{generation_id}", json=body)
+
+
+# --- Spaces --------------------------------------------------------------------------------------
+
+
+@mcp.tool(
+    title="List spaces",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def list_spaces() -> dict:
+    """Lienzos de nodos (Spaces) del cliente: id, título, versión, número de nodos y fechas."""
+    return _call("GET", "/v1/spaces")
+
+
+@mcp.tool(
+    title="Get space",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def get_space(space_id: str) -> dict:
+    """Un lienzo con su grafo completo (nodes, edges) y su `version` (la necesitan update_space y las corridas)."""
+    return _call("GET", f"/v1/spaces/{space_id}")
+
+
+@mcp.tool(
+    title="Create space",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+    ),
+)
+def create_space(title: str, nodes: list[dict] | None = None, edges: list[dict] | None = None) -> dict:
+    """Crea un lienzo de nodos (no genera nada ni gasta). El usuario lo ve en la UI, en /spaces.
+    nodes: [{id, type, position: {x, y}, data}] con type text (data.text), media (data.url de upload_media o
+    use_output, data.kind image|video|audio), note (data.text) o generator (data.model = id del catálogo,
+    data.values = ajustes de su input_schema, p. ej. {"prompt": "…", "duration": 5}). edges: [{id, source,
+    target, targetHandle}]: targetHandle es la clave del campo de entrada del generador destino (prompt,
+    image_url, end_image_url, image_urls, video_url, video_urls, audio_urls…) y el tipo debe encajar (texto →
+    prompt, imagen → campos de imagen…). Sin ciclos."""
+    graph = {"nodes": nodes or [], "edges": edges or []}
+    return _call("POST", "/v1/spaces", json={"title": title, "graph": graph})
+
+
+@mcp.tool(
+    title="Update space",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+    ),
+)
+def update_space(
+    space_id: str,
+    version: int,
+    title: str | None = None,
+    nodes: list[dict] | None = None,
+    edges: list[dict] | None = None,
+) -> dict:
+    """Reemplaza el título o el grafo de un lienzo (no gasta). `version` es la de get_space: si alguien guardó
+    antes, responde 409 y hay que volver a leerlo. Pasa nodes y edges completos (sustituyen a los anteriores)."""
+    body: dict[str, Any] = {"version": version}
+    if title is not None:
+        body["title"] = title
+    if nodes is not None or edges is not None:
+        current = _call("GET", f"/v1/spaces/{space_id}")["graph"]
+        body["graph"] = {**current, "nodes": nodes if nodes is not None else current["nodes"],
+                         "edges": edges if edges is not None else current["edges"]}  # fmt: skip
+    return _call("PUT", f"/v1/spaces/{space_id}", json=body)
+
+
+def _run_payload(space_id: str, mode: str, node_id: str | None, version: int) -> dict:
+    if mode not in ("workflow", "downstream"):
+        raise ToolError(
+            "mode must be workflow (todo el lienzo) or downstream (un nodo y lo que depende de él)"
+        )
+    return {"space_id": space_id, "mode": mode, "node_id": node_id, "version": version}
+
+
+@mcp.tool(
+    title="Estimate space run",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def estimate_space_run(space_id: str, mode: str = "workflow", node_id: str | None = None) -> dict:
+    """Precio de correr un lienzo en el servidor, sin gastar: cada paso (`steps`, status ok, unknown, later si se
+    cotiza al llegar o error) y `total_usd`. mode workflow = todo; downstream = node_id y lo que depende de él.
+    Devuelve quote_id: dile al usuario el total (y que los pasos `later` se cotizan al llegar: si no caben en
+    el tope, la corrida se pausa para preguntarle) y pásalo a run_space. No gasta, pero para cotizar puede
+    subir a Higgsfield (gratis) las salidas previas que el lienzo usa como entrada y registrarlas."""
+    version = _call("GET", f"/v1/spaces/{space_id}")["version"]
+    payload = _run_payload(space_id, mode, node_id, version)
+    body = {"mode": mode, "version": version, "dry_run": True, **({"node_id": node_id} if node_id else {})}
+    quote = _call("POST", f"/v1/spaces/{space_id}/runs", json=body)
+    estimate = {"usd": quote["total_usd"], "reserve_usd": None, "complete": True, "missing": []}
+    return {**quote, "version": version, "quote_id": _issue_quote(payload, estimate)}
+
+
+@mcp.tool(
+    title="Run space (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def run_space(
+    space_id: str,
+    quote_id: str,
+    mode: str = "workflow",
+    node_id: str | None = None,
+    version: int | None = None,
+    max_total_usd: float | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Arranca la corrida cotizada con estimate_space_run (mismos space_id, mode y node_id; version es la que
+    devolvió). El tope es el total que vio el usuario; max_total_usd solo si el usuario aprobó explícitamente
+    un tope mayor (para cubrir pasos que se cotizan al llegar). No espera: usa get_space_run.
+    Tras un error ambiguo, repite con el mismo quote_id (y la misma idempotency_key si pasaste una): devuelve
+    la misma corrida, nunca arranca otra ni paga dos veces."""
+    if version is None:
+        raise ToolError("Pass the version returned by estimate_space_run")
+    payload = _run_payload(space_id, mode, node_id, version)
+    # La clave queda ligada a la cotización: repetir run_space con el mismo quote_id (p. ej. tras un error
+    # ambiguo) devuelve la misma corrida en vez de arrancar otra (revisión 64).
+    key, approved = _authorize(payload, quote_id, idempotency_key, False)
+    budget = approved["usd"] or 0.0
+    if max_total_usd is not None:
+        if max_total_usd + 1e-9 < budget:
+            raise ToolError(f"max_total_usd cannot be lower than the quoted total ({budget})")
+        budget = max_total_usd
+    body = {
+        "mode": mode,
+        "version": version,
+        "max_total_usd": budget,
+        **({"node_id": node_id} if node_id else {}),
+    }
+    return _call("POST", f"/v1/spaces/{space_id}/runs", json=body, headers={"Idempotency-Key": key})
+
+
+@mcp.tool(
+    title="Get space run",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def get_space_run(space_id: str, run_id: str | None = None) -> dict:
+    """Estado de una corrida (o de las últimas, sin run_id): status, nodes (estado y job_id de cada paso),
+    committed_usd, max_total_usd y pause (motivo y needed_total_usd si espera aprobación)."""
+    if run_id:
+        return _call("GET", f"/v1/spaces/{space_id}/runs/{run_id}")
+    return _call("GET", f"/v1/spaces/{space_id}/runs", params={"limit": 5})
+
+
+@mcp.tool(
+    title="Approve space run (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def approve_space_run(
+    space_id: str, run_id: str, max_total_usd: float | None = None, accept_unknown_cost: bool = False
+) -> dict:
+    """Reanuda una corrida en awaiting_approval, solo con el OK del usuario: max_total_usd = el nuevo total
+    que aprobó (pause.needed_total_usd o más); accept_unknown_cost=True solo si aceptó un paso sin precio."""
+    body: dict[str, Any] = {"accept_unknown": accept_unknown_cost}
+    if max_total_usd is not None:
+        body["max_total_usd"] = max_total_usd
+    return _call("POST", f"/v1/spaces/{space_id}/runs/{run_id}/approve", json=body)
+
+
+@mcp.tool(
+    title="Cancel space run",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    ),
+)
+def cancel_space_run(space_id: str, run_id: str) -> dict:
+    """Detiene una corrida: no envía más pasos y cancela los que aún no cuestan; lo terminado se conserva."""
+    return _call("POST", f"/v1/spaces/{space_id}/runs/{run_id}/cancel")
 
 
 def main() -> None:

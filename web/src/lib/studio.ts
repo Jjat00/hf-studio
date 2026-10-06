@@ -237,10 +237,15 @@ export const studio = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...body, dry_run: true }),
     }),
-  startRun: (id: string, body: { mode: "downstream" | "workflow"; node_id?: string; version: number; max_total_usd: number }) =>
+  /** `idempotencyKey`: la misma por diálogo; reintentar tras perder la respuesta devuelve la misma corrida. */
+  startRun: (
+    id: string,
+    body: { mode: "downstream" | "workflow"; node_id?: string; version: number; max_total_usd: number },
+    idempotencyKey: string,
+  ) =>
     call<SpaceRun>(`/v1/spaces/${id}/runs`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
     }),
   runs: (id: string, limit = 10) => call<{ runs: SpaceRun[] }>(`/v1/spaces/${id}/runs?limit=${limit}`),

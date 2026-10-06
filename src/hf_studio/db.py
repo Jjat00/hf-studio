@@ -175,6 +175,10 @@ class SpaceRun(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
     mode: Mapped[str] = mapped_column(String(20))
     start_node: Mapped[str | None] = mapped_column(String(64))
+    # Idempotency-Key de quien la arrancó: repetir la petición devuelve esta misma corrida (revisión 64).
+    idempotency_key: Mapped[str | None] = mapped_column(String(200))
+    # Huella inmutable de esa petición (lienzo, versión, modo, nodo y tope original): no cambia al aprobar.
+    request_hash: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(24), index=True, default="running")
     graph: Mapped[dict] = mapped_column(JSON)
     order: Mapped[list] = mapped_column(JSON)
@@ -225,6 +229,7 @@ ADDED_COLUMNS = {
     },
     "elements": {"deleted_at": "DATETIME"},
     "uploads": {"source": "VARCHAR(80)"},
+    "space_runs": {"idempotency_key": "VARCHAR(200)", "request_hash": "VARCHAR(64)"},
 }
 
 
@@ -246,6 +251,12 @@ async def init_db(engine: AsyncEngine) -> None:
         # Bases creadas antes de la columna `source`: create_all no añade índices a tablas existentes.
         await conn.execute(
             text("CREATE UNIQUE INDEX IF NOT EXISTS ix_uploads_owner_source ON uploads (owner_id, source)")
+        )
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_space_runs_key ON space_runs (owner_id, idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL"
+            )
         )
         # Una sola corrida activa por Space, también frente a dos peticiones simultáneas.
         await conn.execute(

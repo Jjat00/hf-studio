@@ -681,6 +681,8 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     estimate: RunEstimate;
     /** Lienzo guardado que se cotizó: si cambia, la cotización deja de valer (revisión 55). */
     snapshot: string;
+    /** Idempotency-Key del arranque: un reintento no crea otra corrida (revisión 64). */
+    key: string;
   } | null>(null);
   const [runBusy, setRunBusy] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -746,7 +748,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         const body = { mode, ...(nodeId ? { node_id: nodeId } : {}), version: version.current };
         const estimate = await studio.estimateRun(space.id, body);
         if (`${latest.current.graphJson}|${latest.current.title}` !== snapshot) throw new Error(s.changed);
-        setRunDialog({ ...body, estimate, snapshot });
+        setRunDialog({ ...body, estimate, snapshot, key: crypto.randomUUID() });
       } catch (e) {
         setRunError(errorText(e));
       } finally {
@@ -768,7 +770,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           throw new Error(s.changed);
         }
         const { mode, node_id, version: v } = runDialog;
-        const r = await studio.startRun(space.id, { mode, ...(node_id ? { node_id } : {}), version: v, max_total_usd: budget });
+        const r = await studio.startRun(space.id, { mode, ...(node_id ? { node_id } : {}), version: v, max_total_usd: budget }, runDialog.key);
         setRun(r);
         setRunDialog(null);
       } catch (e) {

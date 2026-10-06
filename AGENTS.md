@@ -46,6 +46,9 @@ owner's credits.
 - Kling 3.0 elements: `list_elements` / `create_element` (2–4 JPG/PNG images). Put their `el_…` ids in the model's
   `elements` field and cite each as `@name` in the prompt; they run on APIMart and KIE only (KIE also needs
   `image_url`).
+- Spaces (node canvases): `create_space` / `update_space` build one; `estimate_space_run` quotes every step and the
+  total (with a `quote_id`), and after the user's OK `run_space` runs it on the server under that budget. A run that
+  pauses (`awaiting_approval`) needs the user's OK on `pause.needed_total_usd` before `approve_space_run`.
 - The server instructions (in `src/hf_studio/mcp_server.py`, `INSTRUCTIONS`) are the source of truth.
 
 ## Work on the code
