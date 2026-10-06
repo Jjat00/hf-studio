@@ -19,6 +19,7 @@ from .providers.base import Provider, ProviderError
 from .providers.prices import PriceBook
 from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
 from .providers.routes import Route, routes_for, with_defaults
+from .space_tools import TOOL_PROVIDER, is_tool
 
 BALANCE_TTL = 60.0
 OUTDATED_PRICES = 3 * 24 * 3600  # una tabla sin poder actualizarse en 3 días ya no da precios exactos
@@ -135,6 +136,11 @@ class Router:
         hints = dict(hints or {})
         hints.pop("elements", None)  # planes guardados antes de la revisión 43: nunca se usa ese snapshot
         logical = with_defaults(model["input_schema"], arguments)
+        if is_tool(model["id"]):
+            # Herramienta local (ffmpeg): una sola opción, gratis, en el proveedor interno del worker.
+            option = Option(TOOL_PROVIDER, "HF Studio (local)", model["id"], logical, 0.0, "exact",
+                            basis="Local tool (ffmpeg): free")  # fmt: skip
+            return Plan(model["id"], [option], [], hints, forced=only is not None)
         ids = element_ids(arguments.get("elements"))
         elements = await self.elements(ids) if ids and self.elements else {}
         options: list[Option] = []

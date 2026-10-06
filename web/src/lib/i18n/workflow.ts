@@ -29,8 +29,9 @@ export function workflowLabel(workflow: string, locale: Locale) {
 const fold = (s: string) => s.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
 
 /** ¿Coincide la búsqueda con el id, el título original o el flujo tal como se muestra en este idioma? */
-export function matchesModel(m: { id: string; title: string }, query: string, locale: Locale) {
+/** `extra`: más texto en el que buscar (p. ej. el nombre traducido de una herramienta de HF Studio). */
+export function matchesModel(m: { id: string; title: string }, query: string, locale: Locale, extra = "") {
   if (!query) return true;
   const workflow = m.title.replace(/ API$/, "").split(" — ")[1] ?? "";
-  return fold(`${m.id} ${m.title} ${workflowLabel(workflow, locale)}`).includes(fold(query));
+  return fold(`${m.id} ${m.title} ${workflowLabel(workflow, locale)} ${extra}`).includes(fold(query));
 }

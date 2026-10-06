@@ -9,7 +9,7 @@ import { CostPanel } from "@/components/studio/cost-panel";
 import { ElementPicker } from "@/components/studio/element-picker";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { ModelPicker, ModelRow } from "@/components/studio/model-picker";
-import { mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
+import { isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
 import { costShort } from "@/lib/studio";
 import { selectedRun, useSpace } from "./context";
 import { portLabel } from "./nodes";
@@ -53,7 +53,16 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
-        <ModelRow model={summary} onClick={() => setPicking(true)} />
+        {isTool(data.model) ? (
+          // Una herramienta no cambia de modelo: su nombre traducido va fijo.
+          <div className="rounded-2xl border border-line bg-surface-3 px-4 py-3">
+            <span className="block text-[13px] text-fg-3">{s.tools}</span>
+            <span className="text-[16px] font-semibold">{s.toolNames[data.model] ?? data.model}</span>
+            <span className="mt-0.5 block text-[12px] text-fg-3">{s.toolHints[data.model]}</span>
+          </div>
+        ) : (
+          <ModelRow model={summary} onClick={() => setPicking(true)} />
+        )}
         {!detail ? (
           <div className="shimmer h-40 rounded-2xl" />
         ) : (

@@ -1,11 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { ImageIcon, Search, StickyNote, Type, Upload, Video } from "lucide-react";
+import { ImageIcon, Search, StickyNote, Type, Upload, Video, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { matchesModel, workflowLabel } from "@/lib/i18n/workflow";
-import type { PortKind } from "@/lib/spaces";
+import { isTool, type PortKind } from "@/lib/spaces";
 import { modelLabel } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
@@ -48,9 +48,14 @@ export function AddMenu({
     const gens = models
       .filter((m) => m.output === "image" || m.output === "video")
       .filter((m) => !from || (m.inputs ?? []).includes(from))
-      .filter((m) => matchesModel(m, q.trim(), locale))
+      // Las herramientas se encuentran también por el nombre y la descripción que se muestran (revisión 58).
+      .filter((m) => matchesModel(m, q.trim(), locale, isTool(m.id) ? `${s.toolNames[m.id] ?? ""} ${s.toolHints[m.id] ?? ""}` : ""))
       .map<Item>((m) => {
         const { name, workflow } = modelLabel(m.title);
+        if (isTool(m.id)) {
+          const title = s.toolNames[m.id] ?? name;
+          return { key: m.id, choice: { type: "generator", model: m.id }, icon: Wrench, title, hint: s.toolHints[m.id] ?? "", group: s.tools };
+        }
         return {
           key: m.id,
           choice: { type: "generator", model: m.id },
@@ -60,7 +65,8 @@ export function AddMenu({
           group: m.output === "video" ? s.addVideo : s.addImage,
         };
       });
-    return [...nodes, ...gens.filter((g) => g.group === s.addImage), ...gens.filter((g) => g.group === s.addVideo)];
+    const groups = [s.tools, s.addImage, s.addVideo];
+    return [...nodes, ...groups.flatMap((g) => gens.filter((x) => x.group === g))];
   }, [from, models, q, locale, s]);
 
   useEffect(() => {

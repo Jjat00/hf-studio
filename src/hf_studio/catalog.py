@@ -29,6 +29,11 @@ class Catalog:
     def __init__(self, data: dict):
         self.synced_at: str = data["synced_at"]
         self.models: dict[str, dict] = {m["id"]: m for m in data["models"]}
+        # Herramientas locales de HF Studio (fotograma, combinar, mezclar): modelos propios, gratis.
+        from .space_tools import TOOLS
+
+        for tool_id, tool in TOOLS.items():
+            self.models.setdefault(tool_id, tool)
         self._validators = {
             mid: Draft202012Validator(m["input_schema"], format_checker=_formats)
             for mid, m in self.models.items()

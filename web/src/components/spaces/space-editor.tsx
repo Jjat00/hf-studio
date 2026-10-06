@@ -30,6 +30,7 @@ import {
   inPorts,
   KIND_COLOR,
   mediaFields,
+  isTool,
   MAX_RUNS,
   newId,
   RUN_ACTIVE,
@@ -245,7 +246,8 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
 
   const nodeName = useCallback(
     (n: SpaceNode) => {
-      if (n.type === "generator") return modelLabel(models.get(n.data.model)?.title ?? n.data.model).name;
+      if (n.type === "generator")
+        return isTool(n.data.model) ? (s.toolNames[n.data.model] ?? n.data.model) : modelLabel(models.get(n.data.model)?.title ?? n.data.model).name;
       if (n.type === "media") return n.data.name || s.addMedia;
       return s.addText;
     },
@@ -576,7 +578,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   // «/» abre el buscador de nodos (salvo escribiendo en un campo).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
+      const el = e.target instanceof Element ? e.target : null;
       if (e.key !== "/" || el?.closest("input, textarea, select, [contenteditable=true]")) return;
       e.preventDefault();
       openMenu();

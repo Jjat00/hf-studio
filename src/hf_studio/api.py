@@ -107,6 +107,7 @@ from .space_runs import (
     selected_run,
     spend_of,
 )
+from .space_tools import TOOL_PROVIDER, LocalTools, is_tool, tool_media
 from .spaces import GraphError, check_graph, check_values, empty_graph, input_kinds
 from .voice import (
     VOICE_MODEL,
@@ -306,7 +307,12 @@ def create_app(
         app.state.providers = provider_registry.build(settings, transport)
         # Higgsfield también guarda los medios de entrada y cotiza su catálogo.
         app.state.hf = app.state.providers[provider_registry.DEFAULT_PROVIDER]
-        app.state.worker = Worker(app.state.sessions, app.state.providers, settings)
+        # El worker conoce además el proveedor interno de las herramientas locales (no se lista como proveedor).
+        app.state.local_tools = LocalTools(settings, transport, plain=app.state.hf.plain)
+        app.state.local_tools.sweep()
+        app.state.worker = Worker(
+            app.state.sessions, {**app.state.providers, TOOL_PROVIDER: app.state.local_tools}, settings
+        )
         app.state.prices = PriceBook(Path(settings.storage_dir) / "prices")
 
         async def element_resolver(ids: list[str]) -> dict[str, dict]:
@@ -343,6 +349,7 @@ def create_app(
         await app.state.worker.stop()
         for provider in app.state.providers.values():
             await provider.aclose()
+        await app.state.local_tools.aclose()
         await app.state.eleven.aclose()
         await engine.dispose()
 
@@ -576,6 +583,13 @@ def create_app(
         # el cliente (las pistas no llevan elementos).
         hints.pop("elements", None)
         await check_element_ids(session, arguments.get("elements"))
+        if is_tool(model["id"]):
+            # ffmpeg abre estos archivos en local: solo subidas o salidas propias (como keep_source_audio).
+            for url in tool_media(arguments):
+                if not await trusted_media(session, owner, url):
+                    raise ServiceError(
+                        422, "untrusted_source", "Tools only take files from /v1/uploads or your generations"
+                    )
         if provider and provider not in provider_registry.PROVIDERS:
             raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
         return await request.app.state.router.plan(model, arguments, hints, only=provider)
@@ -1031,16 +1045,30 @@ def create_app(
                     409, "not_cancelable", f"Cannot cancel a generation in status {job.status}"
                 )
             return job_out(job)
-        if job.status == "queued" and job.hf_request_id:
+        if job.hf_request_id and (
+            job.status == "queued" or (job.status == "in_progress" and job.provider == TOOL_PROVIDER)
+        ):
+            # Una herramienta local sí se puede detener en curso: la tarea es nuestra (revisión 58).
             await request.app.state.worker.provider(job).cancel_job(job.hf_request_id, job.cancel_url)
             job.status, job.finished_at, job.next_check_at = "canceled", utcnow(), None
         else:
             raise ServiceError(409, "not_cancelable", f"Cannot cancel a generation in status {job.status}")
-        if not await request.app.state.worker.commit(session, job.id):
-            raise ServiceError(
-                409, "not_cancelable", "The generation changed while canceling; check it again"
-            )
-        return job_out(job)
+        local = job.provider == TOOL_PROVIDER
+        for _ in range(3):
+            if await request.app.state.worker.commit(session, job.id):
+                return job_out(job)
+            # Con una herramienta local la tarea ya se detuvo: un sondeo que se cruzó (guardó `in_progress`
+            # o ya `canceled`) no invalida la cancelación. Otro estado final sí gana (revisiones 59 y 60).
+            fresh = await session.get(Job, job_id, populate_existing=True)
+            if not local or fresh is None:
+                break
+            if fresh.status == "canceled":
+                return job_out(fresh)
+            if fresh.status != "in_progress":
+                break
+            fresh.status, fresh.finished_at, fresh.next_check_at = "canceled", utcnow(), None
+            job = fresh
+        raise ServiceError(409, "not_cancelable", "The generation changed while canceling; check it again")
 
     @app.get("/v1/generations/{job_id}/files/{name}", tags=["generaciones"])
     async def get_file(job_id: str, name: str, session: Session, owner: Owner) -> FileResponse:

@@ -61,7 +61,9 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
-  regenerated with `hf-studio sync-catalog`).
+  regenerated with `hf-studio sync-catalog`), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
+  canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
+  internal worker-only provider).
 - Every MCP tool declares `title` and all four hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`); `tests/test_mcp_tools.py` pins them. Keep them true to what the handler does.
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in

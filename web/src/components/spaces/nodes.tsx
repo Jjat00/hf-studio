@@ -10,7 +10,7 @@ import { CreationsPicker } from "@/components/studio/creations-picker";
 import type { Dict } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
 import { humanize } from "@/lib/schema";
-import { inPorts, KIND_COLOR, kindOfUrl, type GeneratorNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
+import { inPorts, isTool, KIND_COLOR, kindOfUrl, type GeneratorNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
 import { costShort, modelLabel, outputSrc, studio } from "@/lib/studio";
 import type { ModelDetail, Output } from "@/lib/types";
 import { selectedRun, useSpace } from "./context";
@@ -20,6 +20,7 @@ const KIND_ICON = { text: Type, image: ImageIcon, video: Video, audio: FileAudio
 /** Nombre corto de un puerto: el prompt, o la etiqueta traducida del campo de medios. */
 export function portLabel(t: Dict, detail: ModelDetail, key: string) {
   if (key === "prompt") return t.spaces.prompt;
+  if (isTool(detail.id) && t.spaces.toolPorts[key]) return t.spaces.toolPorts[key];
   if (key === "image_url" && detail.output === "image") return t.spaces.inputImage;
   const labels = t.media.labels as Record<string, readonly [string, string] | undefined>;
   return labels[key]?.[0] ?? humanize(key, {});
@@ -209,7 +210,9 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
   const output = (summary?.output ?? detail?.output) as PortKind | "unknown" | undefined;
   const outKind: PortKind = output === "video" || output === "audio" ? output : "image";
   const Icon = KIND_ICON[outKind];
-  const { name, workflow } = summary ? modelLabel(summary.title) : { name: data.model, workflow: "" };
+  const label = summary ? modelLabel(summary.title) : { name: data.model, workflow: "" };
+  // Las herramientas locales llevan nombre propio traducido y la marca de gratis.
+  const { name, workflow } = isTool(data.model) ? { name: s.toolNames[data.model] ?? label.name, workflow: s.tools } : label;
   const connected = new Set(edges.filter((e) => e.target === id).map((e) => e.targetHandle));
   const hasPrompt = ports.some((p) => p.key === "prompt");
 

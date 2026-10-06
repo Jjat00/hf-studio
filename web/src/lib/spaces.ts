@@ -158,6 +158,11 @@ export function normalizeNode(n: SpaceNode): SpaceNode {
   return n;
 }
 
+/** Herramientas locales de HF Studio (fotograma, combinar, mezclar): modelos propios y gratis. */
+export function isTool(modelId: string) {
+  return modelId.startsWith("hf-studio/");
+}
+
 export function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }

@@ -15,9 +15,9 @@ export function SettingCard({ label, children, error, className }: { label: stri
   );
 }
 
-function formatOption(key: string, v: string | number) {
+function formatOption(key: string, v: string | number, labels?: Record<string, Record<string, string>>) {
   if (key === "duration") return `${v}s`;
-  return String(v);
+  return labels?.[key]?.[String(v)] ?? String(v);
 }
 
 export function FieldControl({
@@ -55,7 +55,7 @@ export function FieldControl({
               {!field.required && <option value="">{t.controls.auto}</option>}
               {field.options.map((o) => (
                 <option key={String(o)} value={String(o)}>
-                  {formatOption(field.key, o)}
+                  {formatOption(field.key, o, t.controls.options)}
                 </option>
               ))}
             </select>
@@ -71,10 +71,10 @@ export function FieldControl({
                   {ratio ? (
                     <span className="flex items-center gap-1.5">
                       <RatioIcon value={String(o)} />
-                      {formatOption(field.key, o)}
+                      {formatOption(field.key, o, t.controls.options)}
                     </span>
                   ) : (
-                    formatOption(field.key, o)
+                    formatOption(field.key, o, t.controls.options)
                   )}
                 </Chip>
               ))}
