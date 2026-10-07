@@ -63,3 +63,23 @@ def test_rate_at_end_of_sentence_ignores_the_period():
     args = {"duration": 5, "resolution": "480p", "aspect_ratio": "16:9", "video_url": "https://x/v.mp4"}
     r = approximate(desc, args, {"input_video_seconds": 5})
     assert "$0.01284/1K" in r["basis"] and r["usd"] > 0
+
+
+FLARE = (
+    "Per 1M tokens: text input $5, cached text input $1.25, text output $10; image input $8, cached image input"
+    " $2, image output $30. Quality defaults to high. Final cost uses actual token usage."
+)
+
+
+def test_token_priced_image_is_quoted_high_from_quality_resolution_and_references():
+    """Marketing Studio 2.5 Flare/Sunburst: se cotiza por lo alto (no se sabe el uso real hasta terminar)."""
+    one_k = approximate(
+        FLARE, {"prompt": "x", "quality": "medium", "resolution": "1k", "image_urls": ["a", "b"]}, {}
+    )
+    # 1.056 tokens de salida × $30/1M + 2 referencias × 600 × $8/1M + el prompt.
+    assert round(one_k["usd"], 4) == round((1056 * 30 + 2 * 600 * 8 + 1 * 5) / 1e6, 4)
+    assert "upper estimate" in one_k["basis"]
+    default = approximate(FLARE, {"prompt": "x"}, {})  # alta y 2k por defecto
+    assert round(default["usd"], 4) == round((4160 * 4 * 30 + 5) / 1e6, 4)
+    # Calidades sin tabla no se inventan: quedan sin precio.
+    assert approximate(FLARE, {"prompt": "x", "quality": "max"}, {})["usd"] is None

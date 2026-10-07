@@ -405,7 +405,7 @@ async def test_stop_cancels_steps_waiting_for_approval(env):  # noqa: F811
 
 
 async def test_a_run_rejects_media_that_is_not_yours(env):  # noqa: F811
-    """Revisión 55 (H5): una URL de otro cliente (o desconocida) no entra en una corrida."""
+    """Revisión 55 (H5): una URL de otro cliente no entra en el lienzo, y una desconocida no entra en una corrida."""
     app, http, _ = env
     from hf_studio.db import ApiClient, Upload
 
@@ -423,9 +423,19 @@ async def test_a_run_rejects_media_that_is_not_yours(env):  # noqa: F811
             )
         )
         await s.commit()
+    # Un archivo ajeno ni siquiera se puede poner en el lienzo: lo que guarda un Space lo comparte.
+    foreign = [
+        node("m", "media", url="https://cdn.test/private.png", kind="image"),
+        gen("vid", I2V, prompt="go"),
+    ]
+    res = await http.post(
+        "/v1/spaces", json={"graph": {"nodes": foreign, "edges": [edge("e1", "m", "vid", "image_url")]}}
+    )
+    assert res.status_code == 422 and "not one of your" in res.json()["error"]["message"]
+    # Una URL que no es de nadie se puede guardar, pero no entra en una corrida.
     space_id, version = await make_space(
         http,
-        [node("m", "media", url="https://cdn.test/private.png", kind="image"), gen("vid", I2V, prompt="go")],
+        [node("m", "media", url="https://cdn.test/unknown.png", kind="image"), gen("vid", I2V, prompt="go")],
         [edge("e1", "m", "vid", "image_url")],
     )
     run = (
@@ -887,3 +897,110 @@ async def test_a_video_feeds_its_last_frame_and_audio_by_handle():
         raise AssertionError("expected NodeInputError")
     except NodeInputError:
         pass
+
+
+async def test_the_agent_runs_steps_that_use_what_the_ui_put_in_its_space(env):  # noqa: F811
+    """La UI (sees_all) y un agente trabajan el mismo Space con claves distintas: el agente corre pasos que usan
+    una generación y una subida que puso la UI. Lo ajeno solo entra al lienzo de mano de quien ya lo ve."""
+    app, http, _ = env
+    from hf_studio.db import ApiClient, Upload, hash_token
+
+    from .test_reuse import finished_image
+
+    async with app.state.sessions() as s:
+        ui_client = ApiClient(name="web-ui", key_hash=hash_token("hfs_u"), key_prefix="hfs_u", sees_all=True)
+        s.add(ui_client)
+        await s.flush()
+        s.add(Upload(owner_id=ui_client.id, filename="r.png", content_type="image/png", size=1,
+                     url="https://cdn.test/ui-ref.png"))  # fmt: skip
+        await s.commit()
+    ui = {"Authorization": "Bearer hfs_u"}
+    job_id = await finished_image(app, "web-ui")
+    space_id, version = await make_space(
+        http,
+        [
+            gen("img", "higgsfield-ai/soul/v2/standard", prompt="x"),
+            gen("vid", I2V, prompt="go"),
+            node("m", "media", kind="image"),
+            gen("vid2", I2V, prompt="go"),
+        ],
+        [edge("e1", "img", "vid", "image_url"), edge("e2", "m", "vid2", "image_url")],
+    )
+    graph = (await http.get(f"/v1/spaces/{space_id}")).json()["graph"]
+    graph["nodes"][0]["data"].update(runs=[job_id], selected=0)
+    graph["nodes"][2]["data"]["url"] = "https://cdn.test/ui-ref.png"
+    # El agente no puede meter en su lienzo una generación o una subida de la UI que no ve.
+    refused = await http.put(f"/v1/spaces/{space_id}", json={"version": version, "graph": graph})
+    assert refused.status_code == 422 and "not one of yours" in refused.json()["error"]["message"]
+    # La UI sí, y después el agente guarda el lienzo conservándolas.
+    saved = (
+        await http.put(f"/v1/spaces/{space_id}", headers=ui, json={"version": version, "graph": graph})
+    ).json()
+    kept = await http.put(
+        f"/v1/spaces/{space_id}", json={"version": saved["version"], "graph": saved["graph"]}
+    )
+    assert kept.status_code == 200
+    version = kept.json()["version"]
+    # Cada paso, solo (`downstream`): así usa lo que está en el lienzo y no una generación nueva de la corrida.
+    for node_id in ("vid", "vid2"):
+        body = {"mode": "downstream", "node_id": node_id, "version": version}
+        quote = (await http.post(f"/v1/spaces/{space_id}/runs", json={**body, "dry_run": True})).json()
+        assert [(x["node_id"], x["status"]) for x in quote["steps"]] == [(node_id, "ok")]
+        run = (await http.post(f"/v1/spaces/{space_id}/runs", json={**body, "max_total_usd": 10})).json()
+        await tick(app, run["id"])
+        assert (await run_state(app, run["id"])).nodes[node_id]["status"] == "running"
+        assert (await http.post(f"/v1/spaces/{space_id}/runs/{run['id']}/cancel")).status_code == 200
+
+
+FLARE_PRICING = (
+    "Per 1M tokens: text input $5, cached text input $1.25, text output $10; image input $8, cached image input"
+    " $2, image output $30. Quality defaults to high."
+)
+
+
+async def test_token_priced_images_get_an_upper_estimate_and_the_budget_holds(env):  # noqa: F811
+    """Marketing Studio 2.5 cobra por tokens: se cotiza por lo alto con su tarifa, así una lista no pide una
+    aprobación por imagen y el tope de la corrida vuelve a frenar (antes cada paso comprometía 0)."""
+    app, http, fakes = env
+    fakes.hf_formula = FLARE_PRICING
+    space_id, version = await make_space(
+        http,
+        [lst("L", "text", "a fox", "a kite", "a bird"), gen("img", SOUL)],
+        [edge("e1", "L", "img", "prompt")],
+    )
+    body = {"mode": "workflow", "version": version}
+    dry = (await http.post(f"/v1/spaces/{space_id}/runs", json={**body, "dry_run": True})).json()
+    # Calidad alta por defecto y 2k: 4.160 × 4 tokens de imagen × $30/1M ≈ $0,50 por imagen.
+    assert [s["status"] for s in dry["steps"]] == ["ok"] * 3
+    assert all(0.49 < s["usd"] < 0.51 for s in dry["steps"])
+    run = (await http.post(f"/v1/spaces/{space_id}/runs", json={**body, "max_total_usd": 1.1})).json()
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    assert state.status == "awaiting_approval" and state.pause["reason"] == "over_budget"
+    assert [state.nodes[f"img#{i}"]["status"] for i in range(3)] == ["running", "running", "pending"]
+
+
+async def test_accepting_an_unknown_price_covers_the_rest_of_the_run(env):  # noqa: F811
+    """Una lista de imágenes sin precio pide una sola aprobación, no una por imagen."""
+    app, http, fakes = env
+    fakes.hf_formula = "Usage-based pricing."
+    space_id, version = await make_space(
+        http,
+        [lst("L", "text", "a fox", "a kite", "a bird"), gen("img", SOUL)],
+        [edge("e1", "L", "img", "prompt")],
+    )
+    run = (
+        await http.post(
+            f"/v1/spaces/{space_id}/runs", json={"mode": "workflow", "version": version, "max_total_usd": 5}
+        )
+    ).json()
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    assert state.status == "awaiting_approval" and state.pause == {**state.pause, "reason": "unknown_cost"}
+    approved = await http.post(
+        f"/v1/spaces/{space_id}/runs/{run['id']}/approve", json={"accept_unknown": True}
+    )
+    assert approved.status_code == 200
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    assert state.status == "running" and all(state.nodes[f"img#{i}"]["status"] == "running" for i in range(3))

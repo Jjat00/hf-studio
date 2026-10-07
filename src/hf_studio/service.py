@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from .catalog import Catalog
 from .config import Settings
 from .db import ACTIVE, ApiClient, Job, Upload, utcnow
 from .elements import check_available
+from .spaces import Share
 
 # «No se indicó» frente a None explícito («sin tope», revisión 32).
 UNSET: object = object()
@@ -38,27 +39,37 @@ def check_input(catalog: Catalog, model_id: str, arguments: dict) -> dict:
     return model
 
 
-async def get_owned_job(session: AsyncSession, owner: ApiClient, job_id: str) -> Job:
+async def get_owned_job(
+    session: AsyncSession, owner: ApiClient, job_id: str, share: Share | None = None
+) -> Job:
+    """Una generación propia (con sees_all, de cualquiera). Dentro de un Space, también las que guarda su lienzo."""
     job = await session.get(Job, job_id)
-    if not job or (job.owner_id != owner.id and not owner.sees_all):
+    shared = share is not None and job_id in share.jobs
+    if not job or (job.owner_id != owner.id and not owner.sees_all and not shared):
         # 404 también para trabajos ajenos: no se revela su existencia.
         raise ServiceError(404, "not_found", "Generation not found")
     return job
 
 
-async def trusted_media(session: AsyncSession, owner: ApiClient, url: str) -> bool:
+async def trusted_media(
+    session: AsyncSession, owner: ApiClient | None, url: str, share: Share | None = None
+) -> bool:
     """URL que HF Studio puede abrir con ffmpeg sin riesgo de SSRF: una subida propia o una salida de
-    una generación propia (con sees_all, de cualquier cliente). Nunca una URL arbitraria."""
+    una generación propia (con sees_all, de cualquier cliente). Nunca una URL arbitraria. Dentro de un Space
+    (`share`) valen también los archivos y las generaciones que guarda su lienzo. `owner=None` mira las de todos
+    (solo para saber si la URL es de alguien)."""
     if not isinstance(url, str) or not url.startswith("https://"):
         return False
+    everyone = owner is None or owner.sees_all or (share is not None and url in share.urls)
     uploads = select(Upload.id).where(Upload.url == url)
-    if not owner.sees_all:
+    if not everyone:
         uploads = uploads.where(Upload.owner_id == owner.id)
     if await session.scalar(uploads.limit(1)):
         return True
     jobs = select(Job.outputs).where(Job.status == "completed")
-    if not owner.sees_all:
-        jobs = jobs.where(Job.owner_id == owner.id)
+    if not everyone:
+        mine = Job.owner_id == owner.id
+        jobs = jobs.where(or_(mine, Job.id.in_(share.jobs)) if share and share.jobs else mine)
     return any(o.get("url") == url for outputs in await session.scalars(jobs) for o in outputs or [])
 
 

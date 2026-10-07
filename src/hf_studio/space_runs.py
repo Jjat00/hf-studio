@@ -23,10 +23,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
 
-from .db import TERMINAL, ApiClient, Job, SpaceRun, utcnow
+from .db import TERMINAL, ApiClient, Job, Space, SpaceRun, utcnow
 from .providers.base import ProviderError
 from .service import ServiceError
-from .spaces import DERIVED_OUTPUTS
+from .spaces import DERIVED_OUTPUTS, Share, graph_refs
 
 log = logging.getLogger("hf_studio.space_runs")
 
@@ -310,7 +310,8 @@ class Hooks:
 
     plan(session, owner, model_id, arguments) -> Plan; create(session, owner, model_id, arguments, key, plan,
     usd, reserve, accept_unknown) -> Job, sin commit (lo confirma el motor junto con la corrida);
-    output_url(session, owner, job_id, derive=None) -> str; trusted(session, owner, url) -> bool; schema(model_id) ->
+    output_url(session, owner, job_id, derive=None, share=None) -> str; trusted(session, owner, url, share=None) ->
+    bool (`share`: lo que comparte el lienzo, ver `spaces.Share`); schema(model_id) ->
     input_schema o None; output_of(model_id) -> tipo de salida; wake() despierta al worker."""
 
     plan: Callable[..., Awaitable[Any]]
@@ -570,6 +571,13 @@ class SpaceRunner:
             state.update(status="failed", error=f"Unknown model: {model_id}")
             return {}
 
+        # Lo que comparte el lienzo guardado: sus archivos y generaciones valen aunque los haya hecho otro cliente
+        # (la UI y un agente trabajando el mismo Space). Las generaciones del grafo de la corrida salen del lienzo
+        # guardado; sus archivos no, porque un flujo los reemplaza con los de la petición.
+        space = await session.get(Space, run.space_id)
+        saved = Share.of(space.graph if space else None)
+        share = Share(saved.jobs | frozenset(graph_refs(run.graph)[0]), saved.urls)
+
         def source_job(src: str) -> str | None:
             mine = f"{src}#{item}" if item is not None and f"{src}#{item}" in nodes else src
             if mine in nodes:  # generado en esta corrida (el mismo elemento del lote)
@@ -583,14 +591,14 @@ class SpaceRunner:
                 schema,
                 self.hooks.output_of,
                 source_job,
-                lambda job_id, derive=None: self.hooks.output_url(session, owner, job_id, derive),
+                lambda job_id, derive=None: self.hooks.output_url(session, owner, job_id, derive, share),
                 item,
-                (lambda job_id: self.hooks.output_text(session, owner, job_id))
+                (lambda job_id: self.hooks.output_text(session, owner, job_id, share))
                 if self.hooks.output_text
                 else None,
             )
             for url in media_urls(arguments, schema):
-                if not await self.hooks.trusted(session, owner, url):
+                if not await self.hooks.trusted(session, owner, url, share):
                     raise NodeInputError("A connected file is not one of your uploads or generations")
             plan = await self.hooks.plan(session, owner, model_id, arguments)
         except STEP_ERRORS as exc:  # entrada incompleta, 422 del catálogo, medios ajenos, proveedor

@@ -2,7 +2,7 @@
 
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileAudio, ImageIcon, ListChecks, Loader2, Minus, Play, Plus, StickyNote, Type, Upload, Video, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, FileAudio, ImageIcon, ListChecks, Loader2, Maximize2, Minus, Play, Plus, StickyNote, Type, Upload, Video, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -83,14 +83,75 @@ function TextPreview({ src }: { src: string }) {
   );
 }
 
-export function Preview({ out, className }: { out: Output; className?: string }) {
+/** Imagen o video a pantalla completa, sobre todo lo demás. Se cierra con Esc, con la X o tocando el fondo. */
+function Lightbox({ src, kind, onClose }: { src: string; kind: "image" | "video"; onClose: () => void }) {
+  const { t } = useI18n();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      // Los eventos de un portal suben por el árbol de React: sin cortar aquí, el clic seleccionaría el nodo.
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm sm:p-8">
+      <div className="absolute top-3 right-3 flex items-center gap-2">
+        <a href={src} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 rounded-lg bg-surface-2/90 px-3 py-1.5 text-sm text-fg-2 hover:text-fg">
+          <ExternalLink className="size-4" /> {t.spaces.openOriginal}
+        </a>
+        <button type="button" aria-label={t.spaces.closeView} onClick={onClose} className="rounded-lg bg-surface-2/90 p-1.5 text-fg-2 hover:text-fg">
+          <X className="size-5" />
+        </button>
+      </div>
+      {kind === "video" ? (
+        <video src={src} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg" controls autoPlay loop playsInline />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg object-contain" />
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+/** `zoomable`: un botón (y doble clic en imágenes) abre la salida a tamaño completo. */
+export function Preview({ out, className, zoomable = true }: { out: Output; className?: string; zoomable?: boolean }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
   const src = outputSrc(out);
   if (out.kind === "text") return <TextPreview src={src} />;
-  if (out.kind === "video")
-    return <video src={src} className={clsx("size-full object-contain", className)} controls muted loop playsInline preload="metadata" />;
   if (out.kind === "audio") return <audio src={src} controls className="w-full" />;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt="" className={clsx("size-full object-contain", className)} />;
+  const kind = out.kind === "video" ? "video" : "image";
+  const media =
+    kind === "video" ? (
+      <video src={src} className={clsx("size-full object-contain", className)} controls muted loop playsInline preload="metadata" />
+    ) : (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={src} alt="" onDoubleClick={zoomable ? () => setOpen(true) : undefined} className={clsx("size-full object-contain", className)} />
+    );
+  if (!zoomable) return media;
+  return (
+    <div className="group/preview relative flex size-full items-center justify-center">
+      {media}
+      <button
+        type="button"
+        aria-label={t.spaces.enlarge}
+        title={t.spaces.enlarge}
+        onClick={() => setOpen(true)}
+        className="nodrag absolute top-1.5 right-1.5 rounded-lg bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover/preview:opacity-100 hover:bg-black/80 focus-visible:opacity-100"
+      >
+        <Maximize2 className="size-3.5" />
+      </button>
+      {open && <Lightbox src={src} kind={kind} onClose={() => setOpen(false)} />}
+    </div>
+  );
 }
 
 export function TextNodeView({ id, data, selected }: NodeProps<TextNode>) {
@@ -538,7 +599,7 @@ export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
                 />
               ) : (
                 <div className="flex h-14 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-md bg-surface-4">
-                  <Preview out={{ kind, url: item.value }} className="max-h-14" />
+                  <Preview out={{ kind, url: item.value }} className="max-h-14" zoomable={false} />
                 </div>
               )}
               <div className="flex flex-col opacity-0 transition group-hover:opacity-100">

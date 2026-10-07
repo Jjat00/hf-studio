@@ -126,12 +126,14 @@ from .space_tools import (
 )
 from .spaces import (
     GraphError,
+    Share,
     apply_inputs,
     check_flow,
     check_graph,
     check_values,
     empty_graph,
     flow_for_graph,
+    graph_refs,
     input_kinds,
 )
 from .voice import (
@@ -293,7 +295,10 @@ class RunIn(BaseModel):
 
 class RunApprove(BaseModel):
     max_total_usd: float | None = Field(None, ge=0, description="Nuevo tope (debe cubrir el paso en pausa)")
-    accept_unknown: bool = Field(False, description="Acepta que el paso en pausa no tiene precio conocido")
+    accept_unknown: bool = Field(
+        False,
+        description="Acepta que el paso en pausa y los que faltan de la corrida no tengan precio conocido",
+    )
 
 
 class EstimateIn(BaseModel):
@@ -1293,11 +1298,17 @@ def create_app(
         return wav
 
     async def fresh_output(
-        session: AsyncSession, owner: ApiClient, job_id: str, index: int, derive: str | None = None
+        session: AsyncSession,
+        owner: ApiClient,
+        job_id: str,
+        index: int,
+        derive: str | None = None,
+        share: Share | None = None,
     ) -> dict:
         """Núcleo de `use_output`; también lo usan las corridas de Spaces para encadenar pasos. `derive`
-        ("last_frame" o "audio") da en su lugar el último fotograma o el audio de una salida de video."""
-        job = await get_owned_job(session, owner, job_id)
+        ("last_frame" o "audio") da en su lugar el último fotograma o el audio de una salida de video. `share`:
+        lo que comparte el lienzo de la corrida (sus generaciones valen aunque las haya hecho otro cliente)."""
+        job = await get_owned_job(session, owner, job_id, share)
         entry = next((f for f in job.files or [] if f["index"] == index), None)
         if job.status != "completed" or entry is None:
             raise ServiceError(404, "not_found", "That output is not available (finished generations only)")
@@ -1586,6 +1597,25 @@ def create_app(
             )
         return cover
 
+    async def check_refs(session: AsyncSession, owner: ApiClient, before: dict | None, after: dict) -> None:
+        """Lo que un lienzo guarda lo comparte con quien lo abre (`spaces.Share`), así que solo se puede añadir lo
+        que quien guarda ya ve: sus generaciones y archivos (con sees_all, los de todos). Lo que ya estaba se
+        conserva aunque lo haya puesto otro cliente. Una URL que no es de nadie no se comparte, así que se deja."""
+        if owner.sees_all:
+            return
+        old_jobs, old_urls = graph_refs(before)
+        new_jobs, new_urls = graph_refs(after)
+        for job_id in sorted(new_jobs - old_jobs):
+            try:
+                await get_owned_job(session, owner, job_id)
+            except ServiceError:
+                raise ServiceError(422, "invalid_graph", f"Generation {job_id} is not one of yours") from None
+        for url in sorted(new_urls - old_urls):
+            if await trusted_media(session, None, url) and not await trusted_media(session, owner, url):
+                raise ServiceError(
+                    422, "invalid_graph", "A file in the graph is not one of your uploads or generations"
+                )
+
     async def get_owned_space(session: AsyncSession, owner: ApiClient, space_id: str) -> Space:
         space = await session.get(Space, space_id)
         # Como las generaciones: la UI (sees_all) ve también los lienzos que crea un agente por MCP.
@@ -1602,6 +1632,7 @@ def create_app(
     @app.post("/v1/spaces", tags=["spaces"], status_code=201)
     async def create_space(body: SpaceIn, session: Session, owner: Owner, catalog: CatalogDep) -> dict:
         graph = valid_graph(body.graph, catalog) if body.graph is not None else empty_graph()
+        await check_refs(session, owner, None, graph)
         space = Space(owner_id=owner.id, title=body.title, graph=graph)
         session.add(space)
         await session.commit()
@@ -1647,6 +1678,7 @@ def create_app(
         graph = current.graph
         if body.graph is not None:
             values["graph"] = graph = valid_graph(body.graph, catalog)
+            await check_refs(session, owner, current.graph, graph)
             # Un flujo publicado sigue al grafo: pierde las entradas cuyos nodos se borraron.
             values["flow"] = flow_for_graph(current.flow, graph)
         if "flow" in body.model_fields_set:
@@ -1703,20 +1735,28 @@ def create_app(
             )  # fmt: skip
             return job
 
-        async def trusted(session: AsyncSession, owner: ApiClient, url: str) -> bool:
-            return await trusted_media(session, owner, url)
+        async def trusted(
+            session: AsyncSession, owner: ApiClient, url: str, share: Share | None = None
+        ) -> bool:
+            return await trusted_media(session, owner, url, share)
 
         async def output_url(
-            session: AsyncSession, owner: ApiClient, job_id: str, derive: str | None = None
+            session: AsyncSession,
+            owner: ApiClient,
+            job_id: str,
+            derive: str | None = None,
+            share: Share | None = None,
         ) -> str:
             try:
-                return (await fresh_output(session, owner, job_id, 0, derive))["url"]
+                return (await fresh_output(session, owner, job_id, 0, derive, share))["url"]
             except ServiceError as exc:
                 raise NodeInputError(f"A connected step has no usable output ({exc.message})") from None
 
-        async def output_text(session: AsyncSession, owner: ApiClient, job_id: str) -> str:
+        async def output_text(
+            session: AsyncSession, owner: ApiClient, job_id: str, share: Share | None = None
+        ) -> str:
             """Texto de un Assistant terminado (su copia local), para el prompt del paso siguiente."""
-            job = await get_owned_job(session, owner, job_id)
+            job = await get_owned_job(session, owner, job_id, share)
             entry = next((f for f in job.files or [] if f.get("kind") == "text"), None)
             path = Path(settings.storage_dir) / "outputs" / job.id / entry["name"] if entry else None
             if job.status != "completed" or path is None or not path.is_file():
@@ -1733,7 +1773,9 @@ def create_app(
 
         return Hooks(plan, create, output_url, trusted, schema, output_of, app.state.worker.wake, output_text)
 
-    async def estimate_run(session: AsyncSession, owner: ApiClient, graph: dict, order: list[str]) -> dict:
+    async def estimate_run(
+        session: AsyncSession, owner: ApiClient, graph: dict, order: list[str], share: Share | None = None
+    ) -> dict:
         """Cotiza cada paso con lo que hay hoy en el lienzo. Un paso que depende de otro de la corrida sin salida
         todavía se cotiza al llegar (`later`); si entonces no cabe en el tope, la corrida se pausa."""
         hooks = app.state.space_runner.hooks
@@ -1748,9 +1790,9 @@ def create_app(
                 arguments = await resolve_input(
                     graph, node_id, hooks.schema(model_id) or {}, hooks.output_of,
                     lambda src: selected_run(nodes[src]["data"]),
-                    lambda job_id, derive=None: hooks.output_url(session, owner, job_id, derive),
+                    lambda job_id, derive=None: hooks.output_url(session, owner, job_id, derive, share),
                     index,
-                    lambda job_id: hooks.output_text(session, owner, job_id),
+                    lambda job_id: hooks.output_text(session, owner, job_id, share),
                 )  # fmt: skip
                 plan = await hooks.plan(session, owner, model_id, arguments)
             except (NodeInputError, ServiceError, ProviderError) as exc:
@@ -1841,7 +1883,8 @@ def create_app(
         if not order:
             raise ServiceError(422, "nothing_to_run", "There are no generation nodes to run")
         if body.dry_run:
-            return JSONResponse(await estimate_run(session, owner, graph, order))
+            # Lo que comparte el lienzo guardado (no las entradas de un flujo, que llegan en la petición).
+            return JSONResponse(await estimate_run(session, owner, graph, order, Share.of(space.graph)))
         if body.max_total_usd is None:
             raise ServiceError(
                 422, "budget_required", "Approve a total budget (max_total_usd) to start the run"
@@ -1985,8 +2028,12 @@ def create_app(
                 raise ServiceError(
                     422, "unknown_not_accepted", "This step has no known price; accept it explicitly"
                 )
+            # Aceptar un precio desconocido vale para el resto de la corrida: una lista de 9 imágenes del mismo
+            # modelo no debe pedir 9 aprobaciones. El tope sigue mandando sobre lo que sí tiene precio.
             nodes = {k: dict(v) for k, v in run.nodes.items()}
-            nodes[pause["node"]]["accept_unknown"] = True
+            for step, state in nodes.items():
+                if step == pause["node"] or state.get("status") == "pending":
+                    state["accept_unknown"] = True
             run.nodes = nodes
         if pause.get("reason") == "job_approval":
             await approve_run_job(session, run, pause, body)

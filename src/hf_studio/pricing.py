@@ -168,8 +168,46 @@ def approximate(description: str, args: dict, hints: dict) -> dict:
             "missing": [],
         }
 
-    # E) Por tokens de texto/imagen (uso real): no se puede anticipar con precisión.
+    # E) Imagen por tokens (Marketing Studio 2.5): tarifa publicada por millón de tokens. El uso real se conoce
+    # al terminar, pero la imagen de salida domina y depende de la calidad y la resolución: se cotiza por lo alto.
+    if (out := re.search(r"image output " + MONEY, text)) and (
+        estimate := _image_tokens_estimate(text, args, out)
+    ):
+        return estimate
+
+    # F) Por tokens de texto/imagen (uso real): no se puede anticipar con precisión.
     return {"usd": None, "basis": "usage-based pricing (final cost depends on actual tokens)", "missing": []}
+
+
+# Tokens de una imagen de salida «1k» por calidad: la tabla publicada de los modelos de imagen por tokens en su
+# formato base (1024×1024), que es lo que cobra Higgsfield también en 9:16. Cada salto de resolución cuadruplica los
+# píxeles. Calidades sin tabla (xhigh, max) no se cotizan: quedan sin precio y piden aprobación.
+# Calibrado con el cobro real del 2026-10-07: 22 imágenes Flare/Sunburst 1k media con 43 referencias costaron
+# ~$0,85 y esta fórmula da ~$0,90 (un 6 % por lo alto). Con la tabla de 1024×1536 y 1.600 tokens por referencia
+# daba el doble.
+IMAGE_OUTPUT_TOKENS = {"low": 272, "medium": 1056, "high": 4160}
+RESOLUTION_AREA = {"1k": 1, "2k": 4, "4k": 16}
+# Una imagen de referencia de entrada (se normaliza antes de enviarse).
+IMAGE_INPUT_TOKENS = 600
+
+
+def _image_tokens_estimate(text: str, args: dict, out: re.Match) -> dict | None:
+    quality = str(args.get("quality") or ("high" if "defaults to high" in text.lower() else "")).lower()
+    resolution = str(args.get("resolution") or "2k").lower()
+    if quality not in IMAGE_OUTPUT_TOKENS or resolution not in RESOLUTION_AREA:
+        return None
+    out_tokens = IMAGE_OUTPUT_TOKENS[quality] * RESOLUTION_AREA[resolution]
+    refs = len(args.get("image_urls") or [])
+    in_rate = float(m.group(1)) if (m := re.search(r"image input " + MONEY, text)) else 0.0
+    text_rate = float(m.group(1)) if (m := re.search(r"text input " + MONEY, text)) else 0.0
+    prompt_tokens = len(str(args.get("prompt") or "")) // 3 + 1
+    usd = (
+        out_tokens * float(out.group(1)) + refs * IMAGE_INPUT_TOKENS * in_rate + prompt_tokens * text_rate
+    ) / 1e6
+    basis = f"≈{out_tokens:,} image tokens ({quality}, {resolution}) × ${out.group(1)}/1M"
+    if refs:
+        basis += f" + {refs} refs × ${in_rate:g}/1M"
+    return {"usd": usd, "basis": basis + " (upper estimate; billed by actual tokens)", "missing": []}
 
 
 def normalize(raw: dict[str, Any], args: dict, hints: dict, placeholders: list[str]) -> dict:

@@ -10,6 +10,7 @@ trabajos en `data.runs`. Aquí solo se valida y normaliza el grafo para que lo q
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from jsonschema import Draft202012Validator
@@ -28,6 +29,37 @@ MAX_VARIANTS = 4
 DERIVED_OUTPUTS = {"last_frame": "image", "audio": "audio"}
 MAX_GRAPH_BYTES = 512 * 1024
 ID = r"^[A-Za-z0-9_.:-]{1,64}$"
+
+
+@dataclass(frozen=True)
+class Share:
+    """Lo que un lienzo guardado comparte con quien puede abrirlo: sus generaciones (`runs` de los generadores) y
+    los archivos de sus Medios y Listas. Así la UI y un agente trabajan el mismo Space aunque usen claves
+    distintas. Es seguro porque al guardar solo se pueden añadir generaciones y archivos que quien guarda ya ve
+    (`api.check_refs`); las entradas de un flujo, que llegan en la petición, nunca cuentan."""
+
+    jobs: frozenset[str] = frozenset()
+    urls: frozenset[str] = frozenset()
+
+    @classmethod
+    def of(cls, graph: dict | None) -> Share:
+        jobs, urls = graph_refs(graph)
+        return cls(frozenset(jobs), frozenset(urls))
+
+
+def graph_refs(graph: dict | None) -> tuple[set[str], set[str]]:
+    """Ids de generaciones (`runs`) y URLs de archivos (Medios y Listas de medios) que guarda un grafo."""
+    jobs: set[str] = set()
+    urls: set[str] = set()
+    for node in (graph or {}).get("nodes", []):
+        data = node.get("data") or {}
+        if node.get("type") == "generator":
+            jobs.update(r for r in data.get("runs") or [] if isinstance(r, str))
+        elif node.get("type") == "media" and isinstance(data.get("url"), str):
+            urls.add(data["url"])
+        elif node.get("type") == "list" and data.get("kind") in MEDIA_KINDS:
+            urls.update(i["value"] for i in data.get("items") or [] if isinstance(i.get("value"), str))
+    return jobs, urls
 
 
 class GraphError(ValueError):

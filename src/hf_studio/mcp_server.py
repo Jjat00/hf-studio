@@ -1078,7 +1078,8 @@ def approve_space_run(
     space_id: str, run_id: str, max_total_usd: float | None = None, accept_unknown_cost: bool = False
 ) -> dict:
     """Reanuda una corrida en awaiting_approval, solo con el OK del usuario: max_total_usd = el nuevo total
-    que aprobó (pause.needed_total_usd o más); accept_unknown_cost=True solo si aceptó un paso sin precio."""
+    que aprobó (pause.needed_total_usd o más); accept_unknown_cost=True solo si aceptó un paso sin precio (vale
+    también para los pasos sin precio que faltan de esa corrida: díselo al usuario)."""
     body: dict[str, Any] = {"accept_unknown": accept_unknown_cost}
     if max_total_usd is not None:
         body["max_total_usd"] = max_total_usd

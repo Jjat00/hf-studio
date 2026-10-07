@@ -34,6 +34,9 @@ class Fakes:
         self.kie_credits = 1000.0
         self.apimart_balance = 50.0
         self.hf_usd = "1.510"
+        self.hf_formula: str | None = (
+            None  # si se pone, Higgsfield cotiza con esta fórmula en vez de un precio
+        )
         self.upload_down = False  # Higgsfield responde 503 a las subidas
         self.uploads: list[bytes] = []  # bytes subidos a Higgsfield (cada uno con su URL cdn.test/up-N)
 
@@ -48,6 +51,8 @@ class Fakes:
             return httpx.Response(200)
         if host == "api.higgsfield.test":
             if path.startswith("/estimate/"):
+                if self.hf_formula is not None:
+                    return httpx.Response(200, json={"pricing_description": self.hf_formula})
                 return httpx.Response(200, json={"type": "estimate", "credits": "24", "usd": self.hf_usd})
             if path.startswith("/requests/") and path.endswith("/status"):
                 return httpx.Response(404, json={"detail": "not found"})
