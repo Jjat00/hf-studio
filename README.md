@@ -264,7 +264,8 @@ Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name
 
 - **Pages:** Explore, Image, Video (Create: text, first and last frame, references · Genjutsu · Edit video · Motion),
   Voice, Audio, Sound library, Use cases, Presets (with published flows at `/flows/<id>`), Spaces (`/spaces`), Library
-  (with detail at `/history/<id>`), Models and MCP.
+  (with detail at `/history/<id>`), Usage (`/usage`: spend by day, provider and model, plus each provider's balance),
+  Models and MCP.
 - **Forms** are generated from each model's `input_schema`, so all 82 endpoints work without model-specific code.
 - **Voice** (`/voice`): pick a video, mark the segment on the timeline, search a voice (your account or the ElevenLabs
   public library, with preview), add an effect and choose how much of the original audio stays.

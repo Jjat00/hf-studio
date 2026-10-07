@@ -63,7 +63,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   `higgsfield.py` (Higgsfield client), `elements.py` (Kling 3.0 elements: local images, refreshed URLs), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
   provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
-  (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
+  (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
   regenerated with `hf-studio sync-catalog`), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
   internal worker-only provider), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models), `space_assistant.py` (Spaces

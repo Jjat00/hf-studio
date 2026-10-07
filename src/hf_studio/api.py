@@ -136,6 +136,7 @@ from .spaces import (
     graph_refs,
     input_kinds,
 )
+from .usage import UsageRow, summarize
 from .voice import (
     VOICE_MODEL,
     VOICE_QUOTE_TTL,
@@ -577,6 +578,44 @@ def create_app(
                 )
             items.append(item)
         return {"providers": items}
+
+    @app.get("/v1/usage", tags=["sistema"])
+    async def usage(
+        session: Session,
+        owner: Owner,
+        days: int = Query(30, ge=0, le=3650, description="Últimos N días; 0 = todo el historial"),
+        utc_offset: int = Query(
+            0, ge=-840, le=840, description="Minutos respecto de UTC para agrupar por día"
+        ),
+    ) -> dict:
+        """Gasto de las generaciones terminadas, por día, proveedor y modelo. Es el precio cotizado de la
+        opción que corrió, no el cobro conciliado con el proveedor (sin gastar: solo lee la base)."""
+        now = utcnow()
+        since = None
+        if days:
+            # Desde la medianoche local de hace N-1 días: «7 días» incluye hoy completo y seis días enteros.
+            local_today = (now + timedelta(minutes=utc_offset)).date()
+            start = datetime.combine(local_today - timedelta(days=days - 1), datetime.min.time())
+            since = start - timedelta(minutes=utc_offset)
+        query = select(Job.model, Job.provider, Job.plan, Job.plan_index, Job.created_at).where(
+            Job.status == "completed"
+        )
+        if not owner.sees_all:
+            query = query.where(Job.owner_id == owner.id)
+        if since:
+            query = query.where(Job.created_at >= since)
+        rows = []
+        for model, provider, plan, index, created in (await session.execute(query)).tuples():
+            option = plan[index] if plan and index < len(plan) else {}
+            rows.append(UsageRow(
+                model=model,
+                # Como en job_out: los trabajos de audio corren en ElevenLabs aunque la columna diga otra cosa.
+                provider="elevenlabs" if model in LOCAL_MODELS else provider,
+                usd=option.get("usd"),
+                kind=option.get("kind"),
+                at=created,
+            ))  # fmt: skip
+        return summarize(rows, since, now, utc_offset)
 
     @app.get("/v1/me", tags=["sistema"])
     async def me(owner: Owner) -> dict:

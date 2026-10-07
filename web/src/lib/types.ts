@@ -108,6 +108,19 @@ export type ProviderInfo = {
   message?: string | null;
 };
 
+/** Gasto de las generaciones terminadas (GET /v1/usage): precio cotizado, no el cobro conciliado. */
+export type UsageGroup = { usd: number; generations: number; unpriced: number };
+export type Usage = {
+  since: string | null;
+  total_usd: number;
+  approx_usd: number;
+  generations: number;
+  unpriced: number;
+  providers: (UsageGroup & { provider: string })[];
+  models: (UsageGroup & { model: string; provider: string })[];
+  days: { date: string; usd: number }[];
+};
+
 export type ApiErrorBody = {
   error?: { code: string; message: string; details?: { path: string; message: string }[] };
 };

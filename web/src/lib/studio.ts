@@ -1,5 +1,5 @@
 import type { Flow, FlowSummary, RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
-import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Usage, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -115,6 +115,8 @@ export const studio = {
       }),
     }),
   providers: () => call<{ providers: ProviderInfo[] }>("/v1/providers"),
+  /** Gasto por día, proveedor y modelo; `days` 0 = todo. `utcOffset` en minutos (Bogotá = -300). */
+  usage: (days: number, utcOffset: number) => call<Usage>(`/v1/usage?days=${days}&utc_offset=${utcOffset}`),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
   freeVoices: () => call<{ voices: FreeVoice[] }>("/v1/voice/free-voices?lang=es"),
   /** URL del MP3 de una voz gratis diciendo el texto (gratis, se guarda en caché en el servidor). */
