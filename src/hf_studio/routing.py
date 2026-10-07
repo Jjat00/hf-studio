@@ -19,8 +19,9 @@ from .providers.base import Provider, ProviderError
 from .providers.prices import PriceBook
 from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
 from .providers.routes import Route, routes_for, with_defaults
+from .space_assistant import assistant_quote, is_assistant
 from .space_audio import audio_quote, is_audio_node
-from .space_tools import AUDIO_PROVIDER, TOOL_PROVIDER, is_tool
+from .space_tools import ASSISTANT_PROVIDER, AUDIO_PROVIDER, TOOL_PROVIDER, is_tool
 
 BALANCE_TTL = 60.0
 OUTDATED_PRICES = 3 * 24 * 3600  # una tabla sin poder actualizarse en 3 días ya no da precios exactos
@@ -141,6 +142,12 @@ class Router:
             # Herramienta local (ffmpeg): una sola opción, gratis, en el proveedor interno del worker.
             option = Option(TOOL_PROVIDER, "HF Studio (local)", model["id"], logical, 0.0, "exact",
                             basis="Local tool (ffmpeg): free")  # fmt: skip
+            return Plan(model["id"], [option], [], hints, forced=only is not None)
+        if is_assistant(model["id"]):
+            # Nodo Assistant de Spaces: la API de Claude, cotizada con su cota superior (aproximada).
+            est = assistant_quote(logical)
+            option = Option(ASSISTANT_PROVIDER, "Claude", model["id"], logical, est["usd"], est["kind"],
+                            basis=est["basis"])  # fmt: skip
             return Plan(model["id"], [option], [], hints, forced=only is not None)
         if is_audio_node(model["id"]):
             # Nodo de audio de Spaces: ElevenLabs, a su tarifa de API (aproximada, como en /v1/audio).

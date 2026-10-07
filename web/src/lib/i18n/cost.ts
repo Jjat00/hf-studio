@@ -28,6 +28,7 @@ const BASIS_ES: [RegExp, string][] = [
 
 const MISSING_ES: Record<string, string> = {
   "input video duration": "la duración del video de entrada",
+  "price of some items": "el precio de algunos elementos",
 };
 
 export function costBasis(text: string, locale: Locale) {

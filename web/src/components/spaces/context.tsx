@@ -2,7 +2,7 @@
 
 import type { Edge } from "@xyflow/react";
 import { createContext, use } from "react";
-import type { GeneratorData, MediaData, NoteData, RunNodeState, TextData } from "@/lib/spaces";
+import type { GeneratorData, ListData, MediaData, NoteData, RunNodeState, TextData } from "@/lib/spaces";
 import type { Estimate } from "@/lib/studio";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 
@@ -24,7 +24,8 @@ export type SpaceCtx = {
   estimates: Record<string, NodeEstimate>;
   runStates: Record<string, RunState>;
   run: (nodeId: string) => void;
-  update: (nodeId: string, patch: Partial<TextData & NoteData & MediaData & GeneratorData>) => void;
+  /** Mezcla `patch` en los datos del nodo (texto, medio, generador o lista). */
+  update: (nodeId: string, patch: Partial<TextData & NoteData & GeneratorData> & Partial<MediaData | ListData>) => void;
   /** Cambia un ajuste del generador sobre su estado más reciente (dos cambios seguidos no se pisan). */
   setValue: (nodeId: string, key: string, value: unknown) => void;
   changeModel: (nodeId: string, model: string) => void;

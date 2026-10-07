@@ -12,7 +12,7 @@ owner's credits.
    (on macOS `brew install ffmpeg-full`: the plain formula lacks the `rubberband` filter).
 2. The only required secret is the Higgsfield key (`HF_API_KEY`, format `KEY_ID:KEY_SECRET`, from
    https://console.higgsfield.ai). `ELEVENLABS_API_KEY` is optional and only enables audio.
-   `APIMART_API_KEY` and `KIE_API_KEY` are optional and make videos cheaper (`uv run hf-studio providers` shows them). **Ask the user for the
+   `APIMART_API_KEY` and `KIE_API_KEY` are optional and make videos cheaper (`uv run hf-studio providers` shows them). `ANTHROPIC_API_KEY` is optional and only enables the Assistant node in Spaces. **Ask the user for the
    keys; never invent, print or commit them.** They go in `.env` (created from `.env.example`, git-ignored).
 3. Run `uv run hf-studio setup --no-input` once `.env` has the key. It validates the key without spending credits and
    writes the UI key to `web/.env.local`. A human can just run `./dev.sh` (Windows: `.\dev`), which asks for the
@@ -66,7 +66,8 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   (quotes), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (82 model schemas,
   regenerated with `hf-studio sync-catalog`), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
-  internal worker-only provider), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models).
+  internal worker-only provider), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models), `space_assistant.py` (Spaces
+  Assistant node: Claude writes text for other nodes, optional `ANTHROPIC_API_KEY`).
 - Every MCP tool declares `title` and all four hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`); `tests/test_mcp_tools.py` pins them. Keep them true to what the handler does.
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in

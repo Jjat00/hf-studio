@@ -697,7 +697,8 @@ def _fingerprint(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def _issue_quote(payload: dict, estimate: dict) -> str:
+def _issue_quote(payload: dict, estimate: dict, key: str | None = None) -> str:
+    """`key`: la cotización queda ligada a esa Idempotency-Key (recuperar un lote a medias con su clave)."""
     with _quotes_lock:
         now = time.monotonic()
         for qid in [q for q, v in _quotes.items() if v["expires"] < now]:
@@ -707,7 +708,7 @@ def _issue_quote(payload: dict, estimate: dict) -> str:
             "request": _fingerprint(payload),
             "estimate": estimate,
             "expires": now + QUOTE_TTL,
-            "key": None,
+            "key": key,
         }
         return qid
 
@@ -774,11 +775,15 @@ def generate_batch(
     input_video_seconds aplica a todos los ítems: úsalo solo si comparten el mismo video.
     1) dry_run=True devuelve el costo por ítem, el total y quote_id: muéstraselo al usuario.
     2) Con su OK, dry_run=False con el mismo lote y ese quote_id (y la misma idempotency_key si reintentas).
+    Si un lote falla a medias (p. ej. sin cupos) o cambió su precio, recotiza con dry_run=True y la MISMA
+    idempotency_key (por defecto quote-<quote_id> del primer intento): el total cuenta lo ya creado con su costo de
+    entonces, y esa cotización solo vale con esa clave; con otra clave se crearía otro lote.
     Sin total completo se rechaza salvo confirm_unknown_cost=True (solo si el usuario acepta un costo desconocido)."""
     payload = {"items": items, "hints": _hints(input_video_seconds)}
     if dry_run:
-        quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True})
-        return {**quote, "quote_id": _issue_quote(payload, quote["total"])}
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        quote = _call("POST", "/v1/generations/batch", json={**payload, "dry_run": True}, headers=headers)
+        return {**quote, "quote_id": _issue_quote(payload, quote["total"], idempotency_key)}
     key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
     headers = {"Idempotency-Key": key}
     body = {**payload, "dry_run": False, "max_total_usd": approved["usd"],
@@ -939,12 +944,14 @@ def update_space(
     return _call("PUT", f"/v1/spaces/{space_id}", json=body)
 
 
-def _run_payload(space_id: str, mode: str, node_id: str | None, version: int) -> dict:
+def _run_payload(
+    space_id: str, mode: str, node_id: str | None, version: int, inputs: dict | None = None
+) -> dict:
     if mode not in ("workflow", "downstream"):
         raise ToolError(
             "mode must be workflow (todo el lienzo) or downstream (un nodo y lo que depende de él)"
         )
-    return {"space_id": space_id, "mode": mode, "node_id": node_id, "version": version}
+    return {"space_id": space_id, "mode": mode, "node_id": node_id, "version": version, "inputs": inputs}
 
 
 @mcp.tool(
@@ -953,15 +960,20 @@ def _run_payload(space_id: str, mode: str, node_id: str | None, version: int) ->
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
 )
-def estimate_space_run(space_id: str, mode: str = "workflow", node_id: str | None = None) -> dict:
+def estimate_space_run(
+    space_id: str, mode: str = "workflow", node_id: str | None = None, inputs: dict | None = None
+) -> dict:
     """Precio de correr un lienzo en el servidor, sin gastar: cada paso (`steps`, status ok, unknown, later si se
     cotiza al llegar o error) y `total_usd`. mode workflow = todo; downstream = node_id y lo que depende de él.
     Devuelve quote_id: dile al usuario el total (y que los pasos `later` se cotizan al llegar: si no caben en
     el tope, la corrida se pausa para preguntarle) y pásalo a run_space. No gasta, pero para cotizar puede
-    subir a Higgsfield (gratis) las salidas previas que el lienzo usa como entrada y registrarlas."""
+    subir a Higgsfield (gratis) las salidas previas que el lienzo usa como entrada y registrarlas.
+    Un Space publicado como flujo (su `flow` en list_spaces) se corre con `inputs`: {node_id de cada entrada:
+    texto, URL de upload_media/use_output o lista de textos/URLs}; el lienzo no cambia."""
     version = _call("GET", f"/v1/spaces/{space_id}")["version"]
-    payload = _run_payload(space_id, mode, node_id, version)
-    body = {"mode": mode, "version": version, "dry_run": True, **({"node_id": node_id} if node_id else {})}
+    payload = _run_payload(space_id, mode, node_id, version, inputs)
+    body = {"mode": mode, "version": version, "dry_run": True, **({"node_id": node_id} if node_id else {}),
+            **({"inputs": inputs} if inputs is not None else {})}  # fmt: skip
     quote = _call("POST", f"/v1/spaces/{space_id}/runs", json=body)
     estimate = {"usd": quote["total_usd"], "reserve_usd": None, "complete": True, "missing": []}
     return {**quote, "version": version, "quote_id": _issue_quote(payload, estimate)}
@@ -981,15 +993,16 @@ def run_space(
     version: int | None = None,
     max_total_usd: float | None = None,
     idempotency_key: str | None = None,
+    inputs: dict | None = None,
 ) -> dict:
-    """Arranca la corrida cotizada con estimate_space_run (mismos space_id, mode y node_id; version es la que
-    devolvió). El tope es el total que vio el usuario; max_total_usd solo si el usuario aprobó explícitamente
+    """Arranca la corrida cotizada con estimate_space_run (mismos space_id, mode, node_id e inputs; version es
+    la que devolvió). El tope es el total que vio el usuario; max_total_usd solo si el usuario aprobó explícitamente
     un tope mayor (para cubrir pasos que se cotizan al llegar). No espera: usa get_space_run.
     Tras un error ambiguo, repite con el mismo quote_id (y la misma idempotency_key si pasaste una): devuelve
     la misma corrida, nunca arranca otra ni paga dos veces."""
     if version is None:
         raise ToolError("Pass the version returned by estimate_space_run")
-    payload = _run_payload(space_id, mode, node_id, version)
+    payload = _run_payload(space_id, mode, node_id, version, inputs)
     # La clave queda ligada a la cotización: repetir run_space con el mismo quote_id (p. ej. tras un error
     # ambiguo) devuelve la misma corrida en vez de arrancar otra (revisión 64).
     key, approved = _authorize(payload, quote_id, idempotency_key, False)
@@ -1003,6 +1016,7 @@ def run_space(
         "version": version,
         "max_total_usd": budget,
         **({"node_id": node_id} if node_id else {}),
+        **({"inputs": inputs} if inputs is not None else {}),
     }
     return _call("POST", f"/v1/spaces/{space_id}/runs", json=body, headers={"Idempotency-Key": key})
 

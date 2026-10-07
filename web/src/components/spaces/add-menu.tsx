@@ -1,15 +1,15 @@
 "use client";
 
 import clsx from "clsx";
-import { AudioLines, ImageIcon, Search, StickyNote, Type, Upload, Video, Wrench } from "lucide-react";
+import { AudioLines, ImageIcon, ListChecks, Search, Sparkles, StickyNote, Type, Upload, Video, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { matchesModel, workflowLabel } from "@/lib/i18n/workflow";
-import { isAudioNode, isTool, type PortKind } from "@/lib/spaces";
+import { isAssistant, isAudioNode, isTool, type PortKind } from "@/lib/spaces";
 import { modelLabel } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
-export type AddChoice = { type: "text" | "media" | "note" } | { type: "generator"; model: string };
+export type AddChoice = { type: "text" | "media" | "note" | "list" } | { type: "generator"; model: string };
 
 type Item = { key: string; choice: AddChoice; icon: typeof Type; title: string; hint: string; group: string };
 
@@ -41,19 +41,22 @@ export function AddMenu({
       : [
           { key: "text", choice: { type: "text" }, icon: Type, title: s.addText, hint: s.addTextHint, group: "" },
           { key: "media", choice: { type: "media" }, icon: Upload, title: s.addMedia, hint: s.addMediaHint, group: "" },
+          { key: "list", choice: { type: "list" }, icon: ListChecks, title: s.addList, hint: s.addListHint, group: "" },
           { key: "note", choice: { type: "note" }, icon: StickyNote, title: s.addNote, hint: s.addNoteHint, group: "" },
         ];
     const query = q.trim().toLowerCase();
     const nodes = base.filter((i) => !query || i.title.toLowerCase().includes(query));
     const gens = models
-      .filter((m) => m.output === "image" || m.output === "video" || isAudioNode(m.id))
+      .filter((m) => m.output === "image" || m.output === "video" || isAudioNode(m.id) || isAssistant(m.id))
       .filter((m) => !from || (m.inputs ?? []).includes(from))
       // Las herramientas se encuentran también por el nombre y la descripción que se muestran (revisión 58).
       .filter((m) =>
-        matchesModel(m, q.trim(), locale, `${s.toolNames[m.id] ?? s.audioNames[m.id] ?? ""} ${s.toolHints[m.id] ?? s.audioHints[m.id] ?? ""}`),
+        matchesModel(m, q.trim(), locale, isAssistant(m.id) ? `${s.assistantName} ${s.assistantHint}` : `${s.toolNames[m.id] ?? s.audioNames[m.id] ?? ""} ${s.toolHints[m.id] ?? s.audioHints[m.id] ?? ""}`),
       )
       .map<Item>((m) => {
         const { name, workflow } = modelLabel(m.title);
+        if (isAssistant(m.id))
+          return { key: m.id, choice: { type: "generator", model: m.id }, icon: Sparkles, title: s.assistantName, hint: s.assistantHint, group: s.assistantGroup };
         if (isAudioNode(m.id))
           return { key: m.id, choice: { type: "generator", model: m.id }, icon: AudioLines, title: s.audioNames[m.id] ?? name, hint: s.audioHints[m.id] ?? "", group: s.audioGroup };
         if (isTool(m.id)) {
@@ -69,7 +72,7 @@ export function AddMenu({
           group: m.output === "video" ? s.addVideo : s.addImage,
         };
       });
-    const groups = [s.tools, s.audioGroup, s.addImage, s.addVideo];
+    const groups = [s.assistantGroup, s.tools, s.audioGroup, s.addImage, s.addVideo];
     return [...nodes, ...groups.flatMap((g) => gens.filter((x) => x.group === g))];
   }, [from, models, q, locale, s]);
 

@@ -4,7 +4,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-27%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+[![MCP](https://img.shields.io/badge/MCP-40%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
 **Español** · [English](README.md) · [Web y ejemplos](https://hf-studio-gold.vercel.app)
 
@@ -62,6 +62,21 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
 
 ## Qué incluye
 
+- **Spaces, un lienzo de nodos para generar por pasos** (`/spaces`, inspirado en Magnific Spaces): conecta textos,
+  medios, listas y cualquier modelo del catálogo; la salida de cada paso alimenta al siguiente. Cada nodo muestra su
+  costo en USD antes de generar y guarda su historial. Clic derecho o `/` para añadir un nodo; arrastra una salida a un
+  espacio vacío para añadir el siguiente paso ya conectado.
+  - **Corridas en el servidor** («Ejecutar todo» o «Generar este y los siguientes»): se cotiza cada paso, apruebas un
+    tope total y la corrida se pausa para preguntarte si un paso no cabe, no tiene precio o su proveedor de respaldo
+    cuesta más. Sigue aunque cierres la pestaña y nunca paga dos veces tras un reinicio.
+  - **Listas para lotes:** un generador conectado a una lista corre una vez por elemento marcado, y el lote sigue la
+    cadena en pares (5 prompts → 5 imágenes → 5 videos).
+  - **Herramientas locales gratis** (ffmpeg): primer o último fotograma de un video, combinar videos, mezclar audio
+    sobre un video.
+  - **Nodos de audio** (ElevenLabs): voz en off con tus voces, efectos de sonido y música.
+  - **Nodo Assistant** (Claude, `ANTHROPIC_API_KEY` opcional): escribe o mejora prompts, describe imágenes y redacta
+    guiones; su texto alimenta a otros nodos.
+  - **Flujos:** publica un lienzo con entradas etiquetadas y córrelo desde Presets llenando un formulario.
 - **82 endpoints de Higgsfield** (66 de video, 15 de imagen y 1 de referencias personalizadas), cada uno con su JSON
   Schema sacado de la documentación oficial (`hf-studio sync-catalog`).
 - **Todas las capacidades de video e imagen:** texto a video, imagen a video, fotograma inicial y final, videos de
@@ -164,7 +179,8 @@ ElevenLabs solo las conoce la API.
 Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nombre y las ilustraciones son propios.
 
 - **Páginas:** Explorar, Imagen, Video (Crear: texto, fotograma inicial y final, referencias · Genjutsu · Editar
-  video · Movimiento), Voz, Audio, Sonoteca, Casos de uso, Presets, Biblioteca (con detalle en `/history/<id>`), Modelos y MCP.
+  video · Movimiento), Voz, Audio, Sonoteca, Casos de uso, Presets (con los flujos publicados en `/flows/<id>`), Spaces
+  (`/spaces`), Biblioteca (con detalle en `/history/<id>`), Modelos y MCP.
 - **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 82 endpoints funcionan sin código
   específico. El formato muestra un rectángulo con su proporción.
 - **Voz** (`/voice`): elige un video, marca el tramo sobre la línea de tiempo, busca una voz (tu cuenta o la
@@ -217,7 +233,7 @@ se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se det
 mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
 `HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-Herramientas (27). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Herramientas (40). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
@@ -230,6 +246,8 @@ Herramientas (27). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destru
 | Voz (ElevenLabs) | `list_voices`, `change_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sonoteca | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
+| Reutilizar y elementos | `use_output`, `list_elements`, `create_element`, `delete_element` |
+| Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
 
 **Ninguna herramienta MCP genera sin cotizar antes esa misma petición.** `estimate_cost`, y `generate_batch` o `run_preset`
 con `dry_run=True`, devuelven el costo y un `quote_id`. `generate`, y los lotes y presets con `dry_run=False`,
@@ -248,6 +266,12 @@ también `studio_notes`, avisos de HF Studio como que `generate_audio=false` en 
 conservar el audio original (`generate` con `keep_source_audio=true`). El MCP no conoce las credenciales de
 Higgsfield ni de ElevenLabs, solo su propia clave `hfs_…`. Tampoco puede comprobar que una persona vio el precio:
 mostrarlo y esperar el OK le toca al agente, como piden las instrucciones del servidor.
+
+**Spaces sigue la misma regla.** `estimate_space_run` cotiza cada paso y el total y devuelve un `quote_id`;
+`run_space` lo exige y usa ese total como tope de la corrida (un `max_total_usd` mayor solo si el usuario lo aprobó).
+Repetir `run_space` con el mismo `quote_id` devuelve la misma corrida. Una corrida en `awaiting_approval` muestra el
+motivo y el nuevo total en `pause.needed_total_usd`; con el OK del usuario, `approve_space_run`. Un flujo publicado se
+corre con `inputs`.
 
 ## API REST
 
@@ -276,6 +300,10 @@ Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
 | GET/POST/DELETE | `/v1/elements` · `/v1/elements/{id}` | Elementos de Kling 3.0: listar, crear (multipart `name`, `description`, 2 a 4 `files` o `image_urls` propias) y borrar |
 | POST | `/v1/sounds/import-elevenlabs` | Trae a la sonoteca las voces del historial de ElevenLabs (gratis) |
 | POST | `/v1/audio/{servicio}/estimate` · `/v1/audio/{servicio}` | `text-to-speech`, `sound-effects`, `music`, `voice-isolator`: cotiza (`audio_quote`) y lanza con ella |
+| GET/POST/PUT/DELETE | `/v1/spaces` · `/v1/spaces/{id}` | Lienzos de nodos (grafo validado, guardado con `version`); `flow` publica uno |
+| POST | `/v1/spaces/{id}/runs` | Corrida en el servidor: `dry_run` cotiza cada paso y el total; con `max_total_usd` arranca (`Idempotency-Key`) |
+| GET/POST | `/v1/spaces/{id}/runs/{run}` · `…/approve` · `…/cancel` | Seguir, aprobar una pausa (nuevo total) o detener una corrida |
+| GET | `/v1/flows` | Flujos publicados con sus entradas |
 
 Estados: `pending` (cola local) → `submitting` → `queued` → `in_progress` → `completed` | `failed` | `nsfw` |
 `canceled` | `timed_out`. Cada respuesta incluye `stage` legible, `terminal`, `elapsed_seconds` y

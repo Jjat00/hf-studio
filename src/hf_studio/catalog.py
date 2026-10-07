@@ -31,10 +31,12 @@ class Catalog:
         self.models: dict[str, dict] = {m["id"]: m for m in data["models"]}
         # Herramientas locales de HF Studio (fotograma, combinar, mezclar): modelos propios, gratis.
         # y nodos de audio de ElevenLabs para Spaces (voz, efecto, música).
+        # y el nodo Assistant (Claude) para Spaces.
+        from .space_assistant import ASSISTANT_NODE
         from .space_audio import AUDIO_NODES
         from .space_tools import TOOLS
 
-        for tool_id, tool in {**TOOLS, **AUDIO_NODES}.items():
+        for tool_id, tool in {**TOOLS, **AUDIO_NODES, ASSISTANT_NODE["id"]: ASSISTANT_NODE}.items():
             self.models.setdefault(tool_id, tool)
         self._validators = {
             mid: Draft202012Validator(m["input_schema"], format_checker=_formats)

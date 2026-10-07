@@ -17,7 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
-import { AlertTriangle, Check, ChevronLeft, CloudOff, ImageIcon, Loader2, Maximize, Play, Plus, StickyNote, Type, Upload, Video } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, CloudOff, ImageIcon, Loader2, Maximize, Play, Plus, Share2, StickyNote, Type, Upload, Video } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -30,8 +30,11 @@ import {
   inPorts,
   KIND_COLOR,
   mediaFields,
+  isAssistant,
   isTool,
+  listValues,
   MAX_RUNS,
+  splitStep,
   newId,
   RUN_ACTIVE,
   type RunEstimate,
@@ -40,21 +43,24 @@ import {
   outKind,
   reaches,
   serialize,
+  type Flow,
   type GeneratorNode,
+  type ListNode,
   type PortKind,
   type Space,
   type SpaceGraph,
   type SpaceNode,
 } from "@/lib/spaces";
-import { fieldErrors, formatUsd, modelLabel, outputSrc, studio, StudioError } from "@/lib/studio";
+import { fieldErrors, formatUsd, modelLabel, outputSrc, studio, StudioError, type Estimate } from "@/lib/studio";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { AddMenu, type AddChoice } from "./add-menu";
 import { SpaceContext, selectedRun, type NodeEstimate, type RunState, type SpaceCtx } from "./context";
 import { Inspector } from "./inspector";
+import { PublishDialog } from "./publish-dialog";
 import { RunBanner, RunDialog } from "./run-panel";
-import { GeneratorNodeView, MediaNodeView, NoteNodeView, portLabel, TextNodeView } from "./nodes";
+import { GeneratorNodeView, ListNodeView, MediaNodeView, NoteNodeView, portLabel, TextNodeView } from "./nodes";
 
-const NODE_TYPES: NodeTypes = { text: TextNodeView, media: MediaNodeView, generator: GeneratorNodeView, note: NoteNodeView };
+const NODE_TYPES: NodeTypes = { text: TextNodeView, media: MediaNodeView, generator: GeneratorNodeView, note: NoteNodeView, list: ListNodeView };
 const POLL_MS = 2500;
 const SAVE_DELAY_MS = 900;
 
@@ -122,6 +128,7 @@ function sourceSig(src: SpaceNode | undefined, jobs: Record<string, Generation>)
   if (!src) return null;
   if (src.type === "text") return src.data.text;
   if (src.type === "media") return src.data.url ?? null;
+  if (src.type === "list") return JSON.stringify(listValues(src.data));
   if (src.type === "generator") {
     const j = selectedRun(src.data);
     return j ? `${j}:${jobs[j]?.status === "completed" ? "ok" : "no"}` : null;
@@ -246,11 +253,13 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
 
   const nodeName = useCallback(
     (n: SpaceNode) => {
+      if (n.type === "generator" && isAssistant(n.data.model)) return s.assistantName;
       if (n.type === "generator")
         return isTool(n.data.model)
           ? (s.toolNames[n.data.model] ?? n.data.model)
           : (s.audioNames[n.data.model] ?? modelLabel(models.get(n.data.model)?.title ?? n.data.model).name);
       if (n.type === "media") return n.data.name || s.addMedia;
+      if (n.type === "list") return `${s.addList} · ${s.listKinds[n.data.kind]}`;
       return s.addText;
     },
     [models, s],
@@ -282,7 +291,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
 
   /** Entrada final de un generador: sus ajustes más lo que traen sus conexiones. */
   const resolve = useCallback(
-    async (nodeId: string) => {
+    async (nodeId: string, item?: number) => {
       // Nodos y aristas de un mismo instante: lo que cambie durante las esperas no se mezcla (revisión 51).
       const ns = nodesRef.current;
       const es = edgesRef.current;
@@ -299,14 +308,36 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         // Mismas reglas que las corridas del servidor: un tipo que no encaja es un error (también en el prompt)
         // y un campo simple toma la primera conexión (revisiones 55 y 56).
         if (sources.some((src) => outKind(src, outputOf) !== port.kind)) throw new InputError(s.wrongKind(portLabel(t, detail, port.key)));
+        // Un elemento de una Lista (lote): el mismo índice en todas las listas conectadas.
+        const fromList = (src: SpaceNode) => {
+          const values = src.type === "list" ? listValues(src.data) : [];
+          if (item === undefined || item >= values.length) throw new InputError(s.listNeedsBatch);
+          return values[item];
+        };
         if (port.kind === "text") {
-          const texts = sources.map((src) => (src.type === "text" ? src.data.text.trim() : "")).filter(Boolean);
+          const texts: string[] = [];
+          for (const src of sources) {
+            if (src.type === "generator") {
+              // El texto que escribió un Assistant (su copia local; mismas reglas que el servidor).
+              const jobId = selectedRun(src.data);
+              const job = jobId ? jobsRef.current[jobId] : undefined;
+              if (!job || job.status !== "completed" || !job.outputs[0]) throw new InputError(s.needsUpstream(nodeName(src)));
+              const res = await fetch(outputSrc(job.outputs[0]));
+              if (!res.ok) throw new InputError(s.needsUpstream(nodeName(src)));
+              texts.push((await res.text()).trim());
+            } else if (src.type === "text") texts.push(src.data.text.trim());
+            else if (src.type === "list") texts.push(fromList(src).trim());
+          }
           const own = typeof values[port.key] === "string" ? (values[port.key] as string).trim() : "";
-          values[port.key] = [...texts, own].filter(Boolean).join("\n\n") || undefined;
+          values[port.key] = [...texts.filter(Boolean), own].filter(Boolean).join("\n\n") || undefined;
           continue;
         }
         const urls: string[] = [];
         for (const src of port.multiple ? sources : sources.slice(0, 1)) {
+          if (src.type === "list") {
+            urls.push(fromList(src));
+            continue;
+          }
           const { url, local } = await sourceMedia(src);
           urls.push(url);
           if (port.kind === "video") durations.push(probeDuration(local ?? url, url));
@@ -326,7 +357,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       if (secs.length && secs.every((x) => x)) hints.input_video_seconds = secs.reduce<number>((a, x) => a + (x ?? 0), 0);
       return { model: node.data.model, input, hints };
     },
-    [sourceMedia, s, t, outputOf],
+    [sourceMedia, s, t, outputOf, nodeName],
   );
 
   const errorText = useCallback(
@@ -338,17 +369,66 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     [],
   );
 
+  type Prepared =
+    | { batch: false; one: { model: string; input: Record<string, unknown>; hints: Record<string, number> } }
+    | { batch: true; items: { model: string; input: Record<string, unknown>; count: number; hints: Record<string, number> }[] };
+
+  /** Petición de un nodo: una generación, o un lote si tiene Listas conectadas (una por elemento marcado). */
+  const prepare = useCallback(
+    async (nodeId: string): Promise<Prepared> => {
+      const ns = nodesRef.current;
+      const lists = edgesRef.current
+        .filter((e) => e.target === nodeId)
+        .map((e) => ns.find((n) => n.id === e.source))
+        .filter((n): n is ListNode => n?.type === "list");
+      if (!lists.length) return { batch: false, one: await resolve(nodeId) };
+      const sizes = new Set(lists.map((l) => listValues(l.data).length));
+      if (sizes.size > 1) throw new InputError(s.batchSizes);
+      const size = [...sizes][0];
+      if (!size) throw new InputError(s.emptyList);
+      const items = [];
+      for (let i = 0; i < size; i++) items.push({ ...(await resolve(nodeId, i)), count: 1 });
+      return { batch: true, items };
+    },
+    [resolve, s],
+  );
+
+  // Clave de idempotencia por nodo y petición exacta: se conserva entre reintentos de un mismo envío.
+  const idempotency = useRef(new Map<string, string>());
+
+  /** Cotización de una petición preparada: la de la generación o el total del lote. Un lote ya empezado (con
+   * clave) cuenta lo creado con el compromiso de entonces, igual que el servidor al enviarlo (revisión 71). */
+  const estimateFor = useCallback(
+    async (p: Prepared, nodeId?: string): Promise<Estimate> => {
+      if (!p.batch) return studio.estimate(p.one.model, p.one.input, p.one.hints);
+      const key = nodeId ? idempotency.current.get(`${nodeId}|${JSON.stringify(p)}`) : undefined;
+      const { total } = await studio.batch(p.items, { dryRun: true, key });
+      const complete = !!total?.complete;
+      return {
+        kind: complete ? "exact" : "approx",
+        credits: null,
+        usd: total?.usd ?? null,
+        discount_pct: null,
+        basis: s.listBatch(p.items.length),
+        missing: complete ? [] : ["price of some items"],
+        description: null,
+        reserve_usd: total?.reserve_usd ?? null,
+      };
+    },
+    [s],
+  );
+
   const quote = useCallback(
     async (nodeId: string, sig: string) => {
       try {
-        const r = await resolve(nodeId);
-        const value = await studio.estimate(r.model, r.input, r.hints);
-        setEstimates((prev) => ({ ...prev, [nodeId]: { key: sig, request: JSON.stringify(r), value } }));
+        const p = await prepare(nodeId);
+        const value = await estimateFor(p, nodeId);
+        setEstimates((prev) => ({ ...prev, [nodeId]: { key: sig, request: JSON.stringify(p), value } }));
       } catch (e) {
         setEstimates((prev) => ({ ...prev, [nodeId]: { key: sig, value: null, error: errorText(e) } }));
       }
     },
-    [resolve, errorText],
+    [prepare, estimateFor, errorText],
   );
 
   // Cotiza el generador seleccionado cada vez que cambian sus entradas (con debounce).
@@ -361,7 +441,6 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     return () => clearTimeout(timer);
   }, [wantedKey, quote]);
 
-  const idempotency = useRef(new Map<string, string>());
   /**
    * Generar un nodo. Solo paga si el usuario ya vio el precio de ESTA petición exacta (entrada resuelta y
    * hints): si no hay cotización vigente, este clic cotiza y el siguiente genera. Un precio desconocido
@@ -379,13 +458,16 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       const sig = signaturesRef.current[nodeId];
       patchRun(nodeId, { busy: true, error: null });
       let keyId: string | null = null;
+      let batched = false;
       try {
-        const r = await resolve(nodeId);
-        const request = JSON.stringify(r);
+        const p = await prepare(nodeId);
+        batched = p.batch;
+        const request = JSON.stringify(p);
         if (signaturesRef.current[nodeId] !== sig) throw new InputError(s.changed);
+        if (p.batch && node.data.runs.length + p.items.length > MAX_RUNS) throw new InputError(s.tooManyRuns(MAX_RUNS));
         const cached = estimatesRef.current[nodeId];
         if (!cached?.value || cached.key !== sig || cached.request !== request) {
-          const value = await studio.estimate(r.model, r.input, r.hints);
+          const value = await estimateFor(p, nodeId);
           setEstimates((prev) => ({ ...prev, [nodeId]: { key: sig, request, value } }));
           patchRun(nodeId, { busy: false, confirm: null, confirmRequest: null });
           return;
@@ -399,32 +481,48 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         }
         keyId = `${nodeId}|${request}`;
         if (!idempotency.current.has(keyId)) idempotency.current.set(keyId, crypto.randomUUID());
-        const g = await studio.generate(r.model, r.input, idempotency.current.get(keyId)!, false, est.usd ?? null, r.hints, est.reserve_usd ?? null, !direct);
+        const key = idempotency.current.get(keyId)!;
+        // Un lote se aprueba por su total (o, si falta algún precio y se confirmó, sin tope: no hay ambas cosas).
+        const made = p.batch
+          ? ((
+              await studio.batch(p.items, {
+                dryRun: false, key, acceptUnknown: !direct,
+                maxTotalUsd: direct ? (est.usd ?? null) : null,
+                // La retención vista se aprueba aparte: aceptar un costo desconocido no la borra (revisión 72).
+                maxTotalReserveUsd: est.reserve_usd ?? null,
+              })
+            ).generations ?? [])
+          : [await studio.generate(p.one.model, p.one.input, key, false, est.usd ?? null, p.one.hints, est.reserve_usd ?? null, !direct)];
         idempotency.current.delete(keyId);
-        setJobs((prev) => ({ ...prev, [g.id]: g }));
+        setJobs((prev) => ({ ...prev, ...Object.fromEntries(made.map((g) => [g.id, g])) }));
         setNodes((ns) =>
           ns.map((n) => {
             if (n.id !== nodeId || n.type !== "generator") return n;
-            const runs = n.data.runs.includes(g.id) ? n.data.runs : [...n.data.runs, g.id];
-            return { ...n, data: { ...n.data, runs, selected: runs.indexOf(g.id) } };
+            const runs = [...n.data.runs, ...made.map((g) => g.id).filter((id) => !n.data.runs.includes(id))];
+            return { ...n, data: { ...n.data, runs, selected: runs.length - 1 } };
           }),
         );
         patchRun(nodeId, { busy: false, confirm: null, confirmRequest: null, error: null });
       } catch (e) {
         let message = errorText(e);
-        if (e instanceof StudioError && e.code === "cost_changed") {
-          const r = await resolve(nodeId).catch(() => null);
-          const fresh = r ? await studio.estimate(r.model, r.input, r.hints).catch(() => null) : null;
-          setEstimates((prev) => ({ ...prev, [nodeId]: { key: sig, request: r ? JSON.stringify(r) : undefined, value: fresh } }));
-          if (fresh?.usd != null) message = t.cost.priceChanged(formatUsd(fresh.usd));
+        // Cambió lo que hay que aprobar (precio, retención o un precio que ya no se conoce): se recotiza la misma
+        // petición con su clave y se pide un clic nuevo sobre lo nuevo, sin reenviar ni subir topes (revisión 73).
+        if (e instanceof StudioError && ["cost_changed", "reserve_not_approved", "cost_unknown"].includes(e.code ?? "")) {
+          const p = await prepare(nodeId).catch(() => null);
+          const fresh = p ? await estimateFor(p, nodeId).catch(() => null) : null;
+          setEstimates((prev) => ({ ...prev, [nodeId]: { key: sig, request: p ? JSON.stringify(p) : undefined, value: fresh } }));
+          patchRun(nodeId, { confirm: null, confirmRequest: null });
+          if (e.code === "reserve_not_approved" && fresh?.reserve_usd != null) message = t.cost.reserveChanged(formatUsd(fresh.reserve_usd));
+          else if (fresh?.usd != null) message = t.cost.priceChanged(formatUsd(fresh.usd));
         }
-        // La clave solo se descarta ante un rechazo claro (4xx: no se creó nada). Un fallo de red o un 5xx
-        // pudo crear el trabajo: el reintento reutiliza la misma clave y no paga dos veces.
-        if (keyId && e instanceof StudioError && e.status < 500) idempotency.current.delete(keyId);
+        // La clave solo se descarta ante un rechazo claro de una generación suelta (4xx: no se creó nada). Un
+        // fallo de red o un 5xx pudo crear el trabajo, y un lote crea uno a uno (un 4xx puede llegar con parte
+        // ya creada): el reintento reutiliza la misma clave, recupera lo creado y no paga dos veces (revisión 69).
+        if (keyId && e instanceof StudioError && e.status < 500 && !batched) idempotency.current.delete(keyId);
         patchRun(nodeId, { busy: false, error: message });
       }
     },
-    [resolve, patchRun, setNodes, errorText, t, s],
+    [prepare, estimateFor, patchRun, setNodes, errorText, t, s],
   );
 
   const update = useCallback<SpaceCtx["update"]>(
@@ -556,6 +654,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       let node: SpaceNode;
       if (choice.type === "generator") node = { id: nid, type: "generator", position, data: { model: choice.model, values: {}, runs: [] } };
       else if (choice.type === "media") node = { id: nid, type: "media", position, data: {} };
+      else if (choice.type === "list") node = { id: nid, type: "list", position, data: { kind: "text", items: [] } };
       else node = { id: nid, type: choice.type, position, data: { text: "" } };
       setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true }]);
       if (choice.type !== "generator") return;
@@ -692,11 +791,19 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     (r: SpaceRun) => {
       setNodes((ns) => {
         let changed = false;
+        // Los pasos de un lote (`nodo#i`) aportan cada uno su generación, en el orden de la corrida.
+        const byNode = new Map<string, string[]>();
+        for (const step of r.order) {
+          const job = r.nodes[step]?.job_id;
+          if (!job) continue;
+          const [nodeId] = splitStep(step);
+          byNode.set(nodeId, [...(byNode.get(nodeId) ?? []), job]);
+        }
         const next = ns.map((n) => {
-          const job = r.nodes[n.id]?.job_id;
-          if (n.type !== "generator" || !job || n.data.runs.includes(job) || n.data.runs.length >= MAX_RUNS) return n;
+          const fresh = (byNode.get(n.id) ?? []).filter((j) => n.type === "generator" && !n.data.runs.includes(j));
+          if (n.type !== "generator" || !fresh.length) return n;
           changed = true;
-          const runs = [...n.data.runs, job];
+          const runs = [...n.data.runs, ...fresh].slice(0, MAX_RUNS);
           return { ...n, data: { ...n.data, runs, selected: runs.length - 1 } };
         });
         return changed ? next : ns;
@@ -801,15 +908,52 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     [mergeRun, errorText, run, space.id],
   );
 
+  // --- Publicar como flujo (fase 3c) ----------------------------------------------------------
+  const [published, setPublished] = useState<Flow | null>(space.flow ?? null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const saveFlow = useCallback(
+    async (next: Flow | null) => {
+      setPublishBusy(true);
+      setPublishError(null);
+      try {
+        // El flujo apunta a nodos del grafo guardado: primero se guarda lo pendiente.
+        if (!(await persist())) throw new Error(s.saveFirst);
+        const res = await studio.saveSpace(space.id, { version: version.current, flow: next });
+        version.current = res.version;
+        setPublished(res.flow ?? null);
+        setPublishing(false);
+      } catch (e) {
+        setPublishError(errorText(e));
+      } finally {
+        setPublishBusy(false);
+      }
+    },
+    [persist, space.id, errorText, s],
+  );
+
   const runFrom = useCallback((nodeId: string) => void openRun("downstream", nodeId), [openRun]);
   const nameOf = useCallback(
-    (id: string) => {
+    (step: string) => {
+      const [id, item] = splitStep(step);
       const n = nodes.find((x) => x.id === id) ?? (space.graph.nodes.find((x) => x.id === id) as SpaceNode | undefined);
-      return n ? nodeName(n) : id;
+      const name = n ? nodeName(n) : id;
+      return item === null ? name : s.step(name, item + 1);
     },
-    [nodes, nodeName, space.graph.nodes],
+    [nodes, nodeName, space.graph.nodes, s],
   );
-  const runNodes = useMemo(() => (run && RUN_ACTIVE.includes(run.status) ? run.nodes : {}), [run]);
+  // Estado de cada nodo en la corrida activa; en un lote manda lo más urgente de sus pasos.
+  const runNodes = useMemo(() => {
+    if (!run || !RUN_ACTIVE.includes(run.status)) return {};
+    const rank = { failed: 0, skipped: 1, running: 2, pending: 3, canceled: 4, done: 5 } as const;
+    const out: Record<string, SpaceRun["nodes"][string]> = {};
+    for (const [step, state] of Object.entries(run.nodes)) {
+      const [id] = splitStep(step);
+      if (!out[id] || rank[state.status] < rank[out[id].status]) out[id] = state;
+    }
+    return out;
+  }, [run]);
 
   const styledEdges = useMemo(() => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -818,7 +962,9 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       const tgt = byId.get(e.target);
       const j = tgt?.type === "generator" ? selectedRun(tgt.data) : undefined;
       const busy = !!j && !!jobs[j] && !jobs[j].terminal;
-      return { ...e, animated: busy, style: { stroke: kind ? KIND_COLOR[kind] : "#666", strokeWidth: 2 } };
+      // Lo que sale de una Lista es un lote: línea punteada, como en Magnific Spaces.
+      const batch = byId.get(e.source)?.type === "list";
+      return { ...e, animated: busy, style: { stroke: kind ? KIND_COLOR[kind] : "#666", strokeWidth: 2, ...(batch ? { strokeDasharray: "6 4" } : {}) } };
     });
   }, [edges, nodes, jobs, outputOf]);
 
@@ -857,6 +1003,13 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
             placeholder={s.untitled}
             className="min-w-0 flex-1 bg-transparent text-[15px] font-semibold outline-none placeholder:text-fg-4"
           />
+          <button
+            type="button"
+            onClick={() => setPublishing(true)}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold text-fg-2 hover:bg-surface-4 hover:text-fg"
+          >
+            <Share2 className="size-3.5" /> {published ? s.published : s.publish}
+          </button>
           <button
             type="button"
             onClick={() => openRun("workflow")}
@@ -954,6 +1107,20 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         </div>
       </div>
 
+      {publishing && (
+        <PublishDialog
+          initial={published ?? { title: title || s.untitled, description: "", inputs: [] }}
+          nodes={nodes}
+          name={nodeName}
+          busy={publishBusy}
+          error={publishError}
+          onSave={saveFlow}
+          onClose={() => {
+            setPublishing(false);
+            setPublishError(null);
+          }}
+        />
+      )}
       {runDialog && (
         <RunDialog
           estimate={runDialog.estimate}

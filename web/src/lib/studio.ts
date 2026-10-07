@@ -1,4 +1,4 @@
-import type { RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
+import type { Flow, FlowSummary, RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
 import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
@@ -223,15 +223,39 @@ export const studio = {
       body: JSON.stringify(title ? { title } : {}),
     }),
   /** Guarda con la versión leída; si otra pestaña guardó antes, 409 version_conflict. */
-  saveSpace: (id: string, body: { version: number; title?: string; graph?: unknown; cover?: string | null }) =>
+  saveSpace: (id: string, body: { version: number; title?: string; graph?: unknown; cover?: string | null; flow?: Flow | null }) =>
     call<Space>(`/v1/spaces/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
   deleteSpace: (id: string) => call<void>(`/v1/spaces/${id}`, { method: "DELETE" }),
+  /** Lote (nodo con Lista): `dry_run` cotiza el total; sin él crea todas las generaciones con ese tope. */
+  batch: (
+    items: { model: string; input: Record<string, unknown>; count: number; hints: Record<string, number> }[],
+    opts: { dryRun: true; key?: string } | { dryRun: false; key: string; maxTotalUsd: number | null; maxTotalReserveUsd: number | null; acceptUnknown: boolean },
+  ) =>
+    call<{ items?: unknown[]; total?: { usd: number; complete: boolean; reserve_usd: number | null }; generations?: Generation[] }>(
+      "/v1/generations/batch",
+      {
+        method: "POST",
+        // En seco, la clave de un lote ya empezado hace que el total cuente lo creado con su compromiso de entonces.
+        headers: { "Content-Type": "application/json", ...(opts.key ? { "Idempotency-Key": opts.key } : {}) },
+        body: JSON.stringify(
+          opts.dryRun
+            ? { items, dry_run: true }
+            : {
+                items,
+                dry_run: false,
+                ...(opts.maxTotalUsd != null ? { max_total_usd: opts.maxTotalUsd } : {}),
+                ...(opts.maxTotalReserveUsd != null ? { max_total_reserve_usd: opts.maxTotalReserveUsd } : {}),
+                ...(opts.acceptUnknown ? { accept_unknown_cost: true } : {}),
+              },
+        ),
+      },
+    ),
   /** Corrida en el servidor: `dry_run` cotiza cada paso; sin él arranca con el tope aprobado. */
-  estimateRun: (id: string, body: { mode: "downstream" | "workflow"; node_id?: string; version: number }) =>
+  estimateRun: (id: string, body: { mode: "downstream" | "workflow"; node_id?: string; version: number; inputs?: Record<string, unknown> }) =>
     call<RunEstimate>(`/v1/spaces/${id}/runs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -240,7 +264,7 @@ export const studio = {
   /** `idempotencyKey`: la misma por diálogo; reintentar tras perder la respuesta devuelve la misma corrida. */
   startRun: (
     id: string,
-    body: { mode: "downstream" | "workflow"; node_id?: string; version: number; max_total_usd: number },
+    body: { mode: "downstream" | "workflow"; node_id?: string; version: number; max_total_usd: number; inputs?: Record<string, unknown> },
     idempotencyKey: string,
   ) =>
     call<SpaceRun>(`/v1/spaces/${id}/runs`, {
@@ -248,6 +272,7 @@ export const studio = {
       headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
     }),
+  flows: () => call<{ flows: FlowSummary[] }>("/v1/flows"),
   runs: (id: string, limit = 10) => call<{ runs: SpaceRun[] }>(`/v1/spaces/${id}/runs?limit=${limit}`),
   run: (id: string, runId: string) => call<SpaceRun>(`/v1/spaces/${id}/runs/${runId}`),
   approveRun: (id: string, runId: string, body: { max_total_usd?: number; accept_unknown?: boolean }) =>

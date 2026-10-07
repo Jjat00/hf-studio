@@ -4,7 +4,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-27%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
+[![MCP](https://img.shields.io/badge/MCP-40%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
 [Español](README.es.md) · **English** · [Website and examples](https://hf-studio-gold.vercel.app)
 
@@ -78,6 +78,20 @@ the cheapest provider that offers **the exact same model and settings**:
 
 ## Features
 
+- **Spaces, a node canvas to generate step by step** (`/spaces`, inspired by Magnific Spaces): connect texts,
+  media, lists and any catalog model, and each step's output feeds the next one. Every node shows its cost in USD
+  before you generate and keeps its run history. Right-click or press `/` to add a node; drag an output to an empty
+  spot to add the next step already connected.
+  - **Runs on the server** ("Run all" or "Generate this and what follows"): every step is quoted, you approve a total
+    budget, and the run pauses to ask you if a step does not fit, has no price or its fallback provider costs more.
+    It keeps going if you close the tab and never pays twice after a restart.
+  - **Lists for batches:** a generator connected to a list runs once per checked item, and the batch follows the
+    chain in pairs (5 prompts → 5 images → 5 videos).
+  - **Free local tools** (ffmpeg): first or last frame of a video, combine videos, mix audio over a video.
+  - **Audio nodes** (ElevenLabs): voiceover with your voices, sound effects and music.
+  - **Assistant node** (Claude, optional `ANTHROPIC_API_KEY`): writes or improves prompts, describes images and drafts
+    scripts; its text feeds other nodes.
+  - **Flows:** publish a canvas with labeled inputs and run it from Presets by filling a form.
 - **82 Higgsfield endpoints** (66 video, 15 image, 1 custom references), each with its JSON Schema taken from the
   official docs (`hf-studio sync-catalog`).
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
@@ -206,7 +220,7 @@ touched. If the agent already has `hf-studio`, `connect` stops: remove it first 
 server is `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with `HF_STUDIO_URL=http://127.0.0.1:8787`
 and `HF_STUDIO_TOKEN=hfs_…` in its environment.
 
-Tools (27). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Tools (40). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`), and the ones that spend credits say so in their title, so clients can warn you before calling them.
 
 | Group | Tools |
@@ -219,6 +233,8 @@ Tools (27). Every tool declares all four MCP hints (`readOnlyHint`, `destructive
 | Voice (ElevenLabs) | `list_voices`, `change_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sound library | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
+| Reuse and elements | `use_output`, `list_elements`, `create_element`, `delete_element` |
+| Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
 
 **No MCP tool generates without quoting that same request first.** `estimate_cost`, and `generate_batch` or
 `run_preset` with `dry_run=True`, return the cost and a `quote_id`. `generate`, and batches and presets with
@@ -237,12 +253,18 @@ such as `generate_audio=false` giving a silent video on an edit and how to keep 
 key. It cannot check that a person actually saw the price: showing it and waiting for an OK is up to the agent,
 which the server instructions require.
 
+**Spaces follow the same rule.** `estimate_space_run` quotes every step and the total and returns a `quote_id`;
+`run_space` needs it and uses that total as the run's budget (a higher `max_total_usd` only if the user approved it).
+Retrying `run_space` with the same `quote_id` returns the same run. A run in `awaiting_approval` shows its reason and
+the new total in `pause.needed_total_usd`; with the user's OK, `approve_space_run`. A published flow runs with `inputs`.
+
 ## Web UI (`web/`)
 
 Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name and illustrations are original.
 
 - **Pages:** Explore, Image, Video (Create: text, first and last frame, references · Genjutsu · Edit video · Motion),
-  Voice, Audio, Sound library, Use cases, Presets, Library (with detail at `/history/<id>`), Models and MCP.
+  Voice, Audio, Sound library, Use cases, Presets (with published flows at `/flows/<id>`), Spaces (`/spaces`), Library
+  (with detail at `/history/<id>`), Models and MCP.
 - **Forms** are generated from each model's `input_schema`, so all 82 endpoints work without model-specific code.
 - **Voice** (`/voice`): pick a video, mark the segment on the timeline, search a voice (your account or the ElevenLabs
   public library, with preview), add an effect and choose how much of the original audio stays.
@@ -279,6 +301,10 @@ Every `/v1` route requires `Authorization: Bearer hfs_…`. Interactive docs at 
 | GET/POST/DELETE | `/v1/elements` · `/v1/elements/{id}` | Kling 3.0 elements: list, create (multipart `name`, `description`, 2–4 `files` or own `image_urls`) and delete |
 | POST | `/v1/sounds/import-elevenlabs` | Imports the voices in your ElevenLabs history (free) |
 | POST | `/v1/audio/{service}/estimate` · `/v1/audio/{service}` | `text-to-speech`, `sound-effects`, `music`, `voice-isolator`: quote (`audio_quote`) and run with it |
+| GET/POST/PUT/DELETE | `/v1/spaces` · `/v1/spaces/{id}` | Node canvases (graph validated, saved with `version`); `flow` publishes one |
+| POST | `/v1/spaces/{id}/runs` | Run on the server: `dry_run` quotes every step and the total; with `max_total_usd` it starts (`Idempotency-Key`) |
+| GET/POST | `/v1/spaces/{id}/runs/{run}` · `…/approve` · `…/cancel` | Follow, approve a pause (new total) or stop a run |
+| GET | `/v1/flows` | Published flows with their inputs |
 
 States: `pending` (local queue) → `submitting` → `queued` → `in_progress` → `completed` | `failed` | `nsfw` |
 `canceled` | `timed_out`. Every response includes a readable `stage`, `terminal`, `elapsed_seconds` and

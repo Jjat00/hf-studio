@@ -5,7 +5,7 @@ export const AUTHOR = "https://jaimeaza.tech";
 
 /** Textos de la landing. Misma forma en los dos idiomas: el tipo sale del español. */
 const es = {
-  nav: { examples: "Ejemplos", providers: "Proveedores", audio: "Audio", agents: "Agentes", start: "Empezar", star: "Estrella en GitHub" },
+  nav: { examples: "Ejemplos", spaces: "Spaces", providers: "Proveedores", audio: "Audio", agents: "Agentes", start: "Empezar", star: "Estrella en GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS y Linux",
     title1: "Tu propio estudio de IA.",
@@ -20,7 +20,7 @@ const es = {
   stats: [
     { value: "82", label: "modelos de video e imagen" },
     { value: "3", label: "proveedores, el más barato primero" },
-    { value: "31", label: "herramientas MCP" },
+    { value: "40", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
   ],
   promo: {
@@ -45,6 +45,30 @@ const es = {
       { art: "object-swap", title: "Genjutsu", desc: "Sustituye una persona u objeto y deja el fondo intacto." },
       { art: "text-to-image", title: "Texto a imagen", desc: "Soul, Recraft, Ideogram, Qwen, Grok y más." },
       { art: "image-edit", title: "Editar imagen", desc: "Retoca o recompone una imagen con una frase." },
+    ],
+  },
+  spaces: {
+    kicker: "Spaces · lienzo de nodos",
+    title: "Genera por pasos, en un lienzo",
+    body: "Conecta textos, listas, imágenes y cualquier modelo: la salida de cada paso alimenta al siguiente. Cada nodo muestra su costo antes de generar, y todo el lienzo corre en el servidor con un tope de gasto que apruebas tú.",
+    diagram: {
+      assistant: "Assistant · Claude",
+      list: "Lista · 3 escenas",
+      image: "Imagen ×3",
+      video: "Video ×3",
+      voice: "Voz en off",
+      script: "guion",
+      mix: "Mezclar audio",
+      free: "gratis",
+      total: "Cada paso cotizado · tope aprobado por ti",
+    },
+    points: [
+      { title: "Un paso lleva al siguiente", desc: "Arrastra la salida de un nodo a un espacio vacío y el buscador ofrece solo los modelos que aceptan ese tipo, ya conectados." },
+      { title: "Corre solo, con tope", desc: "Cotiza cada paso y apruebas un total. Si un paso no cabe o cambia de precio, la corrida se pausa y te pregunta. Sigue aunque cierres la pestaña." },
+      { title: "Listas para lotes", desc: "Una lista de 5 prompts da 5 imágenes y 5 videos, cada video con su imagen." },
+      { title: "Herramientas gratis", desc: "Último fotograma para encadenar clips, combinar videos y mezclar voz, música o efectos, con ffmpeg en tu máquina." },
+      { title: "Voz, música y un Assistant", desc: "Nodos de ElevenLabs para voz en off, efectos y música, y Claude para escribir o mejorar prompts y describir imágenes." },
+      { title: "Flujos y agentes", desc: "Publica un lienzo con sus entradas y córrelo llenando un formulario, o deja que tu agente lo arme y lo corra por MCP." },
     ],
   },
   providers: {
@@ -145,7 +169,7 @@ const es = {
 export type Dict = typeof es;
 
 const en: Dict = {
-  nav: { examples: "Examples", providers: "Providers", audio: "Audio", agents: "Agents", start: "Get started", star: "Star on GitHub" },
+  nav: { examples: "Examples", spaces: "Spaces", providers: "Providers", audio: "Audio", agents: "Agents", start: "Get started", star: "Star on GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS and Linux",
     title1: "Your own AI studio.",
@@ -160,7 +184,7 @@ const en: Dict = {
   stats: [
     { value: "82", label: "video and image models" },
     { value: "3", label: "providers, cheapest first" },
-    { value: "31", label: "MCP tools" },
+    { value: "40", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
   ],
   promo: {
@@ -185,6 +209,30 @@ const en: Dict = {
       { art: "object-swap", title: "Genjutsu", desc: "Swap a person or an object and keep the background intact." },
       { art: "text-to-image", title: "Text to image", desc: "Soul, Recraft, Ideogram, Qwen, Grok and more." },
       { art: "image-edit", title: "Image edit", desc: "Retouch or recompose an image with one sentence." },
+    ],
+  },
+  spaces: {
+    kicker: "Spaces · node canvas",
+    title: "Generate step by step, on a canvas",
+    body: "Connect texts, lists, images and any model: each step's output feeds the next one. Every node shows its cost before generating, and the whole canvas runs on the server under a budget you approve.",
+    diagram: {
+      assistant: "Assistant · Claude",
+      list: "List · 3 scenes",
+      image: "Image ×3",
+      video: "Video ×3",
+      voice: "Voiceover",
+      script: "script",
+      mix: "Mix audio",
+      free: "free",
+      total: "Every step quoted · budget approved by you",
+    },
+    points: [
+      { title: "One step leads to the next", desc: "Drag a node's output to an empty spot and the search offers only the models that take that type, already connected." },
+      { title: "Runs on its own, with a budget", desc: "Every step is quoted and you approve a total. If a step does not fit or its price changes, the run pauses and asks you. It keeps going if you close the tab." },
+      { title: "Lists for batches", desc: "A list of 5 prompts gives 5 images and 5 videos, each video with its own image." },
+      { title: "Free tools", desc: "Last frame to chain clips, combine videos and mix voice, music or effects, with ffmpeg on your machine." },
+      { title: "Voice, music and an Assistant", desc: "ElevenLabs nodes for voiceover, effects and music, and Claude to write or improve prompts and describe images." },
+      { title: "Flows and agents", desc: "Publish a canvas with its inputs and run it by filling a form, or let your agent build and run it over MCP." },
     ],
   },
   providers: {

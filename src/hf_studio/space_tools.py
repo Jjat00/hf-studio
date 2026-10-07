@@ -29,9 +29,10 @@ log = logging.getLogger("hf_studio.space_tools")
 
 TOOL_PROVIDER = "hf-studio"
 AUDIO_PROVIDER = "elevenlabs"
+ASSISTANT_PROVIDER = "anthropic"
 # Proveedores internos del worker que trabajan dentro de este proceso (salidas `local://`): su copia guardada
 # es obligatoria y se pueden cancelar en curso.
-BACKGROUND_PROVIDERS = (TOOL_PROVIDER, AUDIO_PROVIDER)
+BACKGROUND_PROVIDERS = (TOOL_PROVIDER, AUDIO_PROVIDER, ASSISTANT_PROVIDER)
 LOCAL_SCHEME = "local://"
 MAX_COMBINE = 10
 MAX_MIX_AUDIO = 4
@@ -236,7 +237,7 @@ class BackgroundProvider(Provider):
         shutil.copyfile(src, tmp)
         tmp.replace(dest)
         shutil.rmtree(self.work / request_id, ignore_errors=True)
-        types = {".png": "image/png", ".mp4": "video/mp4", ".mp3": "audio/mpeg"}
+        types = {".png": "image/png", ".mp4": "video/mp4", ".mp3": "audio/mpeg", ".txt": "text/plain"}
         return dest.stat().st_size, types.get(dest.suffix, "application/octet-stream")
 
     async def _run(self, request_id: str, model: str, arguments: dict) -> tuple[str, str, str]:

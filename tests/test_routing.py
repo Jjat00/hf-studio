@@ -676,3 +676,117 @@ async def test_an_approved_channel_is_sent_even_if_another_gets_cheaper(env):
     app.state.prices.store("apimart", prices)  # el -ext vuelve a su tarifa barata
     await tick(app)
     assert [s["model"] for s in fakes.sent["apimart"]] == ["grok-imagine-video-1.5"]
+
+
+async def test_a_partial_batch_retry_counts_what_it_already_committed(env):
+    """Revisión 70 (H1): al recuperar un lote parcial, lo ya creado cuenta con su tope persistido, no con su
+    precio de hoy; si el total supera lo aprobado, no se crea el resto."""
+    app, http, _ = env
+    a = {"model": T2V, "input": VIDEO}
+    b = {"model": T2V, "input": {**VIDEO, "prompt": "A kite over a beach"}}
+    first = await http.post("/v1/generations/batch", json={"items": [a], "max_total_usd": 0.71},
+                            headers={"Idempotency-Key": "k"})  # fmt: skip
+    assert first.status_code == 202  # k:0 creado con 0,71 comprometidos
+    prices = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    prices["seedance-2.0|720P"] = prices["seedance-2.0|720P"] / 2  # baja el precio
+    app.state.prices.store("apimart", prices)
+    quoted = (await http.post("/v1/generations/batch", json={"items": [a, b], "dry_run": True})).json()
+    cheap = quoted["total"]["usd"]
+    assert cheap < 1.42
+    r = await http.post("/v1/generations/batch", json={"items": [a, b], "max_total_usd": cheap},
+                        headers={"Idempotency-Key": "k"})  # fmt: skip
+    assert r.status_code == 409 and r.json()["error"]["code"] == "cost_changed"
+    async with app.state.sessions() as s:
+        assert len((await s.scalars(select(Job))).all()) == 1
+
+
+async def test_a_partial_batch_is_requoted_with_its_key_and_then_recovered(env):
+    """Revisión 71 (H1): la cotización en seco con la clave cuenta lo ya creado con su compromiso de entonces;
+    con ese total, el reintento recupera el primero y crea solo el segundo."""
+    app, http, _ = env
+    a = {"model": T2V, "input": VIDEO}
+    b = {"model": T2V, "input": {**VIDEO, "prompt": "A kite over a beach"}}
+    await http.post("/v1/generations/batch", json={"items": [a], "max_total_usd": 0.71},
+                    headers={"Idempotency-Key": "k"})  # fmt: skip
+    prices = json.loads((FIXTURES / "prices_apimart.json").read_text())
+    prices["seedance-2.0|720P"] = prices["seedance-2.0|720P"] / 2
+    app.state.prices.store("apimart", prices)
+    plain = (await http.post("/v1/generations/batch", json={"items": [a, b], "dry_run": True})).json()[
+        "total"
+    ]
+    keyed = (
+        await http.post(
+            "/v1/generations/batch", json={"items": [a, b], "dry_run": True}, headers={"Idempotency-Key": "k"}
+        )
+    ).json()["total"]
+    assert keyed["recovered"] == 1 and keyed["usd"] == pytest.approx(0.71 + plain["usd"] / 2, abs=1e-4)
+    r = await http.post("/v1/generations/batch", json={"items": [a, b], "max_total_usd": keyed["usd"]},
+                        headers={"Idempotency-Key": "k"})  # fmt: skip
+    assert r.status_code == 202 and len(r.json()["generations"]) == 2
+    async with app.state.sessions() as s:
+        assert len((await s.scalars(select(Job))).all()) == 2
+
+
+async def test_recovering_a_batch_does_not_requote_what_it_already_created(env):
+    """Revisión 71 (H2): una posición ya creada no se vuelve a cotizar (su proveedor puede no estar ya)."""
+    from hf_studio.service import request_digest
+
+    app, http, _ = env
+    assistant = {"model": "claude/assistant", "input": {"prompt": "Write a prompt"}}
+    video = {"model": T2V, "input": VIDEO}
+    async with app.state.sessions() as s:  # creado en un intento anterior; hoy no hay ANTHROPIC_API_KEY
+        owner = await s.scalar(select(ApiClient))
+        s.add(Job(owner_id=owner.id, model=assistant["model"], input=assistant["input"], status="completed",
+                  provider="anthropic", idempotency_key="m:0", max_usd=0.12,
+                  input_hash=request_digest(assistant["model"], assistant["input"])))  # fmt: skip
+        await s.commit()
+    dry = (
+        await http.post(
+            "/v1/generations/batch",
+            json={"items": [assistant, video], "dry_run": True},
+            headers={"Idempotency-Key": "m"},
+        )
+    ).json()
+    assert dry["total"]["usd"] == pytest.approx(0.12 + 0.71)
+    r = await http.post("/v1/generations/batch", json={"items": [assistant, video], "max_total_usd": 0.83},
+                        headers={"Idempotency-Key": "m"})  # fmt: skip
+    assert r.status_code == 202, r.text
+    other = await http.post("/v1/generations/batch", json={"items": [video, video], "max_total_usd": 2},
+                            headers={"Idempotency-Key": "m"})  # fmt: skip
+    assert other.status_code == 409 and other.json()["error"]["code"] == "idempotency_conflict"
+
+
+async def test_two_retries_of_the_same_batch_key_run_one_after_the_other(env):
+    """Revisión 72 (H1): dos reintentos simultáneos de la misma clave no cotizan ni crean a la vez: el segundo
+    espera al primero y ve lo que creó (así no suman dos fotos distintas del presupuesto)."""
+    import asyncio
+
+    app, http, _ = env
+    router = app.state.router
+    real_plan = router.plan
+    entered, release = asyncio.Event(), asyncio.Event()
+    planning = 0
+
+    async def slow_plan(*args, **kwargs):
+        nonlocal planning
+        planning += 1
+        entered.set()
+        await release.wait()
+        return await real_plan(*args, **kwargs)
+
+    router.plan = slow_plan
+    body = {"items": [{"model": T2V, "input": VIDEO}], "max_total_usd": 0.71}
+    first = asyncio.create_task(
+        http.post("/v1/generations/batch", json=body, headers={"Idempotency-Key": "same"})
+    )
+    await entered.wait()
+    second = asyncio.create_task(
+        http.post("/v1/generations/batch", json=body, headers={"Idempotency-Key": "same"})
+    )
+    await asyncio.sleep(0.2)
+    assert planning == 1  # el segundo espera el candado, no cotiza en paralelo
+    release.set()
+    a, b = await asyncio.gather(first, second)
+    router.plan = real_plan
+    assert a.status_code == 202 and b.status_code == 200
+    assert a.json()["generations"][0]["id"] == b.json()["generations"][0]["id"] and planning == 1

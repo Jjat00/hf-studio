@@ -88,6 +88,10 @@ export function CostPanel({
       <div className="mt-0.5 text-[16px] font-semibold">{value}</div>
       {detail && <p className="mt-0.5 line-clamp-2 text-xs text-fg-3">{detail}</p>}
       {!loading && estimate?.options && estimate.options.length > 0 && <ProviderComparison estimate={estimate} />}
+      {/* Un lote no trae opciones por proveedor: su retención total se muestra aquí para aprobarla a la vista. */}
+      {!loading && !estimate?.options?.length && estimate?.reserve_usd != null && (
+        <p className="mt-1.5 text-xs text-warning">{t.cost.reserve(formatUsd(estimate.reserve_usd))}</p>
+      )}
       {needsConfirm && warn !== undefined && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
           <AlertTriangle className="mt-px size-3.5 shrink-0" />

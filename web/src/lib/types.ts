@@ -23,7 +23,7 @@ export type JSONSchema = {
 export type ModelSummary = {
   id: string;
   title: string;
-  output: "video" | "image" | "audio" | "unknown";
+  output: "video" | "image" | "audio" | "text" | "unknown";
   workflow: string;
   family: string;
   capabilities: string[];

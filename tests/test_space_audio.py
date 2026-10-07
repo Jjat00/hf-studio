@@ -171,3 +171,30 @@ async def test_a_run_without_elevenlabs_fails_the_step(tmp_path):
             async with app.state.sessions() as s:
                 state = await s.get(SpaceRun, run["id"])
             assert state.status == "failed" and "ELEVENLABS_API_KEY" in state.nodes["m"]["error"]
+
+
+async def test_an_uploaded_mp3_becomes_a_wav_input(audio_env, tmp_path):
+    """Higgsfield no acepta MP3: la subida lo convierte a WAV (nodo de medio de Spaces)."""
+    _, http, _, fakes = audio_env
+    ffmpeg("-f", "lavfi", "-i", "sine=frequency=330:duration=1", str(tmp_path / "in.mp3"))
+    res = await http.post(
+        "/v1/uploads", files={"file": ("voz.mp3", (tmp_path / "in.mp3").read_bytes(), "audio/mpeg")}
+    )
+    assert res.status_code == 201 and res.json()["content_type"] == "audio/wav"
+    assert fakes.uploads[-1][:4] == b"RIFF"
+    fake = await http.post("/v1/uploads", files={"file": ("x.mp3", b"#EXTM3U\nhttp://x/y", "audio/mpeg")})
+    assert fake.status_code == 415
+
+
+async def test_a_small_mp3_that_expands_past_the_limit_is_rejected_without_reading_it(audio_env, tmp_path):
+    """Revisión 69 (H5): ffmpeg corta el WAV al pasar el límite y se rechaza sin cargarlo entero."""
+    app, http, _, fakes = audio_env
+    ffmpeg(
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "3", "-b:a", "32k", str(tmp_path / "s.mp3")
+    )
+    data = (tmp_path / "s.mp3").read_bytes()
+    app.state.settings.max_upload_bytes = 64 * 1024
+    assert len(data) < 64 * 1024  # el MP3 cabe, su WAV (3 s estéreo ≈ 530 KB) no
+    before = len(fakes.uploads)
+    res = await http.post("/v1/uploads", files={"file": ("s.mp3", data, "audio/mpeg")})
+    assert res.status_code == 413 and len(fakes.uploads) == before

@@ -9,7 +9,7 @@ import { CostPanel } from "@/components/studio/cost-panel";
 import { ElementPicker } from "@/components/studio/element-picker";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { ModelPicker, ModelRow } from "@/components/studio/model-picker";
-import { isAudioNode, isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
+import { isAssistant, isAudioNode, isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
 import { costShort } from "@/lib/studio";
 import { selectedRun, useSpace } from "./context";
 import { portLabel } from "./nodes";
@@ -55,7 +55,13 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
-        {isTool(data.model) || isAudioNode(data.model) ? (
+        {isAssistant(data.model) ? (
+          <div className="rounded-2xl border border-line bg-surface-3 px-4 py-3">
+            <span className="block text-[13px] text-fg-3">{s.assistantGroup}</span>
+            <span className="text-[16px] font-semibold">{s.assistantName}</span>
+            <span className="mt-0.5 block text-[12px] text-fg-3">{s.assistantHint}</span>
+          </div>
+        ) : isTool(data.model) || isAudioNode(data.model) ? (
           // Herramientas y nodos de audio no cambian de modelo: su nombre traducido va fijo.
           <div className="rounded-2xl border border-line bg-surface-3 px-4 py-3">
             <span className="block text-[13px] text-fg-3">{isTool(data.model) ? s.tools : s.audioGroup}</span>

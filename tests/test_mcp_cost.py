@@ -235,3 +235,30 @@ def test_approve_fallback_can_accept_an_unknown_cost(monkeypatch):
         {"max_usd": None, "max_reserve_usd": None, "accept_unknown_cost": True},
     )
     assert sent[1][1] == {"max_usd": 1.0, "max_reserve_usd": 4.9, "accept_unknown_cost": False}
+
+
+def test_a_batch_requote_carries_its_key_and_binds_the_quote_to_it(monkeypatch):
+    """Revisión 72 (H2): recotizar un lote a medias con su clave cuenta lo ya creado; la cotización solo vale
+    con esa clave."""
+    calls = []
+
+    def call(method, path, **kw):
+        calls.append(kw)
+        if kw["json"].get("dry_run"):
+            return {
+                "items": [],
+                "total": {"usd": 1.71, "complete": True, "reserve_usd": None, "recovered": 1},
+            }
+        return {"generations": []}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    items = [{"model": "m", "input": {"prompt": "a"}, "count": 2}]
+    q = mcp_server.generate_batch(items, dry_run=True, idempotency_key="quote-q_old")
+    assert calls[-1]["headers"] == {"Idempotency-Key": "quote-q_old"}
+    with pytest.raises(ToolError):  # con otra clave sería otro lote
+        mcp_server.generate_batch(items, dry_run=False, quote_id=q["quote_id"], idempotency_key="other")
+    mcp_server.generate_batch(items, dry_run=False, quote_id=q["quote_id"])
+    assert (
+        calls[-1]["headers"] == {"Idempotency-Key": "quote-q_old"}
+        and calls[-1]["json"]["max_total_usd"] == 1.71
+    )

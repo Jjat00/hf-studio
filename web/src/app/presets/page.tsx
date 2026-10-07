@@ -1,12 +1,13 @@
 "use client";
 
 import clsx from "clsx";
-import { Bookmark, ImageIcon, Video } from "lucide-react";
+import { Bookmark, ImageIcon, Video, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { localizePreset, presetCategory } from "@/lib/i18n/presets";
-import { studio } from "@/lib/studio";
+import type { FlowSummary } from "@/lib/spaces";
+import { apiSrc, studio } from "@/lib/studio";
 import type { Preset } from "@/lib/types";
 
 const FALLBACK = { video: "/art/text-to-video.webp", image: "/art/text-to-image.webp" };
@@ -16,8 +17,10 @@ export default function PresetsPage() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [category, setCategory] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [flows, setFlows] = useState<FlowSummary[]>([]);
   useEffect(() => {
     studio.presets().then((r) => setPresets(r.presets)).catch((e) => setError(e.message));
+    studio.flows().then((r) => setFlows(r.flows), () => undefined);
   }, []);
   const categories = useMemo(() => [null, ...new Set(presets.map((p) => p.category))], [presets]);
   const shown = presets.filter((p) => category === null || p.category === category).map((p) => localizePreset(p, locale));
@@ -26,6 +29,31 @@ export default function PresetsPage() {
     <div className="px-4 py-8 md:px-8">
       <h1 className="headline text-[40px] md:text-[56px]">{t.presets.title}</h1>
       <p className="mt-2 max-w-2xl text-fg-3">{t.presets.body}</p>
+      {flows.length > 0 && (
+        <section className="mt-8">
+          <h2 className="headline flex items-center gap-2 text-[24px]">
+            <Workflow className="size-5 text-lime" /> {t.spaces.flows}
+          </h2>
+          <p className="mt-1 text-sm text-fg-3">{t.spaces.flowsBody}</p>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+            {flows.map((f) => (
+              <Link key={f.space_id} href={`/flows/${f.space_id}`} className="group block rounded-[18px] border border-line bg-surface-1 p-3 hover:border-lime/40">
+                <div className="dotted-bg flex aspect-[16/9] items-center justify-center overflow-hidden rounded-xl bg-surface-2">
+                  {f.cover ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={apiSrc(f.cover)} alt="" className="size-full object-cover" />
+                  ) : (
+                    <Workflow className="size-8 text-fg-4" />
+                  )}
+                </div>
+                <p className="headline mt-3 text-[18px]">{f.title}</p>
+                {f.description && <p className="mt-0.5 line-clamp-2 text-[14px] text-fg-3">{f.description}</p>}
+                <p className="mt-1 text-[12px] text-fg-4">{f.inputs.map((i) => i.label).join(" · ")}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="hide-scrollbar mt-6 flex gap-1.5 overflow-x-auto">
         {categories.map((c) => (
           <button

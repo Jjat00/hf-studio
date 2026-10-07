@@ -2,7 +2,7 @@
 
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
-import { AlertTriangle, ChevronLeft, ChevronRight, FileAudio, ImageIcon, Loader2, Play, StickyNote, Type, Upload, Video } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileAudio, ImageIcon, ListChecks, Loader2, Play, StickyNote, Type, Upload, Video, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -10,7 +10,7 @@ import { CreationsPicker } from "@/components/studio/creations-picker";
 import type { Dict } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
 import { humanize } from "@/lib/schema";
-import { inPorts, isAudioNode, isTool, KIND_COLOR, kindOfUrl, type GeneratorNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
+import { inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, MAX_LIST_ITEMS, newId, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
 import { costShort, modelLabel, outputSrc, studio } from "@/lib/studio";
 import type { ModelDetail, Output } from "@/lib/types";
 import { selectedRun, useSpace } from "./context";
@@ -21,6 +21,7 @@ const KIND_ICON = { text: Type, image: ImageIcon, video: Video, audio: FileAudio
 export function portLabel(t: Dict, detail: ModelDetail, key: string) {
   if (key === "prompt") return t.spaces.prompt;
   if (isTool(detail.id) && t.spaces.toolPorts[key]) return t.spaces.toolPorts[key];
+  if (isAssistant(detail.id) && key === "image_urls") return t.spaces.assistantImages;
   if (key === "image_url" && detail.output === "image") return t.spaces.inputImage;
   const labels = t.media.labels as Record<string, readonly [string, string] | undefined>;
   return labels[key]?.[0] ?? humanize(key, {});
@@ -61,8 +62,28 @@ function Card({ selected, children, className }: { selected?: boolean; children:
   );
 }
 
+/** Texto de una salida (Assistant), leído de su copia local. */
+function TextPreview({ src }: { src: string }) {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(src)
+      .then((r) => (r.ok ? r.text() : ""))
+      .then((t) => alive && setText(t), () => alive && setText(""));
+    return () => {
+      alive = false;
+    };
+  }, [src]);
+  return (
+    <div className="nowheel thin-scrollbar size-full overflow-y-auto p-3 text-left text-[12px] leading-relaxed whitespace-pre-wrap text-fg-2">
+      {text ?? "…"}
+    </div>
+  );
+}
+
 export function Preview({ out, className }: { out: Output; className?: string }) {
   const src = outputSrc(out);
+  if (out.kind === "text") return <TextPreview src={src} />;
   if (out.kind === "video")
     return <video src={src} className={clsx("size-full object-contain", className)} controls muted loop playsInline preload="metadata" />;
   if (out.kind === "audio") return <audio src={src} controls className="w-full" />;
@@ -208,7 +229,7 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
   }, [id, portKey, updateInternals]);
 
   const output = (summary?.output ?? detail?.output) as PortKind | "unknown" | undefined;
-  const outKind: PortKind = output === "video" || output === "audio" ? output : "image";
+  const outKind: PortKind = output === "video" || output === "audio" || output === "text" ? output : "image";
   const Icon = KIND_ICON[outKind];
   const label = summary ? modelLabel(summary.title) : { name: data.model, workflow: "" };
   // Las herramientas locales llevan nombre propio traducido y la marca de gratis.
@@ -216,7 +237,9 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
     ? { name: s.toolNames[data.model] ?? label.name, workflow: s.tools }
     : isAudioNode(data.model)
       ? { name: s.audioNames[data.model] ?? label.name, workflow: "ElevenLabs" }
-      : label;
+      : isAssistant(data.model)
+        ? { name: s.assistantName, workflow: "Claude" }
+        : label;
   const connected = new Set(edges.filter((e) => e.target === id).map((e) => e.targetHandle));
   const hasPrompt = ports.some((p) => p.key === "prompt");
 
@@ -297,7 +320,7 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
             <textarea
               value={typeof data.values.prompt === "string" ? data.values.prompt : ""}
               onChange={(e) => setValue(id, "prompt", e.target.value || undefined)}
-              placeholder={outKind === "video" ? s.promptVideo : outKind === "audio" ? s.promptAudio : s.promptImage}
+              placeholder={outKind === "video" ? s.promptVideo : outKind === "audio" ? s.promptAudio : outKind === "text" ? s.promptAssistant : s.promptImage}
               rows={3}
               className="nodrag nowheel thin-scrollbar w-full resize-none rounded-xl bg-surface-3 p-2.5 text-[13px] leading-relaxed outline-none placeholder:text-fg-4 focus:bg-surface-4"
             />
@@ -328,6 +351,129 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
           )}
         </div>
       </Card>
+    </div>
+  );
+}
+
+export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
+  const { t } = useI18n();
+  const s = t.spaces;
+  const { update } = useSpace();
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const kind = data.kind;
+  const full = data.items.length >= MAX_LIST_ITEMS;
+  const checked = data.items.filter((i) => i.checked && i.value).length;
+  const setItems = (items: ListItem[]) => update(id, { items });
+  const add = (value: string) => {
+    if (!full) setItems([...data.items, { id: newId("i"), value, checked: true }]);
+  };
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= data.items.length) return;
+    const items = [...data.items];
+    const [it] = items.splice(from, 1);
+    items.splice(to, 0, it);
+    setItems(items);
+  };
+
+  async function upload(files: FileList | null) {
+    if (!files?.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const values: string[] = [];
+      for (const file of Array.from(files).slice(0, MAX_LIST_ITEMS - data.items.length)) values.push((await studio.upload(file)).url);
+      setItems([...data.items, ...values.map((value) => ({ id: newId("i"), value, checked: true }))]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="w-[280px]">
+      <Title icon={ListChecks} color={KIND_COLOR[kind]}>
+        {s.addList} · {s.listKinds[kind]}
+        {checked > 1 && <span className="font-normal text-fg-3">· {s.listBatch(checked)}</span>}
+      </Title>
+      <Card selected={selected} className="relative p-2.5">
+        {data.items.length === 0 && (
+          <div className="mb-2 grid grid-cols-4 gap-1">
+            {(["text", "image", "video", "audio"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => update(id, { kind: k })}
+                className={clsx("nodrag rounded-lg px-1 py-1 text-[11px]", k === kind ? "bg-surface-5 text-fg" : "bg-surface-3 text-fg-3 hover:text-fg")}
+              >
+                {s.listKinds[k]}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="nowheel thin-scrollbar flex max-h-72 flex-col gap-1.5 overflow-y-auto">
+          {data.items.map((item, i) => (
+            <div key={item.id} className="group flex items-start gap-1.5 rounded-lg bg-surface-3 p-1.5">
+              <input
+                type="checkbox"
+                checked={item.checked}
+                onChange={(e) => setItems(data.items.map((x) => (x.id === item.id ? { ...x, checked: e.target.checked } : x)))}
+                className="nodrag mt-1 accent-lime"
+              />
+              {kind === "text" ? (
+                <textarea
+                  value={item.value}
+                  onChange={(e) => setItems(data.items.map((x) => (x.id === item.id ? { ...x, value: e.target.value } : x)))}
+                  placeholder={s.listItemPlaceholder}
+                  rows={2}
+                  className="nodrag nowheel min-w-0 flex-1 resize-none bg-transparent text-[12px] leading-snug outline-none placeholder:text-fg-4"
+                />
+              ) : (
+                <div className="flex h-14 min-w-0 flex-1 items-center justify-center overflow-hidden rounded-md bg-surface-4">
+                  <Preview out={{ kind, url: item.value }} className="max-h-14" />
+                </div>
+              )}
+              <div className="flex flex-col opacity-0 transition group-hover:opacity-100">
+                <button type="button" aria-label="up" onClick={() => move(i, i - 1)} className="nodrag text-fg-3 hover:text-fg">
+                  <ChevronUp className="size-3.5" />
+                </button>
+                <button type="button" aria-label="down" onClick={() => move(i, i + 1)} className="nodrag text-fg-3 hover:text-fg">
+                  <ChevronDown className="size-3.5" />
+                </button>
+                <button type="button" aria-label={s.remove} onClick={() => setItems(data.items.filter((x) => x.id !== item.id))} className="nodrag text-fg-3 hover:text-danger">
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-1.5">
+          {kind === "text" ? (
+            <button type="button" disabled={full} onClick={() => add("")} className="nodrag flex-1 rounded-lg bg-surface-4 py-1.5 text-[12px] text-fg-2 hover:text-fg disabled:opacity-40">
+              + {s.listAdd}
+            </button>
+          ) : (
+            <>
+              <input ref={input} type="file" multiple accept={`${kind}/*`} className="hidden" onChange={(e) => upload(e.target.files)} />
+              <button type="button" disabled={full || busy} onClick={() => input.current?.click()} className="nodrag flex flex-1 items-center justify-center gap-1 rounded-lg bg-surface-4 py-1.5 text-[12px] text-fg-2 hover:text-fg disabled:opacity-40">
+                {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />} {s.upload}
+              </button>
+              {kind !== "audio" && (
+                <button type="button" disabled={full} onClick={() => setPicking(true)} className="nodrag flex-1 rounded-lg bg-surface-4 py-1.5 text-[12px] text-fg-2 hover:text-fg disabled:opacity-40">
+                  {kind === "image" ? s.creationsImage : s.creationsVideo}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        {full && <p className="mt-1 text-[11px] text-fg-3">{s.listFull(MAX_LIST_ITEMS)}</p>}
+        {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
+        <Dot kind={kind} type="source" id="out" />
+      </Card>
+      {picking && (kind === "image" || kind === "video") && <CreationsPicker kind={kind} onPick={(url) => add(url)} onClose={() => setPicking(false)} />}
     </div>
   );
 }

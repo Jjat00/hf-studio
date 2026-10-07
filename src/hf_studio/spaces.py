@@ -15,7 +15,9 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-NODE_TYPES = ("text", "media", "generator", "note")
+NODE_TYPES = ("text", "media", "generator", "note", "list")
+LIST_KINDS = ("text", "image", "video", "audio")
+MAX_LIST_ITEMS = 20  # el lote del nodo usa /v1/generations/batch (máx. 20 ítems)
 MEDIA_KINDS = ("image", "video", "audio")
 MAX_NODES = 300
 MAX_EDGES = 1000
@@ -37,7 +39,7 @@ class Node(BaseModel):
     model_config = ConfigDict(extra="ignore")  # React Flow añade estado de vista (selected, measured…)
 
     id: str = Field(pattern=ID)
-    type: Literal["text", "media", "generator", "note"]
+    type: Literal["text", "media", "generator", "note", "list"]
     position: Position
     data: dict[str, Any] = Field(default_factory=dict)
     width: float | None = None
@@ -109,6 +111,77 @@ def check_values(graph: dict, schemas: dict[str, dict]) -> dict:
     return graph
 
 
+MAX_FLOW_INPUTS = 10
+FLOW_INPUT_TYPES = ("text", "media", "list")
+
+
+def check_flow(raw: Any, graph: dict) -> dict:
+    """Space publicado como flujo: título, descripción y qué nodos (texto, medio o lista) son sus entradas,
+    con la etiqueta que ve quien lo corre. Lanza GraphError si no vale."""
+    if not isinstance(raw, dict):
+        raise GraphError("A flow is an object with title, description and inputs")
+    title = raw.get("title")
+    if not isinstance(title, str) or not 0 < len(title.strip()) <= 120:
+        raise GraphError("A flow needs a title (up to 120 characters)")
+    description = raw.get("description") or ""
+    if not isinstance(description, str) or len(description) > 1000:
+        raise GraphError("The flow description has at most 1000 characters")
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    inputs, seen = [], set()
+    for item in raw.get("inputs") or []:
+        node_id = item.get("node_id") if isinstance(item, dict) else None
+        label = item.get("label") if isinstance(item, dict) else None
+        if node_id not in nodes or nodes[node_id]["type"] not in FLOW_INPUT_TYPES or node_id in seen:
+            raise GraphError("Flow inputs are distinct text, media or list nodes of the space")
+        if not isinstance(label, str) or not 0 < len(label.strip()) <= 80:
+            raise GraphError("Every flow input needs a label (up to 80 characters)")
+        seen.add(node_id)
+        inputs.append({"node_id": node_id, "label": label.strip()})
+    if not inputs or len(inputs) > MAX_FLOW_INPUTS:
+        raise GraphError(f"A flow has between 1 and {MAX_FLOW_INPUTS} inputs")
+    return {"title": title.strip(), "description": description.strip(), "inputs": inputs}
+
+
+def flow_for_graph(flow: dict | None, graph: dict) -> dict | None:
+    """El flujo tras cambiar el grafo: se quitan las entradas cuyos nodos ya no existen (o cambiaron de tipo);
+    sin entradas deja de estar publicado."""
+    if not flow:
+        return None
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    inputs = [
+        i for i in flow["inputs"] if i["node_id"] in nodes and nodes[i["node_id"]]["type"] in FLOW_INPUT_TYPES
+    ]
+    return {**flow, "inputs": inputs} if inputs else None
+
+
+def apply_inputs(graph: dict, flow: dict, values: dict) -> dict:
+    """Copia del grafo con los valores de las entradas del flujo: el texto de un nodo Texto, la URL de un Medio
+    o los elementos de una Lista. Solo se tocan las entradas publicadas."""
+    allowed = {i["node_id"] for i in flow["inputs"]}
+    unknown = set(values) - allowed
+    if unknown:
+        raise GraphError(f"Not inputs of this flow: {', '.join(sorted(unknown))}")
+    out = json.loads(json.dumps(graph))
+    for node in out["nodes"]:
+        if node["id"] not in values:
+            continue
+        value = values[node["id"]]
+        if node["type"] == "text":
+            if not isinstance(value, str):
+                raise GraphError(f"Input {node['id']} is a text")
+            node["data"] = {**node["data"], "text": value}
+        elif node["type"] == "media":
+            if not isinstance(value, str) or not value:
+                raise GraphError(f"Input {node['id']} is a file URL (from upload_media or use_output)")
+            node["data"] = {**node["data"], "url": value}
+        else:
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                raise GraphError(f"Input {node['id']} is a list of strings")
+            items = [{"id": f"in{k}", "value": v, "checked": True} for k, v in enumerate(value)]
+            node["data"] = {**node["data"], "items": items}
+    return out
+
+
 def empty_graph() -> dict:
     return Graph().model_dump()
 
@@ -122,12 +195,36 @@ def _optional_str(node: Node, data: dict, key: str, limit: int) -> str | None:
     return value
 
 
+def _normalize_list(node: Node, data: dict) -> dict:
+    """Lista de un tipo (texto o medios) para lotes: cada elemento marcado es una corrida del generador."""
+    kind = data.get("kind", "text")
+    if kind not in LIST_KINDS:
+        raise GraphError(f"Node {node.id}: kind must be one of {', '.join(LIST_KINDS)}")
+    items = data.get("items", [])
+    if not isinstance(items, list) or len(items) > MAX_LIST_ITEMS:
+        raise GraphError(f"Node {node.id}: a list holds at most {MAX_LIST_ITEMS} items")
+    out = []
+    limit = 20000 if kind == "text" else 2048
+    for item in items:
+        if not isinstance(item, dict):
+            raise GraphError(f"Node {node.id}: invalid list item")
+        item_id, value = item.get("id"), item.get("value", "")
+        if not isinstance(item_id, str) or not 0 < len(item_id) <= 64:
+            raise GraphError(f"Node {node.id}: every list item needs an id")
+        if not isinstance(value, str) or len(value) > limit:
+            raise GraphError(f"Node {node.id}: list values are strings of at most {limit} characters")
+        out.append({"id": item_id, "value": value, "checked": item.get("checked", True) is not False})
+    return {"kind": kind, "items": out}
+
+
 def _normalize_data(node: Node) -> dict:
     """`data` con solo los campos que usa la UI, por tipo de nodo y con sus valores por defecto escritos:
     lo que la API acepta siempre se puede abrir en el lienzo (revisión 51)."""
     data = node.data
     if node.type in ("text", "note"):
         return {"text": _optional_str(node, data, "text", 20000) or ""}
+    if node.type == "list":
+        return _normalize_list(node, data)
     if node.type == "media":
         kind = data.get("kind")
         if kind is not None and kind not in MEDIA_KINDS:

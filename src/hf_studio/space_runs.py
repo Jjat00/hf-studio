@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import heapq
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -95,11 +95,11 @@ def out_kind(node: dict | None, output_of: Callable[[str], str | None]) -> str |
         return None
     if node["type"] == "text":
         return "text"
-    if node["type"] == "media":
+    if node["type"] in ("media", "list"):
         return node["data"].get("kind")
     if node["type"] == "generator":
         o = output_of(node["data"]["model"])
-        return o if o in ("image", "video", "audio") else None
+        return o if o in ("image", "video", "audio", "text") else None
     return None
 
 
@@ -157,6 +157,60 @@ def upstream(graph: dict, node_id: str) -> list[str]:
     return [e["source"] for e in graph["edges"] if e["target"] == node_id]
 
 
+def list_values(node: dict) -> list[str]:
+    """Elementos marcados (y no vacíos) de un nodo Lista, en su orden."""
+    return [i["value"] for i in node["data"].get("items", []) if i.get("checked", True) and i.get("value")]
+
+
+def split_step(step: str) -> tuple[str, int | None]:
+    """`nodo#3` → (nodo, 3); un paso sin lote es el propio nodo. Los ids de nodo no pueden tener «#»."""
+    if "#" in step:
+        node, item = step.rsplit("#", 1)
+        return node, int(item)
+    return step, None
+
+
+def run_steps(graph: dict, mode: str, start: str | None, output_of: Callable[[str], str | None]) -> list[str]:
+    """Pasos de una corrida, en orden. Un generador conectado a una Lista corre una vez por elemento marcado
+    (`nodo#0`, `nodo#1`…) y su lote se propaga en pares por la cadena: 5 prompts → 5 imágenes → 5 videos."""
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    scope = run_scope(graph, mode, start)
+    # Un nodo en lote lleva índice aunque su lote tenga un solo elemento: así resuelve el valor de la Lista
+    # igual que con varios (revisión 69).
+    fan: dict[str, int] = {}
+    for node_id in scope:
+        sizes = set()
+        for src in upstream(graph, node_id):
+            if nodes[src]["type"] == "list":
+                values = list_values(nodes[src])
+                if not values:
+                    raise NodeInputError(f"The list connected to {node_id} has no checked items")
+                sizes.add(len(values))
+            elif src in fan:
+                sizes.add(fan[src])
+        if len(sizes) > 1:
+            raise NodeInputError(f"The batches connected to {node_id} have different sizes")
+        if sizes:
+            fan[node_id] = sizes.pop()
+    steps: list[str] = []
+    for node_id in scope:
+        steps += [f"{node_id}#{i}" for i in range(fan[node_id])] if node_id in fan else [node_id]
+    return steps
+
+
+def step_deps(graph: dict, steps: Iterable[str], step: str) -> list[str]:
+    """Pasos de la corrida de los que depende un paso: el mismo elemento si el origen va en lote."""
+    known = set(steps)
+    node_id, item = split_step(step)
+    deps = []
+    for src in upstream(graph, node_id):
+        if item is not None and f"{src}#{item}" in known:
+            deps.append(f"{src}#{item}")
+        elif src in known:
+            deps.append(src)
+    return deps
+
+
 async def resolve_input(
     graph: dict,
     node_id: str,
@@ -164,6 +218,8 @@ async def resolve_input(
     output_of: Callable[[str], str | None],
     source_job: Callable[[str], str | None],
     output_url: Callable[[str], Awaitable[str]],
+    item: int | None = None,
+    output_text: Callable[[str], Awaitable[str]] | None = None,
 ) -> dict:
     """Entrada final de un generador: sus ajustes más lo que traen sus conexiones.
 
@@ -185,8 +241,25 @@ async def resolve_input(
         # toma la primera conexión (revisión 55).
         if any(out_kind(src, output_of) != port.kind for src in sources):
             raise NodeInputError(f"A connection to {port.key} does not carry {port.kind}")
+
+        def from_list(src: dict) -> str:
+            values = list_values(src)
+            if item is None or item >= len(values):
+                raise NodeInputError(f"The list {src['id']} feeds a batch: run it from the node or as a run")
+            return values[item]
+
         if port.kind == "text":
-            texts = [s["data"].get("text", "").strip() for s in sources if s["type"] == "text"]
+            texts = []
+            for src in sources:
+                if src["type"] == "generator":  # el texto que escribió un Assistant
+                    job_id = source_job(src["id"])
+                    if not job_id or output_text is None:
+                        raise NodeInputError(f"Generate the connected step ({src['id']}) first")
+                    texts.append((await output_text(job_id)).strip())
+                elif src["type"] in ("text", "list"):
+                    texts.append(
+                        (from_list(src) if src["type"] == "list" else src["data"].get("text", "")).strip()
+                    )
             own = values.get(port.key).strip() if isinstance(values.get(port.key), str) else ""
             joined = "\n\n".join(t for t in [*texts, own] if t)
             if joined:
@@ -196,7 +269,9 @@ async def resolve_input(
             continue
         urls: list[str] = []
         for src in sources if port.multiple else sources[:1]:
-            if src["type"] == "media":
+            if src["type"] == "list":
+                urls.append(from_list(src))
+            elif src["type"] == "media":
                 if not src["data"].get("url"):
                     raise NodeInputError(f"A connected media node ({src['id']}) has no file")
                 urls.append(src["data"]["url"])
@@ -228,6 +303,9 @@ class Hooks:
     schema: Callable[[str], dict | None]
     output_of: Callable[[str], str | None]
     wake: Callable[[], None]
+    output_text: Callable[..., Awaitable[str]] | None = (
+        None  # (session, owner, job_id) -> texto de un Assistant
+    )
 
 
 def spend_of(usd: float | None, reserve: float | None) -> float:
@@ -388,7 +466,7 @@ class SpaceRunner:
             for node_id in run.order:
                 if nodes[node_id]["status"] != "pending":
                     continue
-                deps = [d for d in upstream(run.graph, node_id) if d in nodes]
+                deps = step_deps(run.graph, nodes, node_id)
                 if any(nodes[d]["status"] in ("failed", "skipped", "canceled") for d in deps):
                     nodes[node_id].update(status="skipped", error="A previous step did not finish")
                     changed = True
@@ -405,7 +483,7 @@ class SpaceRunner:
                     i
                     for i in run.order
                     if nodes[i]["status"] == "pending"
-                    and all(nodes[d]["status"] == "done" for d in upstream(run.graph, i) if d in nodes)
+                    and all(nodes[d]["status"] == "done" for d in step_deps(run.graph, nodes, i))
                 ),
                 None,
             )
@@ -430,6 +508,11 @@ class SpaceRunner:
                 committed += spend
             else:
                 outcome = await self._prepare(session, run, owner, node_id, state, committed)
+                if "wait" in outcome:
+                    # Cola llena (cupos de generaciones activas): el paso sigue pendiente y se reintenta, ya
+                    # recotizado, en la próxima vuelta, cuando termine algún trabajo (revisión 70).
+                    await session.rollback()
+                    return False
                 if "pause" in outcome:
                     pause = outcome["pause"]
                 elif "job" in outcome:
@@ -458,9 +541,12 @@ class SpaceRunner:
         state: dict,
         committed: float,
     ) -> dict:
-        """Resuelve, cotiza y crea (sin commit) un paso. Devuelve {job, spend}, {pause} o {} si falló."""
+        """Resuelve, cotiza y crea (sin commit) un paso. Devuelve {job, spend}, {pause}, {wait} si la cola de
+        generaciones activas está llena, o {} si falló."""
         nodes = run.nodes
         graph_nodes = {n["id"]: n for n in run.graph["nodes"]}
+        step = node_id
+        node_id, item = split_step(step)
         model_id = graph_nodes[node_id]["data"]["model"]
         schema = self.hooks.schema(model_id)
         if schema is None:
@@ -468,8 +554,9 @@ class SpaceRunner:
             return {}
 
         def source_job(src: str) -> str | None:
-            if src in nodes:  # generado en esta corrida
-                return nodes[src].get("job_id") if nodes[src]["status"] == "done" else None
+            mine = f"{src}#{item}" if item is not None and f"{src}#{item}" in nodes else src
+            if mine in nodes:  # generado en esta corrida (el mismo elemento del lote)
+                return nodes[mine].get("job_id") if nodes[mine]["status"] == "done" else None
             return selected_run(graph_nodes[src]["data"])
 
         try:
@@ -480,6 +567,10 @@ class SpaceRunner:
                 self.hooks.output_of,
                 source_job,
                 lambda job_id: self.hooks.output_url(session, owner, job_id),
+                item,
+                (lambda job_id: self.hooks.output_text(session, owner, job_id))
+                if self.hooks.output_text
+                else None,
             )
             for url in media_urls(arguments, schema):
                 if not await self.hooks.trusted(session, owner, url):
@@ -494,16 +585,21 @@ class SpaceRunner:
             return {}
         unknown = best.usd is None or bool(best.missing)
         if unknown and not state.get("accept_unknown"):
-            return {"pause": {"node": node_id, "reason": "unknown_cost", "reserve_usd": best.reserve_usd}}
+            return {"pause": {"node": step, "reason": "unknown_cost", "reserve_usd": best.reserve_usd}}
         need = spend_of(None if unknown else best.usd, best.reserve_usd)
         if committed + need > run.max_total_usd + COST_TOLERANCE_USD:
-            return {"pause": {"node": node_id, "reason": "over_budget", "usd": best.usd,
+            return {"pause": {"node": step, "reason": "over_budget", "usd": best.usd,
                               "reserve_usd": best.reserve_usd, "needed_total_usd": round(committed + need, 6)}}  # fmt: skip
         try:
             job = await self.hooks.create(
-                session, owner, model_id, arguments, run_key(run.id, node_id), plan,
+                session, owner, model_id, arguments, run_key(run.id, step), plan,
                 None if unknown else best.usd, best.reserve_usd, unknown,
             )  # fmt: skip
+        except ServiceError as exc:
+            if exc.code == "too_many_active":
+                return {"wait": True}
+            state.update(status="failed", error=str(exc.message or exc))
+            return {}
         except STEP_ERRORS as exc:
             state.update(status="failed", error=str(getattr(exc, "message", None) or exc))
             return {}

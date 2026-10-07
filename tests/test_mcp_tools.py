@@ -329,3 +329,12 @@ SPACE_ROUTES = [
 def test_space_tools_hit_their_route(space_calls, run, method, path):
     run()
     assert space_calls[-1][:2] == (method, path)
+
+
+def test_a_flow_run_ties_its_inputs_to_the_quote(space_calls):
+    quote = mcp_server.estimate_space_run("s1", inputs={"t": "un zorro"})
+    assert space_calls[-1][2]["json"]["inputs"] == {"t": "un zorro"}
+    with pytest.raises(ToolError, match="quote_id"):  # otras entradas: otra petición
+        mcp_server.run_space("s1", quote["quote_id"], version=7, inputs={"t": "un lobo"})
+    mcp_server.run_space("s1", quote["quote_id"], version=7, inputs={"t": "un zorro"})
+    assert space_calls[-1][2]["json"]["inputs"] == {"t": "un zorro"}

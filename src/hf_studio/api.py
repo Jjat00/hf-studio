@@ -12,7 +12,7 @@ import time
 import uuid
 import weakref
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,6 +101,7 @@ from .sounds import clean_tags as clean_sound_tags
 from .sounds import history_kind as sound_history_kind
 from .sounds import register_job as register_sound
 from .sounds import title_from as sound_title
+from .space_assistant import AnthropicJobs, is_assistant
 from .space_audio import ElevenLabsJobs, is_audio_node
 from .space_runs import (
     Hooks,
@@ -108,12 +109,31 @@ from .space_runs import (
     SpaceRunner,
     is_run_key,
     resolve_input,
-    run_scope,
+    run_steps,
     selected_run,
     spend_of,
+    split_step,
+    step_deps,
 )
-from .space_tools import AUDIO_PROVIDER, BACKGROUND_PROVIDERS, TOOL_PROVIDER, LocalTools, is_tool, tool_media
-from .spaces import GraphError, check_graph, check_values, empty_graph, input_kinds
+from .space_tools import (
+    ASSISTANT_PROVIDER,
+    AUDIO_PROVIDER,
+    BACKGROUND_PROVIDERS,
+    TOOL_PROVIDER,
+    LocalTools,
+    is_tool,
+    tool_media,
+)
+from .spaces import (
+    GraphError,
+    apply_inputs,
+    check_flow,
+    check_graph,
+    check_values,
+    empty_graph,
+    flow_for_graph,
+    input_kinds,
+)
 from .voice import (
     VOICE_MODEL,
     VOICE_QUOTE_TTL,
@@ -149,6 +169,8 @@ HF_ERROR_STATUS = {
     "concurrency": 429, "unavailable": 503, "server": 502, "network": 502, "too_late": 409,
     "unsupported": 400, "moderation": 422, "ambiguous": 502,
 }  # fmt: skip
+
+MP3_TYPES = {"audio/mpeg", "audio/mp3"}
 
 
 # Datos de cotización (p. ej. input_video_seconds): positivos y finitos, o el precio saldría falso.
@@ -251,6 +273,10 @@ class SpaceUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=120)
     graph: dict[str, Any] | None = None
     cover: str | None = Field(None, pattern=SPACE_COVER, description="Archivo local de una salida propia")
+    flow: dict[str, Any] | None = Field(
+        None,
+        description="Publicar como flujo: {title, description, inputs: [{node_id, label}]}; null lo retira",
+    )
 
 
 class RunIn(BaseModel):
@@ -259,6 +285,10 @@ class RunIn(BaseModel):
     version: int = Field(ge=1, description="Versión guardada del Space; la corrida usa exactamente ese grafo")
     dry_run: bool = Field(False, description="Solo cotiza cada paso y el total, sin gastar")
     max_total_usd: float | None = Field(None, ge=0, description="Tope aprobado para toda la corrida")
+    inputs: dict[str, Any] | None = Field(
+        None,
+        description="Valores de las entradas de un flujo publicado: {node_id: texto, URL o lista de textos}",
+    )
 
 
 class RunApprove(BaseModel):
@@ -321,12 +351,15 @@ def create_app(
             settings, app.state.eleven, transport, slots=app.state.voice_slots
         )
         app.state.audio_jobs.sweep()
+        app.state.assistant_jobs = AnthropicJobs(settings, transport)
+        app.state.assistant_jobs.sweep()
         app.state.worker = Worker(
             app.state.sessions,
             {
                 **app.state.providers,
                 TOOL_PROVIDER: app.state.local_tools,
                 AUDIO_PROVIDER: app.state.audio_jobs,
+                ASSISTANT_PROVIDER: app.state.assistant_jobs,
             },
             settings,
         )
@@ -366,6 +399,7 @@ def create_app(
             await provider.aclose()
         await app.state.local_tools.aclose()
         await app.state.audio_jobs.aclose()
+        await app.state.assistant_jobs.aclose()
         await app.state.eleven.aclose()
         await engine.dispose()
 
@@ -599,6 +633,10 @@ def create_app(
         # el cliente (las pistas no llevan elementos).
         hints.pop("elements", None)
         await check_element_ids(session, arguments.get("elements"))
+        if is_assistant(model["id"]) and not app.state.assistant_jobs.available:
+            raise ServiceError(
+                503, "anthropic_not_configured", "Set ANTHROPIC_API_KEY in .env to use the Assistant"
+            )
         if is_audio_node(model["id"]) and not app.state.eleven.configured:
             # ServiceError (no VoiceError): también la entiende el motor de corridas, que marca el paso fallido.
             raise ServiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
@@ -705,11 +743,13 @@ def create_app(
         request: Request, session: Session, owner: Owner, file: Annotated[UploadFile, File()]
     ) -> dict:
         content_type = (file.content_type or "").lower()
-        if content_type not in UPLOAD_CONTENT_TYPES:
+        if content_type not in UPLOAD_CONTENT_TYPES | MP3_TYPES:
             content_type = (mimetypes.guess_type(file.filename or "")[0] or "").lower()
-        if content_type not in UPLOAD_CONTENT_TYPES:
+        if content_type not in UPLOAD_CONTENT_TYPES | MP3_TYPES:
             raise ServiceError(
-                415, "unsupported_media", f"Supported types: {', '.join(sorted(UPLOAD_CONTENT_TYPES))}"
+                415,
+                "unsupported_media",
+                f"Supported types: {', '.join(sorted(UPLOAD_CONTENT_TYPES | MP3_TYPES))}",
             )
         data = bytearray()
         while chunk := await file.read(1024 * 1024):
@@ -720,6 +760,9 @@ def create_app(
                 )
         if not data:
             raise ServiceError(422, "empty_file", "The file is empty")
+        if content_type in MP3_TYPES:
+            # Higgsfield no acepta MP3: se sube una copia WAV hecha con ffmpeg (solo el demuxer mp3).
+            data, content_type = bytearray(await upload_mp3_as_wav(bytes(data))), "audio/wav"
         if not matches_type(bytes(data[:16]), content_type):
             # Solo el contenido que dice ser: un manifiesto DASH/HLS como «video/mp4» haría que ffmpeg
             # abriera las URLs de dentro (SSRF, revisión 28).
@@ -824,6 +867,8 @@ def create_app(
             "all_terminal": all(j.status in TERMINAL for j in jobs),
         }
 
+    batch_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
+
     @app.post("/v1/generations/batch", tags=["generaciones"])
     async def create_batch(
         body: BatchIn,
@@ -837,82 +882,129 @@ def create_app(
         for item in body.items:
             if not catalog.get(item.model):
                 raise ServiceError(404, "unknown_model", f"Unknown model: {item.model}")
-        if body.dry_run:
-            plans = [
-                await make_plan(
-                    request, session, owner, catalog.get(i.model), i.input, {**body.hints, **i.hints}
+        # Un lote con clave se recupera y crea bajo un candado por dueño y clave: dos reintentos a la vez no pueden
+        # contar cada uno con su propia foto de lo creado y sumar más de lo aprobado (revisión 72).
+        async with AsyncExitStack() as guard:
+            if idempotency_key and not body.dry_run:
+                lock = batch_locks.get((owner.id, idempotency_key))
+                if lock is None:
+                    lock = batch_locks[(owner.id, idempotency_key)] = asyncio.Lock()
+                await guard.enter_async_context(lock)
+            # Posiciones del lote (un ítem con count 3 son tres) y lo que un intento anterior con esta misma clave ya
+            # creó. Lo ya creado se recupera con su trabajo y su compromiso persistidos (tope y retención de
+            # entonces), sin volver a cotizarlo ni exigir su proveedor; solo se cotizan las posiciones nuevas. La
+            # cotización en seco con la clave usa las mismas cuentas que la ejecución (revisiones 70 y 71).
+            positions: list[tuple[int, str | None]] = []
+            for idx, item in enumerate(body.items):
+                positions += [(idx, None)] * item.count
+            if idempotency_key:
+                positions = [(idx, f"{idempotency_key}:{n}") for n, (idx, _) in enumerate(positions)]
+                found = {
+                    j.idempotency_key: j
+                    for j in await session.scalars(
+                        select(Job).where(
+                            Job.owner_id == owner.id, Job.idempotency_key.in_([k for _, k in positions])
+                        )
+                    )
+                }
+            else:
+                found = {}
+            for idx, key in positions:
+                prior = found.get(key)
+                item = body.items[idx]
+                if prior is not None and prior.input_hash != request_digest(item.model, item.input):
+                    raise ServiceError(
+                        409,
+                        "idempotency_conflict",
+                        "This Idempotency-Key was already used for a different batch",
+                    )
+            if not body.dry_run:
+                for item in body.items:
+                    check_input(catalog, item.model, item.input)
+                if found and len(found) == len(positions):
+                    # Reintento del lote completo: devolver lo ya creado antes de mirar cupos.
+                    return JSONResponse(
+                        {"generations": [job_out(found[k]) for _, k in positions]}, status_code=200
+                    )
+                active = await session.scalar(
+                    select(func.count())
+                    .select_from(Job)
+                    .where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
                 )
-                for i in body.items
-            ]
-            quotes = [estimate_body(p) for p in plans]
-            counts = [i.count for i in body.items]
-            items = [
-                {"model": i.model, "count": i.count, "estimate": q}
-                for i, q in zip(body.items, quotes, strict=True)
-            ]
-            return JSONResponse({"items": items, "total": total(quotes, counts)})
-        for item in body.items:
-            check_input(catalog, item.model, item.input)
-        wanted = sum(i.count for i in body.items)
-        if idempotency_key:
-            # Reintento del mismo lote: devolver lo ya creado antes de mirar cupos.
-            keys = [f"{idempotency_key}:{n}" for n in range(wanted)]
-            found = {
-                j.idempotency_key: j
-                for j in await session.scalars(
-                    select(Job).where(Job.owner_id == owner.id, Job.idempotency_key.in_(keys))
+                # Lo ya creado de un reintento parcial no vuelve a ocupar cupo (revisión 69).
+                wanted = len(positions) - len(found)
+                if active + wanted > settings.max_active_jobs_per_client:
+                    raise ServiceError(
+                        429,
+                        "too_many_active",
+                        f"This batch needs {wanted} slots; you have {active} active of {settings.max_active_jobs_per_client}",
+                    )
+            plans: dict[int, Any] = {}
+            for idx in dict.fromkeys(idx for idx, key in positions if key not in found):
+                item = body.items[idx]
+                plans[idx] = await make_plan(
+                    request, session, owner, catalog.get(item.model), item.input, {**body.hints, **item.hints}
                 )
-            }
-            if len(found) == wanted:
-                return JSONResponse({"generations": [job_out(found[k]) for k in keys]}, status_code=200)
-        active = await session.scalar(
-            select(func.count()).select_from(Job).where(Job.owner_id == owner.id, Job.status.in_(ACTIVE))
-        )
-        if active + wanted > settings.max_active_jobs_per_client:
-            raise ServiceError(
-                429,
-                "too_many_active",
-                f"This batch needs {wanted} slots; you have {active} active of {settings.max_active_jobs_per_client}",
+            spends: list[
+                tuple[float | None, float]
+            ] = []  # por posición: (usd o None si desconocido, retención)
+            for idx, key in positions:
+                prior = found.get(key)
+                if prior is not None:
+                    spends.append((prior.max_usd, prior.max_reserve_usd or 0.0))
+                else:
+                    best = plans[idx].best
+                    usd = None if best is None or best.usd is None or best.missing else best.usd
+                    spends.append((usd, (best.reserve_usd or 0.0) if best else 0.0))
+            if body.dry_run:
+                quotes = {idx: estimate_body(plan) for idx, plan in plans.items()}
+                items = []
+                for idx, item in enumerate(body.items):
+                    recovered = sum(1 for i, k in positions if i == idx and k in found)
+                    items.append({"model": item.model, "count": item.count, "estimate": quotes.get(idx),
+                                  **({"recovered": recovered} if recovered else {})})  # fmt: skip
+                if not found:
+                    return JSONResponse(
+                        {"items": items, "total": total(list(quotes.values()), [i.count for i in body.items])}
+                    )
+                usd = sum(u for u, _ in spends if u is not None)
+                reserve = sum(r for _, r in spends)
+                return JSONResponse({"items": items, "total": {
+                    "usd": round(usd, 4), "credits": None, "complete": all(u is not None for u, _ in spends),
+                    "reserve_usd": round(reserve, 4) or None, "recovered": len(found),
+                }})  # fmt: skip
+            for idx, plan in plans.items():
+                if plan.best is None:
+                    raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
+            # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisiones 28 a 33).
+            if body.accept_unknown_cost and body.max_total_usd is not None:
+                # Un tope total no se puede hacer cumplir por trabajo si algún precio es desconocido: o hay tope o se
+                # acepta el total desconocido sin tope, nunca las dos cosas.
+                raise ServiceError(422, "conflicting_approval",
+                                   "Pass either max_total_usd or accept_unknown_cost=true (no cap), not both")  # fmt: skip
+            if body.max_total_usd is not None:
+                if any(u is None for u, _ in spends) and not body.accept_unknown_cost:
+                    raise ServiceError(
+                        409, "cost_unknown", "Some item no longer has a price; quote the batch again"
+                    )
+                cost = sum(u for u, _ in spends if u is not None)
+                if cost > body.max_total_usd + COST_TOLERANCE_USD:
+                    raise ServiceError(409, "cost_changed",
+                                       f"The batch now costs {cost:.4f} USD (approved {body.max_total_usd:.4f})", cost)  # fmt: skip
+            quoted = (
+                body.max_total_usd is not None
+                or body.max_total_reserve_usd is not None
+                or body.accept_unknown_cost
             )
-        plans = []
-        for item in body.items:
-            plan = await make_plan(
-                request, session, owner, catalog.get(item.model), item.input, {**body.hints, **item.hints}
-            )
-            if plan.best is None:
-                raise ServiceError(422, "no_provider", estimate_body(plan)["basis"], plan.public())
-            plans.append(plan)
-        # Antes de crear el primer trabajo: el lote entero dentro de lo aprobado (revisiones 28 a 33).
-        if body.accept_unknown_cost and body.max_total_usd is not None:
-            # Un tope total no se puede hacer cumplir por trabajo si algún precio es desconocido: o hay tope o se
-            # acepta el total desconocido sin tope, nunca las dos cosas.
-            raise ServiceError(422, "conflicting_approval",
-                               "Pass either max_total_usd or accept_unknown_cost=true (no cap), not both")  # fmt: skip
-        unknown = [p.best.usd is None or bool(p.best.missing) for p in plans]
-        if body.max_total_usd is not None:
-            if any(unknown) and not body.accept_unknown_cost:
-                raise ServiceError(
-                    409, "cost_unknown", "Some item no longer has a price; quote the batch again"
-                )
-            cost = sum(
-                p.best.usd * i.count for p, i, u in zip(plans, body.items, unknown, strict=True) if not u
-            )
-            if cost > body.max_total_usd + COST_TOLERANCE_USD:
-                raise ServiceError(409, "cost_changed",
-                                   f"The batch now costs {cost:.4f} USD (approved {body.max_total_usd:.4f})", cost)  # fmt: skip
-        quoted = (
-            body.max_total_usd is not None
-            or body.max_total_reserve_usd is not None
-            or body.accept_unknown_cost
-        )
-        held = sum((p.best.reserve_usd or 0) * i.count for p, i in zip(plans, body.items, strict=True))
-        if quoted:
-            check_reserve(held, body.max_total_reserve_usd, held, "The batch")
-        jobs, created_any = [], False
-        n = 0
-        for item, plan in zip(body.items, plans, strict=True):
-            for _ in range(item.count):
-                key = f"{idempotency_key}:{n}" if idempotency_key else None
+            held = sum(r for _, r in spends)
+            if quoted:
+                check_reserve(held, body.max_total_reserve_usd, held, "The batch")
+            jobs, created_any = [], False
+            for idx, key in positions:
+                if key in found:
+                    jobs.append(found[key])
+                    continue
+                item, plan = body.items[idx], plans[idx]
                 stored = plan.stored()
                 if body.accept_unknown_cost:
                     stored[0]["unknown_accepted"] = True  # el total se aceptó sin tope
@@ -923,12 +1015,11 @@ def create_app(
                 )  # fmt: skip
                 jobs.append(job)
                 created_any |= created
-                n += 1
-        if created_any:
-            request.app.state.worker.wake()
-        return JSONResponse(
-            {"generations": [job_out(j) for j in jobs]}, status_code=202 if created_any else 200
-        )
+            if created_any:
+                request.app.state.worker.wake()
+            return JSONResponse(
+                {"generations": [job_out(j) for j in jobs]}, status_code=202 if created_any else 200
+            )
 
     @app.get("/v1/generations/{job_id}", tags=["generaciones"])
     async def get_generation(
@@ -1110,6 +1201,30 @@ def create_app(
         return await fresh_output(session, owner, job_id, index)
 
     wav_locks: weakref.WeakValueDictionary[Path, asyncio.Lock] = weakref.WeakValueDictionary()
+
+    async def upload_mp3_as_wav(data: bytes) -> bytes:
+        """WAV de un MP3 subido. Valida la firma antes de dárselo a ffmpeg, limitado al demuxer mp3."""
+        head = data[:16]
+        if not (head[:3] == b"ID3" or (len(head) > 1 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)):
+            raise ServiceError(415, "content_mismatch", "The file content is not a valid audio/mpeg")
+        with tempfile.TemporaryDirectory(prefix="hfs-mp3-") as tmp:
+            src, dst = Path(tmp) / "in.mp3", Path(tmp) / "out.wav"
+            src.write_bytes(data)
+            code, err = await run_ffmpeg(
+                "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file", "-format_whitelist", "mp3",
+                "-f", "mp3", "-i", str(src), "-vn", "-c:a", "pcm_s16le",
+                # ffmpeg deja de escribir al pasar el límite: el WAV expandido nunca crece sin tope (revisión 69).
+                "-fs", str(settings.max_upload_bytes + 1), str(dst),
+            )  # fmt: skip
+            if code != 0 or not dst.is_file() or not dst.stat().st_size:
+                raise ServiceError(422, "audio_convert_failed", f"Could not convert that MP3: {err[:200]}")
+            too_big = dst.stat().st_size > settings.max_upload_bytes  # antes de cargarlo en memoria
+            wav = b"" if too_big else dst.read_bytes()
+        if too_big:
+            raise ServiceError(
+                413, "too_large", f"Maximum {settings.max_upload_bytes // (1024 * 1024)} MB as WAV"
+            )
+        return wav
 
     async def mp3_as_wav(path: Path) -> Path:
         """Copia WAV (junto al MP3, una vez) de una salida de audio propia. Un candado por archivo y un temporal
@@ -1441,6 +1556,29 @@ def create_app(
         await session.commit()
         return space.as_dict()
 
+    @app.get("/v1/flows", tags=["spaces"])
+    async def list_flows(session: Session, owner: Owner) -> dict:
+        """Spaces publicados como flujo, con sus entradas (tipo y etiqueta) para pedirlas en un formulario."""
+        rows = await session.scalars(
+            select(Space)
+            .where(Space.owner_id == owner.id, Space.flow.is_not(None))
+            .order_by(Space.updated_at.desc())
+        )
+        flows = []
+        for sp in rows:
+            if not sp.flow:
+                continue
+            nodes = {n["id"]: n for n in sp.graph["nodes"]}
+            inputs = [
+                {**i, "type": nodes[i["node_id"]]["type"],
+                 "kind": "text" if nodes[i["node_id"]]["type"] == "text" else nodes[i["node_id"]]["data"].get("kind")}
+                for i in sp.flow["inputs"] if i["node_id"] in nodes
+            ]  # fmt: skip
+            flows.append(
+                {"space_id": sp.id, "version": sp.version, "cover": sp.cover, **sp.flow, "inputs": inputs}
+            )
+        return {"flows": flows}
+
     @app.get("/v1/spaces/{space_id}", tags=["spaces"])
     async def get_space(space_id: str, session: Session, owner: Owner) -> dict:
         return (await get_owned_space(session, owner, space_id)).as_dict()
@@ -1451,12 +1589,20 @@ def create_app(
     ) -> dict:
         """Guarda título, grafo o portada. Exige la versión leída: si otra pestaña guardó antes, 409 con la
         versión vigente, para que el cliente recargue en vez de pisar cambios."""
-        await get_owned_space(session, owner, space_id)
+        current = await get_owned_space(session, owner, space_id)
         values: dict[str, Any] = {"version": Space.version + 1, "updated_at": utcnow()}
         if body.title is not None:
             values["title"] = body.title
+        graph = current.graph
         if body.graph is not None:
-            values["graph"] = valid_graph(body.graph, catalog)
+            values["graph"] = graph = valid_graph(body.graph, catalog)
+            # Un flujo publicado sigue al grafo: pierde las entradas cuyos nodos se borraron.
+            values["flow"] = flow_for_graph(current.flow, graph)
+        if "flow" in body.model_fields_set:
+            try:
+                values["flow"] = check_flow(body.flow, graph) if body.flow is not None else None
+            except GraphError as exc:
+                raise ServiceError(422, "invalid_flow", str(exc)) from None
         if "cover" in body.model_fields_set:
             values["cover"] = await valid_cover(session, owner, body.cover)
         result = await session.execute(
@@ -1515,6 +1661,15 @@ def create_app(
             except ServiceError as exc:
                 raise NodeInputError(f"A connected step has no usable output ({exc.message})") from None
 
+        async def output_text(session: AsyncSession, owner: ApiClient, job_id: str) -> str:
+            """Texto de un Assistant terminado (su copia local), para el prompt del paso siguiente."""
+            job = await get_owned_job(session, owner, job_id)
+            entry = next((f for f in job.files or [] if f.get("kind") == "text"), None)
+            path = Path(settings.storage_dir) / "outputs" / job.id / entry["name"] if entry else None
+            if job.status != "completed" or path is None or not path.is_file():
+                raise NodeInputError("A connected step has no text output")
+            return path.read_text(encoding="utf-8")
+
         def schema(model_id: str) -> dict | None:
             model = get_catalog().get(model_id)
             return model["input_schema"] if model else None
@@ -1523,7 +1678,7 @@ def create_app(
             model = get_catalog().get(model_id)
             return model["output"] if model else None
 
-        return Hooks(plan, create, output_url, trusted, schema, output_of, app.state.worker.wake)
+        return Hooks(plan, create, output_url, trusted, schema, output_of, app.state.worker.wake, output_text)
 
     async def estimate_run(session: AsyncSession, owner: ApiClient, graph: dict, order: list[str]) -> dict:
         """Cotiza cada paso con lo que hay hoy en el lienzo. Un paso que depende de otro de la corrida sin salida
@@ -1531,15 +1686,18 @@ def create_app(
         hooks = app.state.space_runner.hooks
         nodes = {n["id"]: n for n in graph["nodes"]}
         items, total, reserve_total = [], 0.0, 0.0
-        for node_id in order:
+        for step in order:
+            node_id, index = split_step(step)  # un elemento de un lote (Lista) es un paso propio
             model_id = nodes[node_id]["data"]["model"]
-            item: dict[str, Any] = {"node_id": node_id, "model": model_id}
-            in_run = [e["source"] for e in graph["edges"] if e["target"] == node_id and e["source"] in order]
+            item: dict[str, Any] = {"node_id": step, "model": model_id}
+            in_run = step_deps(graph, order, step)
             try:
                 arguments = await resolve_input(
                     graph, node_id, hooks.schema(model_id) or {}, hooks.output_of,
                     lambda src: selected_run(nodes[src]["data"]),
                     lambda job_id: hooks.output_url(session, owner, job_id),
+                    index,
+                    lambda job_id: hooks.output_text(session, owner, job_id),
                 )  # fmt: skip
                 plan = await hooks.plan(session, owner, model_id, arguments)
             except (NodeInputError, ServiceError, ProviderError) as exc:
@@ -1579,8 +1737,15 @@ def create_app(
         Con `Idempotency-Key`, repetirla (p. ej. tras perder la respuesta) devuelve la misma corrida, aunque ya
         haya terminado; con otra petición, 409."""
         owner_id = owner.id  # valor propio: un rollback expira los objetos del ORM (revisión 65)
+        # Sin entradas de flujo, la huella es la misma de la fase 3a: una clave de antes de actualizar sigue
+        # recuperando su corrida (revisión 69). Con entradas, forman parte de la identidad.
+        fields = [space_id, body.mode, body.node_id, body.version, body.max_total_usd]
         request_hash = hashlib.sha256(
-            json.dumps([space_id, body.mode, body.node_id, body.version, body.max_total_usd]).encode()
+            (
+                json.dumps(fields)
+                if body.inputs is None
+                else json.dumps([*fields, body.inputs], sort_keys=True)
+            ).encode()
         ).hexdigest()
 
         async def same_request() -> JSONResponse | None:
@@ -1608,13 +1773,22 @@ def create_app(
                 409, "space_changed", "Save the space before running it", {"version": space.version}
             )
         try:
-            order = run_scope(space.graph, body.mode, body.node_id)
+            graph = space.graph
+            if body.inputs is not None:
+                # Un flujo corre sobre una copia del lienzo con sus entradas; el Space no cambia.
+                if not space.flow:
+                    raise NodeInputError("This space is not published as a flow")
+                try:
+                    graph = valid_graph(apply_inputs(space.graph, space.flow, body.inputs), get_catalog())
+                except GraphError as exc:
+                    raise NodeInputError(str(exc)) from None
+            order = run_steps(graph, body.mode, body.node_id, app.state.space_runner.hooks.output_of)
         except NodeInputError as exc:
             raise ServiceError(422, "invalid_run", str(exc)) from None
         if not order:
             raise ServiceError(422, "nothing_to_run", "There are no generation nodes to run")
         if body.dry_run:
-            return JSONResponse(await estimate_run(session, owner, space.graph, order))
+            return JSONResponse(await estimate_run(session, owner, graph, order))
         if body.max_total_usd is None:
             raise ServiceError(
                 422, "budget_required", "Approve a total budget (max_total_usd) to start the run"
@@ -1633,7 +1807,7 @@ def create_app(
                 409, "run_active", "This space already has a run in progress", {"run_id": active}
             )
         run = SpaceRun(
-            space_id=space.id, owner_id=owner.id, mode=body.mode, start_node=body.node_id, graph=space.graph,
+            space_id=space.id, owner_id=owner.id, mode=body.mode, start_node=body.node_id, graph=graph,
             order=order, nodes={i: {"status": "pending"} for i in order}, max_total_usd=body.max_total_usd,
             idempotency_key=idempotency_key, request_hash=request_hash if idempotency_key else None,
         )  # fmt: skip

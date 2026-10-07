@@ -592,3 +592,235 @@ async def test_an_existing_database_gets_the_new_run_columns(tmp_path):
         jobs = await conn.run_sync(lambda c: {col["name"] for col in inspect(c).get_columns("jobs")})
     await engine.dispose()
     assert {"idempotency_key", "request_hash"} <= runs and "request_hash" not in jobs
+
+
+def lst(id_, kind="text", *values, unchecked=()):
+    items = [{"id": f"i{k}", "value": v, "checked": k not in unchecked} for k, v in enumerate(values)]
+    return node(id_, "list", kind=kind, items=items)
+
+
+async def test_a_list_runs_the_generator_once_per_checked_item(env):  # noqa: F811
+    app, http, _ = env
+    space_id, version = await make_space(
+        http,
+        [lst("L", "text", "a kite", "a boat", "a fox", unchecked=(1,)), gen("g", **SETTINGS)],
+        [edge("e1", "L", "g", "prompt")],
+    )
+    dry = (
+        await http.post(
+            f"/v1/spaces/{space_id}/runs", json={"mode": "workflow", "version": version, "dry_run": True}
+        )
+    ).json()
+    assert [s["node_id"] for s in dry["steps"]] == ["g#0", "g#1"] and dry["total_usd"] == 1.42
+    run = (
+        await http.post(
+            f"/v1/spaces/{space_id}/runs",
+            json={"mode": "workflow", "version": version, "max_total_usd": 1.42},
+        )
+    ).json()
+    assert run["order"] == ["g#0", "g#1"]
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    async with app.state.sessions() as s:
+        prompts = [(await s.get(Job, state.nodes[k]["job_id"])).input["prompt"] for k in ("g#0", "g#1")]
+    assert prompts == ["a kite", "a fox"] and state.committed_usd == 1.42
+
+
+async def test_a_batch_propagates_pairwise_down_the_chain(env):  # noqa: F811
+    app, http, fakes = env
+    space_id, version = await make_space(
+        http,
+        [lst("L", "text", "red fox", "blue bird"), gen("img", SOUL), gen("vid", I2V, prompt="it moves")],
+        [edge("e1", "L", "img", "prompt"), edge("e2", "img", "vid", "image_url")],
+    )
+    run = (
+        await http.post(
+            f"/v1/spaces/{space_id}/runs", json={"mode": "workflow", "version": version, "max_total_usd": 50}
+        )
+    ).json()
+    assert run["order"] == ["img#0", "img#1", "vid#0", "vid#1"]
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    await finish(app, state.nodes["img#1"]["job_id"], image=True)  # solo la segunda imagen
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    if state.status == "awaiting_approval":  # precio desconocido de Kling en los fixtures
+        await http.post(f"/v1/spaces/{space_id}/runs/{run['id']}/approve", json={"accept_unknown": True})
+        await tick(app, run["id"])
+        state = await run_state(app, run["id"])
+    assert state.nodes["vid#0"]["status"] == "pending"  # espera a su imagen
+    assert state.nodes["vid#1"]["status"] == "running"  # usa la imagen #1, no la #0
+    assert len(fakes.uploads) == 1
+
+
+async def test_lists_must_agree_and_have_items(env):  # noqa: F811
+    _, http, _ = env
+    space_id, version = await make_space(
+        http,
+        [lst("A", "text", "x", "y"), lst("B", "image", "https://cdn.test/a.png"), gen("v", I2V)],
+        [edge("e1", "A", "v", "prompt"), edge("e2", "B", "v", "image_url")],
+    )
+    res = await http.post(
+        f"/v1/spaces/{space_id}/runs", json={"mode": "workflow", "version": version, "dry_run": True}
+    )
+    assert res.status_code == 422 and "different sizes" in res.json()["error"]["message"]
+    space_id, version = await make_space(
+        http, [lst("A", "text", "x", unchecked=(0,)), gen("g", **SETTINGS)], [edge("e1", "A", "g", "prompt")]
+    )
+    res = await http.post(
+        f"/v1/spaces/{space_id}/runs", json={"mode": "workflow", "version": version, "dry_run": True}
+    )
+    assert res.status_code == 422 and "no checked items" in res.json()["error"]["message"]
+
+
+def test_list_nodes_are_validated():
+    import pytest
+
+    from hf_studio.spaces import GraphError, check_graph
+
+    with pytest.raises(GraphError, match="at most 20"):
+        check_graph({"nodes": [lst("L", "text", *[str(i) for i in range(21)])]})
+    with pytest.raises(GraphError, match="kind"):
+        check_graph({"nodes": [node("L", "list", kind="pdf", items=[])]})
+    clean = check_graph({"nodes": [node("L", "list", items=[{"id": "a", "value": "x", "junk": 1}])]})
+    assert clean["nodes"][0]["data"] == {
+        "kind": "text",
+        "items": [{"id": "a", "value": "x", "checked": True}],
+    }
+
+
+async def test_a_published_flow_runs_with_its_inputs_without_changing_the_space(env):  # noqa: F811
+    app, http, _ = env
+    space_id, version = await make_space(
+        http, [node("t", text="placeholder"), gen("g", **SETTINGS)], [edge("e1", "t", "g", "prompt")]
+    )
+    bad = await http.put(
+        f"/v1/spaces/{space_id}",
+        json={"version": version, "flow": {"title": "X", "inputs": [{"node_id": "g", "label": "No"}]}},
+    )
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "invalid_flow"
+    flow = {
+        "title": "Clip de 5 s",
+        "description": "Un prompt, un video",
+        "inputs": [{"node_id": "t", "label": "¿Qué pasa en el video?"}],
+    }
+    saved = (await http.put(f"/v1/spaces/{space_id}", json={"version": version, "flow": flow})).json()
+    version = saved["version"]
+    listed = (await http.get("/v1/flows")).json()["flows"]
+    assert listed[0]["space_id"] == space_id and listed[0]["inputs"] == [
+        {"node_id": "t", "label": "¿Qué pasa en el video?", "type": "text", "kind": "text"}
+    ]
+    body = {
+        "mode": "workflow",
+        "version": version,
+        "max_total_usd": 1,
+        "inputs": {"t": "a paper boat in the rain"},
+    }
+    assert (
+        await http.post(f"/v1/spaces/{space_id}/runs", json={**body, "inputs": {"g": "x"}})
+    ).status_code == 422
+    run = (await http.post(f"/v1/spaces/{space_id}/runs", json=body)).json()
+    await tick(app, run["id"])
+    async with app.state.sessions() as s:
+        job = await s.get(Job, (await s.get(SpaceRun, run["id"])).nodes["g"]["job_id"])
+    assert job.input["prompt"] == "a paper boat in the rain"
+    space = (await http.get(f"/v1/spaces/{space_id}")).json()
+    assert space["graph"]["nodes"][0]["data"]["text"] == "placeholder"  # el lienzo no cambia
+
+
+async def test_inputs_need_a_flow_and_the_flow_follows_the_graph(env):  # noqa: F811
+    _, http, _ = env
+    space_id, version = await make_space(
+        http,
+        [node("t", text="x"), node("u", text="y"), gen("g", **SETTINGS)],
+        [edge("e1", "t", "g", "prompt")],
+    )
+    res = await http.post(
+        f"/v1/spaces/{space_id}/runs",
+        json={"mode": "workflow", "version": version, "dry_run": True, "inputs": {"t": "z"}},
+    )
+    assert res.status_code == 422 and "not published" in res.json()["error"]["message"]
+    flow = {"title": "F", "inputs": [{"node_id": "t", "label": "A"}, {"node_id": "u", "label": "B"}]}
+    version = (await http.put(f"/v1/spaces/{space_id}", json={"version": version, "flow": flow})).json()[
+        "version"
+    ]
+    graph = {"nodes": [node("t", text="x"), gen("g", **SETTINGS)], "edges": [edge("e1", "t", "g", "prompt")]}
+    saved = (await http.put(f"/v1/spaces/{space_id}", json={"version": version, "graph": graph})).json()
+    assert [i["node_id"] for i in saved["flow"]["inputs"]] == ["t"]  # «u» ya no existe
+    unpublished = (
+        await http.put(f"/v1/spaces/{space_id}", json={"version": saved["version"], "flow": None})
+    ).json()
+    assert unpublished["flow"] is None and (await http.get("/v1/flows")).json()["flows"] == []
+
+
+async def test_a_list_with_one_checked_item_runs_as_a_batch_of_one(env):  # noqa: F811
+    """Revisión 69 (H4): una Lista con un solo elemento marcado conserva su índice y resuelve su valor."""
+    app, http, _ = env
+    space_id, version = await make_space(
+        http,
+        [lst("L", "text", "a kite", "a boat", unchecked=(1,)), gen("g", **SETTINGS)],
+        [edge("e1", "L", "g", "prompt")],
+    )
+    for mode, node_id in (("workflow", None), ("downstream", "g")):
+        body = {"mode": mode, "node_id": node_id, "version": version, "dry_run": True}
+        dry = (await http.post(f"/v1/spaces/{space_id}/runs", json=body)).json()
+        assert [(s["node_id"], s["status"]) for s in dry["steps"]] == [("g#0", "ok")], dry
+    run = (
+        await http.post(
+            f"/v1/spaces/{space_id}/runs",
+            json={"mode": "workflow", "version": version, "max_total_usd": 0.71},
+        )
+    ).json()
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    async with app.state.sessions() as s:
+        assert (await s.get(Job, state.nodes["g#0"]["job_id"])).input["prompt"] == "a kite"
+
+
+async def test_a_phase_3a_idempotency_key_still_finds_its_run(env):  # noqa: F811
+    """Revisión 69 (H6): una corrida arrancada antes de actualizar (huella de 5 campos) se recupera igual."""
+    import hashlib
+    import json
+
+    app, http, _ = env
+    space_id, version = await make_space(http, [gen("g1", prompt="a kite", **SETTINGS)])
+    body = {"mode": "workflow", "version": version, "max_total_usd": 1}
+    headers = {"Idempotency-Key": "quote-old"}
+    first = (await http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers)).json()
+    old = hashlib.sha256(json.dumps([space_id, "workflow", None, version, 1.0]).encode()).hexdigest()
+    async with app.state.sessions() as s:
+        await s.execute(update(SpaceRun).where(SpaceRun.id == first["id"]).values(request_hash=old))
+        await s.commit()
+    again = await http.post(f"/v1/spaces/{space_id}/runs", json=body, headers=headers)
+    assert again.status_code == 200 and again.json()["id"] == first["id"]
+    other = await http.post(
+        f"/v1/spaces/{space_id}/runs", json={**body, "inputs": {"g1": "x"}}, headers=headers
+    )
+    assert other.status_code == 409
+
+
+async def test_a_full_queue_makes_steps_wait_instead_of_failing(env):  # noqa: F811
+    """Revisión 70 (H2): 20 elementos con 10 cupos: los demás esperan y salen al liberarse cupo, una vez."""
+    app, http, _ = env
+    space_id, version = await make_space(
+        http, [lst("L", "text", *[f"scene {i}" for i in range(20)]), gen("g", **SETTINGS)],
+        [edge("e1", "L", "g", "prompt")],
+    )  # fmt: skip
+    run = (
+        await http.post(
+            f"/v1/spaces/{space_id}/runs",
+            json={"mode": "workflow", "version": version, "max_total_usd": 14.2},
+        )
+    ).json()
+    assert await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    statuses = [state.nodes[f"g#{i}"]["status"] for i in range(20)]
+    assert statuses.count("running") == 10 and statuses.count("pending") == 10 and "failed" not in statuses
+    for i in range(3):
+        await finish(app, state.nodes[f"g#{i}"]["job_id"])
+    await tick(app, run["id"])
+    state = await run_state(app, run["id"])
+    statuses = [state.nodes[f"g#{i}"]["status"] for i in range(20)]
+    assert statuses.count("pending") == 7 and "failed" not in statuses
+    async with app.state.sessions() as s:
+        assert len((await s.scalars(select(Job))).all()) == 13  # cada paso creó su trabajo una sola vez

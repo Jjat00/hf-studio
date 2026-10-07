@@ -1,6 +1,6 @@
 # HF Studio
 
-> Open-source, self-hosted AI studio for video, image and audio. One local backend (FastAPI) exposes a REST API, an MCP server over stdio for agents (Claude Code, Codex, Claude Desktop, ChatGPT and any stdio MCP client) and a Next.js web UI. Video and image run on 82 Higgsfield models, each sent to the cheapest provider with a key (Higgsfield, APIMart or KIE); voice, music and sound effects use ElevenLabs. Generating spends the user's own credits, and no MCP tool can generate without first quoting that exact request. MIT license.
+> Open-source, self-hosted AI studio for video, image and audio. One local backend (FastAPI) exposes a REST API, an MCP server over stdio for agents (Claude Code, Codex, Claude Desktop, ChatGPT and any stdio MCP client) and a Next.js web UI. Video and image run on 82 Higgsfield models, each sent to the cheapest provider with a key (Higgsfield, APIMart or KIE); voice, music and sound effects use ElevenLabs. Spaces is a node canvas to generate step by step and run whole pipelines on the server under an approved budget. Generating spends the user's own credits, and no MCP tool can generate without first quoting that exact request. MIT license.
 
 If you are an AI agent and your user wants to add HF Studio to their workflow, follow "Set it up for a user" below. The canonical, always up-to-date guide is AGENTS.md in the repository.
 
@@ -24,7 +24,7 @@ If you are an AI agent and your user wants to add HF Studio to their workflow, f
 4. Run `uv run hf-studio setup --no-input` once `.env` has the key. It validates the key without spending credits and writes the UI key to `web/.env.local`. (A human can instead run `./dev.sh`, or `.\dev` on Windows, which asks for the keys interactively.)
 5. Start it: `uv run hf-studio start` (API on `http://127.0.0.1:8787`, UI on `http://localhost:3000`) or `uv run hf-studio start --api-only` (API only, enough for MCP, no Node.js needed). It is a long-running process: start it in the background. Health check: `GET http://127.0.0.1:8787/health` returns `{"ok": true, ...}`.
 6. Connect the agent: `uv run hf-studio connect claude-code` (or `codex`, `claude-desktop`, `json`). It creates a new revocable `hfs_…` key for that client and registers the server; it never rotates an existing key. `--print` prints the command or config instead. If `hf-studio` is already registered it stops without changes; ask the user before removing the old one. If the agent's CLI is not installed, nothing is registered and it prints the command to run where that CLI is.
-7. Tell the user to restart the agent so it loads the 31 tools.
+7. Tell the user to restart the agent so it loads the 40 tools.
 
 Manual MCP config (any stdio client): command `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with env `HF_STUDIO_URL=http://127.0.0.1:8787` and `HF_STUDIO_TOKEN=hfs_…`.
 
@@ -37,8 +37,9 @@ Manual MCP config (any stdio client): command `uv run --directory /absolute/path
 - Before generating a sound, search `list_sounds`: reusing one is free.
 - `providers_status` shows which provider keys are set, their balances and the links to sign up or top up.
 - Kling 3.0 elements: `list_elements` / `create_element` (2–4 JPG/PNG images); put the `el_…` ids in the model's `elements` field and cite each as `@name` in the prompt. They run on APIMart and KIE only (KIE also needs `image_url`).
+- Spaces (node canvases): `create_space` / `update_space` build one (nodes: text, media, list, note or generator with any catalog model, including the free tools `hf-studio/frame`, `hf-studio/combine`, `hf-studio/mix`, the ElevenLabs audio nodes and the Claude `claude/assistant`; edges go to input fields by their `input_schema` key). `estimate_space_run` quotes every step and the total with a `quote_id`; after the user's OK, `run_space` runs it on the server under that budget (retrying with the same `quote_id` returns the same run). A paused run (`awaiting_approval`) needs the user's OK on `pause.needed_total_usd` before `approve_space_run`. A published flow runs with `inputs`.
 
-## Tools (31)
+## Tools (40)
 
 - Models: `find_models`, `get_model`, `recommend_models`
 - Generate: `upload_media`, `estimate_cost`, `generate`, `generate_batch`
@@ -49,6 +50,7 @@ Manual MCP config (any stdio client): command `uv run --directory /absolute/path
 - Voice (ElevenLabs): `list_voices`, `change_voice`
 - Audio (ElevenLabs): `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account`
 - Sound library: `list_sounds`, `label_sound`, `import_elevenlabs_history`
+- Spaces: `list_spaces`, `get_space`, `create_space`, `update_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run`
 
 ## Safety notes
 

@@ -26,6 +26,7 @@ function Nav() {
   const { t, locale, setLocale } = useI18n();
   const links = [
     ["#ejemplos", t.nav.examples],
+    ["#spaces", t.nav.spaces],
     ["#proveedores", t.nav.providers],
     ["#audio", t.nav.audio],
     ["#agentes", t.nav.agents],
@@ -209,6 +210,89 @@ function Capabilities() {
             </div>
             <p className="headline mt-4 text-[20px] tracking-[-0.03em]">{c.title}</p>
             <p className="mt-1 text-[16px] text-fg-3">{c.desc}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// Colores de los tipos de dato, los mismos que en el lienzo de la app.
+const KIND = { text: "#60a5fa", image: "#a78bfa", video: "#4ade80", audio: "#fb923c" } as const;
+
+/** Esquema de un lienzo de Spaces: un Assistant escribe escenas, una Lista las lleva en lote a imagen y video, y se
+ *  combinan y se les mezcla música. Dibujado en SVG (sin capturas): ilustra el flujo, no es una generación real. */
+function SpacesDiagram() {
+  const { t } = useI18n();
+  const d = t.spaces.diagram;
+  const W = 170;
+  const H = 64;
+  // Solo cadenas que el producto ejecuta: la Lista es una entrada; su lote baja en pares (3 prompts → 3 imágenes →
+  // 3 videos) y cada video se mezcla con la misma voz en off (revisión 69).
+  const nodes = [
+    { id: "list", x: 60, y: 30, kind: "text", label: d.list, sub: "prompts" },
+    { id: "image", x: 420, y: 30, kind: "image", label: d.image, sub: "Nano Banana Pro" },
+    { id: "video", x: 780, y: 30, kind: "video", label: d.video, sub: "Kling 3.0" },
+    { id: "assistant", x: 60, y: 200, kind: "text", label: d.assistant, sub: d.script },
+    { id: "voice", x: 420, y: 200, kind: "audio", label: d.voice, sub: "ElevenLabs" },
+    { id: "mix", x: 780, y: 200, kind: "video", label: d.mix, sub: `×3 · ${d.free}` },
+  ] as const;
+  const at = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const right = (id: string) => [at[id].x + W, at[id].y + H / 2];
+  const left = (id: string) => [at[id].x, at[id].y + H / 2];
+  const bottom = (id: string) => [at[id].x + W / 2, at[id].y + H];
+  const top = (id: string) => [at[id].x + W / 2, at[id].y];
+  const curve = ([x1, y1]: number[], [x2, y2]: number[], vertical = false) =>
+    vertical ? `M${x1},${y1} C${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}` : `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
+  const edges = [
+    { d: curve(right("list"), left("image")), kind: "text", batch: true },
+    { d: curve(right("image"), left("video")), kind: "image", batch: true },
+    { d: curve(bottom("video"), top("mix"), true), kind: "video", batch: true },
+    { d: curve(right("assistant"), left("voice")), kind: "text", batch: false },
+    { d: curve(right("voice"), left("mix")), kind: "audio", batch: false },
+  ] as const;
+  return (
+    <div className="overflow-hidden rounded-[24px] border border-line bg-surface-2 p-3 sm:p-5">
+      <svg viewBox="0 0 1010 300" className="w-full" role="img" aria-label={t.spaces.title}>
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1.5" cy="1.5" r="1.2" fill="rgba(255,255,255,0.08)" />
+          </pattern>
+        </defs>
+        <rect width="1010" height="300" fill="url(#dots)" />
+        {edges.map((e) => (
+          <path key={e.d} d={e.d} fill="none" stroke={KIND[e.kind]} strokeWidth="2.5" strokeDasharray={e.batch ? "7 5" : undefined} />
+        ))}
+        {nodes.map((n) => (
+          <g key={n.id} transform={`translate(${n.x},${n.y})`}>
+            <rect width={W} height={H} rx="14" fill="#1c1e21" stroke="rgba(255,255,255,0.14)" />
+            <circle cx="18" cy="22" r="5" fill={KIND[n.kind]} />
+            <text x="32" y="27" fill="#f7f7f8" fontSize="15" fontWeight="600">{n.label}</text>
+            <text x="18" y="48" fill="rgba(255,255,255,0.45)" fontSize="13">{n.sub}</text>
+          </g>
+        ))}
+        <text x="20" y="288" fill="#d1fe17" fontSize="14" fontWeight="600">{d.total}</text>
+      </svg>
+    </div>
+  );
+}
+
+function Spaces() {
+  const { t } = useI18n();
+  const sp = t.spaces;
+  return (
+    <section id="spaces" className="mx-auto w-full max-w-[1400px] scroll-mt-20 px-4">
+      <div className="mb-8 max-w-3xl">
+        <Kicker>{sp.kicker}</Kicker>
+        <h2 className="headline mt-3 text-[36px] md:text-[48px]">{sp.title}</h2>
+        <p className="mt-3 text-[17px] text-fg-2">{sp.body}</p>
+      </div>
+      <SpacesDiagram />
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {sp.points.map((pt) => (
+          <div key={pt.title} className="flex flex-col rounded-[22px] border border-line bg-surface-2 p-5">
+            <p className="text-[18px] font-semibold tracking-[-0.01em]">{pt.title}</p>
+            <p className="mt-1.5 text-[15px] leading-snug text-fg-3">{pt.desc}</p>
           </div>
         ))}
       </div>
@@ -557,6 +641,7 @@ export function Landing() {
         <Promo />
         <Examples />
         <Capabilities />
+        <Spaces />
         <Providers />
         <Audio />
         <Agents />

@@ -146,13 +146,15 @@ class Space(Base):
     title: Mapped[str] = mapped_column(String(120))
     graph: Mapped[dict] = mapped_column(JSON)
     cover: Mapped[str | None] = mapped_column(Text)
+    # Publicado como flujo: {title, description, inputs: [{node_id, label}]} (spaces.check_flow), o None.
+    flow: Mapped[dict | None] = mapped_column(JSON)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
     def summary(self) -> dict:
         nodes = self.graph.get("nodes", [])
-        return {"id": self.id, "title": self.title, "cover": self.cover, "version": self.version,
+        return {"id": self.id, "title": self.title, "cover": self.cover, "version": self.version, "flow": self.flow,
                 "nodes": len(nodes), "created_at": self.created_at.replace(tzinfo=UTC).isoformat(),
                 "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
 
@@ -230,6 +232,7 @@ ADDED_COLUMNS = {
     "elements": {"deleted_at": "DATETIME"},
     "uploads": {"source": "VARCHAR(80)"},
     "space_runs": {"idempotency_key": "VARCHAR(200)", "request_hash": "VARCHAR(64)"},
+    "spaces": {"flow": "JSON"},
 }
 
 
