@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hf_studio.db import ApiClient, Job, Space
+from hf_studio.db import ApiClient, Job, Space, hash_token
 from hf_studio.spaces import GraphError, check_graph
 
 from .test_reuse import finished_image
@@ -225,3 +225,17 @@ async def test_values_with_shared_definitions_are_validated_against_the_root(env
         graph = {"nodes": [node("g", "generator", model=model, values=values)]}
         res = await http.put(f"/v1/spaces/{space['id']}", json={"version": version, "graph": graph})
         assert res.status_code == status, (values, res.text)
+
+
+async def test_the_ui_sees_spaces_an_agent_created(env):  # noqa: F811
+    """Un lienzo creado por MCP (clave del agente) aparece en la UI, que tiene sees_all como en el historial."""
+    app, http, _ = env
+    space = (await http.post("/v1/spaces", json={"title": "Del agente"})).json()
+    async with app.state.sessions() as s:
+        s.add(ApiClient(name="web-ui", key_hash=hash_token("hfs_u"), key_prefix="hfs_u", sees_all=True))
+        await s.commit()
+    ui = {"Authorization": "Bearer hfs_u"}
+    assert [x["title"] for x in (await http.get("/v1/spaces", headers=ui)).json()["spaces"]] == ["Del agente"]
+    assert (await http.get(f"/v1/spaces/{space['id']}", headers=ui)).status_code == 200
+    saved = await http.put(f"/v1/spaces/{space['id']}", headers=ui, json={"version": 1, "title": "Editado"})
+    assert saved.json()["title"] == "Editado"

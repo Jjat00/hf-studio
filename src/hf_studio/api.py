@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, Query, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
@@ -1588,15 +1588,15 @@ def create_app(
 
     async def get_owned_space(session: AsyncSession, owner: ApiClient, space_id: str) -> Space:
         space = await session.get(Space, space_id)
-        if space is None or space.owner_id != owner.id:
+        # Como las generaciones: la UI (sees_all) ve también los lienzos que crea un agente por MCP.
+        if space is None or (space.owner_id != owner.id and not owner.sees_all):
             raise ServiceError(404, "not_found", "Space not found")
         return space
 
     @app.get("/v1/spaces", tags=["spaces"])
     async def list_spaces(session: Session, owner: Owner) -> dict:
-        rows = await session.scalars(
-            select(Space).where(Space.owner_id == owner.id).order_by(Space.updated_at.desc())
-        )
+        query = select(Space) if owner.sees_all else select(Space).where(Space.owner_id == owner.id)
+        rows = await session.scalars(query.order_by(Space.updated_at.desc()))
         return {"spaces": [s.summary() for s in rows]}
 
     @app.post("/v1/spaces", tags=["spaces"], status_code=201)
@@ -1612,7 +1612,7 @@ def create_app(
         """Spaces publicados como flujo, con sus entradas (tipo y etiqueta) para pedirlas en un formulario."""
         rows = await session.scalars(
             select(Space)
-            .where(Space.owner_id == owner.id, Space.flow.is_not(None))
+            .where(Space.flow.is_not(None), true() if owner.sees_all else Space.owner_id == owner.id)
             .order_by(Space.updated_at.desc())
         )
         flows = []
@@ -1658,7 +1658,7 @@ def create_app(
             values["cover"] = await valid_cover(session, owner, body.cover)
         result = await session.execute(
             update(Space)
-            .where(Space.id == space_id, Space.owner_id == owner.id, Space.version == body.version)
+            .where(Space.id == space_id, Space.owner_id == current.owner_id, Space.version == body.version)
             .values(**values)
         )
         if result.rowcount == 0:
@@ -1773,7 +1773,7 @@ def create_app(
 
     async def get_owned_run(session: AsyncSession, owner: ApiClient, space_id: str, run_id: str) -> SpaceRun:
         run = await session.get(SpaceRun, run_id)
-        if run is None or run.owner_id != owner.id or run.space_id != space_id:
+        if run is None or (run.owner_id != owner.id and not owner.sees_all) or run.space_id != space_id:
             raise ServiceError(404, "not_found", "Run not found")
         return run
 
