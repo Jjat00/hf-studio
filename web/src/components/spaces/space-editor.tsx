@@ -5,6 +5,8 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
+  NodeToolbar,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
@@ -17,13 +19,15 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import clsx from "clsx";
-import { AlertTriangle, Check, ChevronLeft, CloudOff, ImageIcon, Loader2, Maximize, Play, Plus, Share2, StickyNote, Type, Upload, Video } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, CloudOff, Hand, ImageIcon, Loader2, Maximize, MousePointer2, Play, Plus, Redo2, Scissors, Share2, StickyNote, Type, Undo2, Upload, Video } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { ModelPicker } from "@/components/studio/model-picker";
 import { probeDuration } from "@/lib/media";
+import { NodeBar, type BarOutput } from "./node-bar";
+import { useCanvasEdit } from "./use-canvas-edit";
 import { cleanInput, defaultsFor } from "@/lib/schema";
 import {
   incoming,
@@ -146,6 +150,10 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
 
   const [nodes, setNodes, onNodesChange] = useNodesState<SpaceNode>(space.graph.nodes.map(normalizeNode));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(space.graph.edges);
+  const { undo, redo, duplicate, recordRuns } = useCanvasEdit({ nodes, edges, setNodes, setEdges });
+  // Herramienta del lienzo, como en Magnific: seleccionar (arrastrar marca una caja), mano (arrastrar mueve la
+  // vista) o tijera (clic en una conexión la corta).
+  const [mode, setMode] = useState<"select" | "hand" | "cut">("select");
   const [title, setTitle] = useState(space.title);
   const [viewport, setViewport] = useState<SpaceGraph["viewport"]>(space.graph.viewport);
   const [details, setDetails] = useState<Record<string, ModelDetail>>({});
@@ -508,6 +516,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           : [await studio.generate(p.one.model, p.one.input, key, false, est.usd ?? null, p.one.hints, est.reserve_usd ?? null, !direct)];
         idempotency.current.delete(keyId);
         setJobs((prev) => ({ ...prev, ...Object.fromEntries(made.map((g) => [g.id, g])) }));
+        recordRuns(nodeId, made.map((g) => g.id));
         setNodes((ns) =>
           ns.map((n) => {
             if (n.id !== nodeId || n.type !== "generator") return n;
@@ -535,7 +544,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         patchRun(nodeId, { busy: false, error: message });
       }
     },
-    [prepare, estimateFor, patchRun, setNodes, errorText, t, s],
+    [prepare, estimateFor, patchRun, setNodes, errorText, t, s, recordRuns],
   );
 
   const update = useCallback<SpaceCtx["update"]>(
@@ -681,8 +690,15 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           setNodes((ns) => ns.map((n) => (n.id === nid && n.type === "generator" ? { ...n, data: { ...n.data, values: { ...defaults, ...n.data.values } } } : n)));
           // Al encadenar, el medio entra por el campo principal: el fotograma final nunca va primero.
           const port = from && ports.filter((p) => p.kind === from.kind).sort((a, b) => +/end|last/.test(a.key) - +/end|last/.test(b.key))[0];
-          if (from && port)
-            setEdges((es) => [...es, { id: newId("e"), source: from.nodeId, target: nid, sourceHandle: from.handle, targetHandle: port.key }]);
+          // El esquema llega más tarde: si entretanto se deshizo o borró el nodo nuevo (o su origen), no se
+          // conecta nada (una arista huérfana bloquearía el guardado, revisión 76).
+          const alive = (id: string) => nodesRef.current.some((n) => n.id === id);
+          if (from && port && alive(nid) && alive(from.nodeId))
+            setEdges((es) =>
+              es.some((e) => e.target === nid && e.targetHandle === port.key)
+                ? es
+                : [...es, { id: newId("e"), source: from.nodeId, target: nid, sourceHandle: from.handle, targetHandle: port.key }],
+            );
         },
         () => undefined,
       );
@@ -694,9 +710,16 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target instanceof Element ? e.target : null;
-      if (e.key !== "/" || el?.closest("input, textarea, select, [contenteditable=true]")) return;
-      e.preventDefault();
-      openMenu();
+      if (el?.closest("input, textarea, select, [contenteditable=true]") || e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k === "v") setMode("select");
+      else if (k === "h") setMode("hand");
+      else if (k === "x") setMode("cut");
+      else if (k === "escape") setMode("select");
+      else if (e.key === "/") {
+        e.preventDefault();
+        openMenu();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -803,16 +826,17 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   /** Suma al historial de cada nodo las generaciones que creó una corrida (y elige la nueva). */
   const mergeRun = useCallback(
     (r: SpaceRun) => {
+      // Los pasos de un lote (`nodo#i`) aportan cada uno su generación, en el orden de la corrida.
+      const byNode = new Map<string, string[]>();
+      for (const step of r.order) {
+        const job = r.nodes[step]?.job_id;
+        if (!job) continue;
+        const [nodeId] = splitStep(step);
+        byNode.set(nodeId, [...(byNode.get(nodeId) ?? []), job]);
+      }
+      for (const [nodeId, jobs] of byNode) recordRuns(nodeId, jobs);
       setNodes((ns) => {
         let changed = false;
-        // Los pasos de un lote (`nodo#i`) aportan cada uno su generación, en el orden de la corrida.
-        const byNode = new Map<string, string[]>();
-        for (const step of r.order) {
-          const job = r.nodes[step]?.job_id;
-          if (!job) continue;
-          const [nodeId] = splitStep(step);
-          byNode.set(nodeId, [...(byNode.get(nodeId) ?? []), job]);
-        }
         const next = ns.map((n) => {
           const fresh = (byNode.get(n.id) ?? []).filter((j) => n.type === "generator" && !n.data.runs.includes(j));
           if (n.type !== "generator" || !fresh.length) return n;
@@ -823,7 +847,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         return changed ? next : ns;
       });
     },
-    [setNodes],
+    [setNodes, recordRuns],
   );
 
   // Al abrir: las corridas recientes aportan sus generaciones; la activa se sigue mostrando.
@@ -982,6 +1006,29 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     });
   }, [edges, nodes, jobs, outputOf]);
 
+  // Nodo seleccionado (uno solo) para la barra flotante, con sus salidas para la conexión rápida.
+  const barNode = useMemo(() => {
+    const sel = nodes.filter((n) => n.selected);
+    return sel.length === 1 && sel[0].type !== "note" ? sel[0] : null;
+  }, [nodes]);
+  const barOutputs = useMemo<BarOutput[]>(() => {
+    if (!barNode) return [];
+    const kind = outKind(barNode, outputOf);
+    if (!kind) return [];
+    const outs: BarOutput[] = [{ handle: "out", kind, label: s.mainOutput }];
+    if (barNode.type === "generator" && kind === "video")
+      outs.push({ handle: "last_frame", kind: "image", label: s.lastFrame }, { handle: "audio", kind: "audio", label: s.audioOut });
+    return outs;
+  }, [barNode, outputOf, s]);
+  const quickConnect = useCallback(
+    (out: BarOutput) => {
+      if (!barNode) return;
+      const at = flow.flowToScreenPosition({ x: barNode.position.x + (barNode.measured?.width ?? 320) + 60, y: barNode.position.y });
+      setMenu({ at, flowAt: flow.screenToFlowPosition(at), from: { nodeId: barNode.id, kind: out.kind, handle: out.handle } });
+    },
+    [barNode, flow],
+  );
+
   const selectedGen = useMemo(() => {
     const sel = nodes.filter((n) => n.selected);
     return sel.length === 1 && sel[0].type === "generator" ? (sel[0] as GeneratorNode) : null;
@@ -1011,7 +1058,14 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     { icon: Video, label: s.addVideo, onClick: () => setPicker("video") },
     { icon: StickyNote, label: s.addNote, onClick: () => addNode({ type: "note" }, flow.screenToFlowPosition({ x: center().x + 190, y: center().y }), null) },
     { icon: Maximize, label: s.fit, onClick: () => flow.fitView({ padding: 0.2, duration: 300 }) },
+    { icon: Undo2, label: s.undo, onClick: undo },
+    { icon: Redo2, label: s.redo, onClick: redo },
   ];
+  const modes = [
+    { id: "select", icon: MousePointer2, label: s.toolSelect },
+    { id: "hand", icon: Hand, label: s.toolHand },
+    { id: "cut", icon: Scissors, label: s.toolCut },
+  ] as const;
 
   return (
     <SpaceContext value={ctx}>
@@ -1053,7 +1107,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         <div className="flex min-h-0 flex-1">
           <div className="relative min-w-0 flex-1">
             <ReactFlow<SpaceNode, Edge>
-              className="hfs-flow"
+              className={clsx("hfs-flow", mode === "cut" && "hfs-cut", mode === "hand" && "hfs-hand")}
               nodes={nodes}
               edges={styledEdges}
               nodeTypes={NODE_TYPES}
@@ -1069,19 +1123,58 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
               minZoom={0.15}
               maxZoom={2}
               deleteKeyCode={["Backspace", "Delete"]}
+              selectionOnDrag={mode === "select"}
+              panOnDrag={mode === "select" ? [1] : true}
+              nodesDraggable={mode !== "cut"}
+              onEdgeClick={mode === "cut" ? (_, e) => setEdges((es) => es.filter((x) => x.id !== e.id)) : undefined}
             >
+              {barNode && mode !== "cut" && (
+                <NodeToolbar nodeId={barNode.id} isVisible position={Position.Bottom} offset={10}>
+                  <NodeBar
+                    generator={barNode.type === "generator"}
+                    busy={!!runStates[barNode.id]?.busy || runBusy}
+                    fromBusy={runBusy || !!activeRunId || Object.keys(runNodes).length > 0}
+                    outputs={barOutputs}
+                    onRun={() => runNode(barNode.id)}
+                    onRunFrom={() => runFrom(barNode.id)}
+                    onQuick={quickConnect}
+                    onDuplicate={() => duplicate(barNode.id)}
+                    onDelete={() => flow.deleteElements({ nodes: [{ id: barNode.id }] })}
+                  />
+                </NodeToolbar>
+              )}
               <Background variant={BackgroundVariant.Dots} gap={22} size={1.3} color="rgba(255,255,255,0.12)" />
               <Controls position="bottom-right" showInteractive={false} />
               <MiniMap position="top-right" pannable zoomable maskColor="rgba(0,0,0,0.55)" nodeColor="#2a2d32" className="!bg-surface-2" />
             </ReactFlow>
 
             <div className="absolute top-1/2 left-3 z-10 flex -translate-y-1/2 flex-col gap-1 rounded-2xl border border-line bg-surface-2/90 p-1.5 backdrop-blur">
+              {modes.map(({ id, icon: Icon, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMode(id)}
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={mode === id}
+                  className={clsx("rounded-xl p-2 transition", mode === id ? "bg-lime text-ink" : "text-fg-2 hover:bg-glass hover:text-fg")}
+                >
+                  <Icon className="size-[18px]" />
+                </button>
+              ))}
+              <span className="mx-1.5 my-0.5 h-px bg-line" />
               {tools.map(({ icon: Icon, label, onClick }) => (
                 <button key={label} type="button" onClick={onClick} title={label} aria-label={label} className="rounded-xl p-2 text-fg-2 transition hover:bg-glass hover:text-fg">
                   <Icon className="size-[18px]" />
                 </button>
               ))}
             </div>
+
+            {mode === "cut" && (
+              <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded-xl border border-line-2 bg-surface-2 px-4 py-2 text-[13px] text-fg-2 shadow-xl">
+                <Scissors className="mr-1.5 inline size-3.5" /> {s.cutHint}
+              </div>
+            )}
 
             {nodes.length === 0 && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

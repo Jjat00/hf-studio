@@ -122,6 +122,18 @@ input[type="range"] {
 .hfs-flow .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 3;
 }
+/* Herramienta mano: el lienzo se arrastra; tijera: las conexiones se cortan con un clic. */
+.hfs-flow.hfs-hand .react-flow__pane {
+  cursor: grab;
+}
+.hfs-flow.hfs-cut .react-flow__pane,
+.hfs-flow.hfs-cut .react-flow__edge {
+  cursor: crosshair;
+}
+.hfs-flow.hfs-cut .react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--color-danger);
+  stroke-dasharray: 4 4;
+}
 .dotted-bg {
   background-image: radial-gradient(rgb(255 255 255 / 0.08) 1px, transparent 1px);
   background-size: 16px 16px;
