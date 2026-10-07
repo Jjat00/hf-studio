@@ -63,10 +63,14 @@ Solo salen por APIMart y KIE (KIE además exige image_url); nunca por Higgsfield
 Para partir de una creación anterior (animar una imagen, usarla de referencia, editar o extender un video),
 use_output(generation_id) da su URL vigente; no reutilices URLs viejas de outputs, pueden haber caducado.
 Spaces (lienzos de nodos): list_spaces, get_space, create_space y update_space leen y arman un lienzo; cada
-nodo es texto, medio, nota o generador (cualquier modelo del catálogo, incluidas las herramientas gratis
-hf-studio/frame, hf-studio/combine y hf-studio/mix y el audio elevenlabs/tts, elevenlabs/sfx y
-elevenlabs/music-gen). Una arista lleva la salida de un nodo a un campo de entrada de otro (targetHandle =
-clave del input_schema: prompt, image_url, video_url, audio_urls…). Para correrlo en el servidor:
+nodo es texto, medio, nota, lista o generador (cualquier modelo del catálogo, incluidas las herramientas
+gratis hf-studio/frame, hf-studio/combine y hf-studio/mix, el audio elevenlabs/tts, elevenlabs/sfx y
+elevenlabs/music-gen, y claude/assistant, que escribe texto para el prompt de otros nodos si hay
+ANTHROPIC_API_KEY). Una arista lleva la salida de un nodo a un campo de entrada de otro (targetHandle = clave
+del input_schema: prompt, image_url, video_url, audio_urls…). Una lista hace que el generador conectado corra
+una vez por elemento, y el lote baja en pares por la cadena; data.count (variantes) hace lo mismo con una sola
+entrada. update_space con flow publica el lienzo como formulario simple (/flows/<id>) y run_space lo corre
+con inputs. Para correrlo en el servidor:
 estimate_space_run (precio de cada paso y total, con quote_id) → dile al usuario el total y espera su OK →
 run_space con ese quote_id (si falla de forma ambigua, repítelo con el mismo quote_id: devuelve la misma
 corrida) → get_space_run hasta que termine. Si la corrida queda en awaiting_approval (un
@@ -910,7 +914,9 @@ def get_space(space_id: str) -> dict:
 def create_space(title: str, nodes: list[dict] | None = None, edges: list[dict] | None = None) -> dict:
     """Crea un lienzo de nodos (no genera nada ni gasta). El usuario lo ve en la UI, en /spaces.
     nodes: [{id, type, position: {x, y}, data}] con type text (data.text), media (data.url de upload_media o
-    use_output, data.kind image|video|audio), note (data.text) o generator (data.model = id del catálogo,
+    use_output, data.kind image|video|audio), note (data.text), list (data.kind text|image|video|audio,
+    data.items = [{id, value, checked}], hasta 20: textos o URLs propias; el generador conectado corre una vez
+    por elemento marcado) o generator (data.model = id del catálogo,
     data.values = ajustes de su input_schema, p. ej. {"prompt": "…", "duration": 5}; data.count de 1 a 4 lo
     repite como variantes). edges: [{id, source, target, targetHandle, sourceHandle?}]: targetHandle es la
     clave del campo de entrada del generador destino (prompt, image_url, end_image_url, image_urls, video_url,
@@ -933,12 +939,21 @@ def update_space(
     title: str | None = None,
     nodes: list[dict] | None = None,
     edges: list[dict] | None = None,
+    flow: dict | None = None,
+    unpublish: bool = False,
 ) -> dict:
     """Reemplaza el título o el grafo de un lienzo (no gasta). `version` es la de get_space: si alguien guardó
-    antes, responde 409 y hay que volver a leerlo. Pasa nodes y edges completos (sustituyen a los anteriores)."""
+    antes, responde 409 y hay que volver a leerlo. Pasa nodes y edges completos (sustituyen a los anteriores).
+    flow publica el lienzo como formulario simple en /flows/<id>: {title, description, inputs: [{node_id,
+    label}]}, hasta 10 entradas, cada una un nodo de texto, medio o lista que se pide al correrlo (run_space
+    con inputs). unpublish=True lo retira."""
     body: dict[str, Any] = {"version": version}
     if title is not None:
         body["title"] = title
+    if unpublish:
+        body["flow"] = None
+    elif flow is not None:
+        body["flow"] = flow
     if nodes is not None or edges is not None:
         current = _call("GET", f"/v1/spaces/{space_id}")["graph"]
         body["graph"] = {**current, "nodes": nodes if nodes is not None else current["nodes"],

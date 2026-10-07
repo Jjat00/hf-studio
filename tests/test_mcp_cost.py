@@ -262,3 +262,14 @@ def test_a_batch_requote_carries_its_key_and_binds_the_quote_to_it(monkeypatch):
         calls[-1]["headers"] == {"Idempotency-Key": "quote-q_old"}
         and calls[-1]["json"]["max_total_usd"] == 1.71
     )
+
+
+def test_update_space_publishes_and_unpublishes_a_flow(monkeypatch):
+    """El MCP publica un lienzo como flujo (formulario simple) y lo retira; sin flow no lo toca."""
+    calls = []
+    monkeypatch.setattr(mcp_server, "_call", lambda method, path, **kw: calls.append(kw.get("json")) or {})
+    flow = {"title": "Escenas", "description": "", "inputs": [{"node_id": "L", "label": "Escenas"}]}
+    mcp_server.update_space("sp", 3, flow=flow)
+    mcp_server.update_space("sp", 4, unpublish=True)
+    mcp_server.update_space("sp", 5, title="Otro")
+    assert calls[0]["flow"] == flow and calls[1] == {"version": 4, "flow": None} and "flow" not in calls[2]
