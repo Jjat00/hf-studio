@@ -927,6 +927,21 @@ def create_space(title: str, nodes: list[dict] | None = None, edges: list[dict] 
     return _call("POST", "/v1/spaces", json={"title": title, "graph": graph})
 
 
+def _keep_runs(nodes: list[dict], current: list[dict]) -> list[dict]:
+    """Un generador que sigue en el lienzo conserva sus generaciones (`runs`, `selected`) si el agente no las
+    pasa: reescribir un prompt no debe borrar lo que el usuario ya generó en la UI."""
+    before = {n.get("id"): n.get("data") or {} for n in current if n.get("type") == "generator"}
+    out = []
+    for n in nodes:
+        old = before.get(n.get("id"))
+        data = n.get("data") or {}
+        if n.get("type") == "generator" and old and "runs" not in data and old.get("runs"):
+            kept = {"runs": old["runs"], **({"selected": old["selected"]} if "selected" in old else {})}
+            n = {**n, "data": {**data, **kept}}
+        out.append(n)
+    return out
+
+
 @mcp.tool(
     title="Update space",
     annotations=ToolAnnotations(
@@ -943,7 +958,8 @@ def update_space(
     unpublish: bool = False,
 ) -> dict:
     """Reemplaza el título o el grafo de un lienzo (no gasta). `version` es la de get_space: si alguien guardó
-    antes, responde 409 y hay que volver a leerlo. Pasa nodes y edges completos (sustituyen a los anteriores).
+    antes, responde 409 y hay que volver a leerlo. Pasa nodes y edges completos (sustituyen a los anteriores);
+    un generador que ya existía conserva sus generaciones (runs) si no las pasas. La UI abierta se actualiza sola.
     flow publica el lienzo como formulario simple en /flows/<id>: {title, description, inputs: [{node_id,
     label}]}, hasta 10 entradas, cada una un nodo de texto, medio o lista que se pide al correrlo (run_space
     con inputs). unpublish=True lo retira."""
@@ -956,8 +972,8 @@ def update_space(
         body["flow"] = flow
     if nodes is not None or edges is not None:
         current = _call("GET", f"/v1/spaces/{space_id}")["graph"]
-        body["graph"] = {**current, "nodes": nodes if nodes is not None else current["nodes"],
-                         "edges": edges if edges is not None else current["edges"]}  # fmt: skip
+        body["graph"] = {**current, "nodes": _keep_runs(nodes, current["nodes"]) if nodes is not None
+                         else current["nodes"], "edges": edges if edges is not None else current["edges"]}  # fmt: skip
     return _call("PUT", f"/v1/spaces/{space_id}", json=body)
 
 

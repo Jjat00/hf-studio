@@ -69,6 +69,8 @@ import { GeneratorNodeView, ListNodeView, MediaNodeView, NoteNodeView, portLabel
 const NODE_TYPES: NodeTypes = { text: TextNodeView, media: MediaNodeView, generator: GeneratorNodeView, note: NoteNodeView, list: ListNodeView };
 const POLL_MS = 2500;
 const SAVE_DELAY_MS = 900;
+/** Cada cuánto se mira si el lienzo cambió fuera (otra pestaña o un agente por MCP). */
+const SYNC_MS = 3000;
 
 const detailCache = new Map<string, Promise<ModelDetail>>();
 function loadDetail(id: string) {
@@ -816,6 +818,43 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   // Al salir de la página se guarda lo pendiente.
   useEffect(() => () => void persist(), [persist]);
 
+  // Cambios hechos fuera (otra pestaña o un agente por MCP): si aquí no hay nada sin guardar, se aplican en vivo,
+  // sin recargar ni mover la vista. Con cambios locales pendientes, el guardado avisa del conflicto como siempre.
+  const viewportRef = useRef(viewport);
+  useLayoutEffect(() => {
+    viewportRef.current = viewport;
+  });
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (!document.hidden && !inflight.current && !conflicted.current) {
+        try {
+          const remote = await studio.space(space.id);
+          const { graphJson: g, title: tt } = latest.current;
+          const clean = `${g}|${tt}` === lastSaved.current && !inflight.current && !conflicted.current;
+          if (alive && clean && remote.version > version.current) {
+            version.current = remote.version;
+            lastSaved.current = `${JSON.stringify(serialize(remote.graph.nodes, remote.graph.edges, viewportRef.current))}|${remote.title}`;
+            savedCover.current = remote.cover;
+            const picked = new Set(nodesRef.current.filter((n) => n.selected).map((n) => n.id));
+            setNodes(remote.graph.nodes.map((n) => ({ ...normalizeNode(n), selected: picked.has(n.id) })));
+            setEdges(remote.graph.edges);
+            setTitle(remote.title);
+          }
+        } catch {
+          // Sin conexión un momento: se reintenta en el siguiente ciclo.
+        }
+      }
+      if (alive) timer = setTimeout(tick, SYNC_MS);
+    };
+    timer = setTimeout(tick, SYNC_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [space.id, setNodes, setEdges]);
+
   // --- Corridas en el servidor (fase 2) --------------------------------------------------------
   const [run, setRun] = useState<SpaceRun | null>(null);
   const [runDialog, setRunDialog] = useState<{
@@ -1227,9 +1266,12 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
             )}
           </div>
 
-          <aside className="hidden w-[340px] shrink-0 border-l border-line bg-surface-1 lg:block">
-            <Inspector node={selectedGen} />
-          </aside>
+          {/* El panel de ajustes solo ocupa sitio con un generador seleccionado; sin él, el lienzo usa todo el ancho. */}
+          {selectedGen && (
+            <aside className="hidden w-[340px] shrink-0 border-l border-line bg-surface-1 lg:block">
+              <Inspector node={selectedGen} />
+            </aside>
+          )}
         </div>
       </div>
 

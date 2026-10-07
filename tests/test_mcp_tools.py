@@ -315,6 +315,31 @@ def test_update_space_keeps_what_it_does_not_replace(space_calls):
     )
 
 
+def test_update_space_keeps_the_runs_of_generators_it_rewrites(monkeypatch):
+    """Reescribir el prompt de un generador por MCP no borra lo que el usuario ya generó en la UI."""
+    gen = {"id": "g", "type": "generator", "position": {"x": 0, "y": 0}}
+    current = [{**gen, "data": {"model": "m", "values": {}, "runs": ["j1", "j2"], "selected": 1}}]
+    seen = []
+
+    def call(method, path, **kw):
+        seen.append(kw)
+        return {"graph": {"nodes": current, "edges": [], "viewport": {"x": 5, "y": 6, "zoom": 2}}}
+
+    monkeypatch.setattr(mcp_server, "_call", call)
+    mcp_server.update_space("s1", 3, nodes=[{**gen, "data": {"model": "m", "values": {"prompt": "x"}}}])
+    graph = seen[-1]["json"]["graph"]
+    assert graph["nodes"][0]["data"] == {
+        "model": "m",
+        "values": {"prompt": "x"},
+        "runs": ["j1", "j2"],
+        "selected": 1,
+    }
+    assert graph["viewport"] == {"x": 5, "y": 6, "zoom": 2}
+    # Si el agente pasa runs, mandan los suyos.
+    mcp_server.update_space("s1", 4, nodes=[{**gen, "data": {"model": "m", "values": {}, "runs": []}}])
+    assert seen[-1]["json"]["graph"]["nodes"][0]["data"]["runs"] == []
+
+
 SPACE_ROUTES = [
     (lambda: mcp_server.list_spaces(), "GET", "/v1/spaces"),
     (lambda: mcp_server.get_space("s1"), "GET", "/v1/spaces/s1"),
