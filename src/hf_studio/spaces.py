@@ -22,6 +22,10 @@ MEDIA_KINDS = ("image", "video", "audio")
 MAX_NODES = 300
 MAX_EDGES = 1000
 MAX_RUNS = 200
+# Variantes por generador (×1 a ×4): corre varias veces con la misma entrada, como un lote.
+MAX_VARIANTS = 4
+# Salidas extra de un generador de video: su último fotograma (imagen) y su pista de audio.
+DERIVED_OUTPUTS = {"last_frame": "image", "audio": "audio"}
 MAX_GRAPH_BYTES = 512 * 1024
 ID = r"^[A-Za-z0-9_.:-]{1,64}$"
 
@@ -52,7 +56,7 @@ class Edge(BaseModel):
     id: str = Field(pattern=ID)
     source: str = Field(pattern=ID)
     target: str = Field(pattern=ID)
-    sourceHandle: str | None = Field(None, max_length=64)
+    sourceHandle: Literal["out", "last_frame", "audio"] | None = None
     targetHandle: str = Field(pattern=r"^[a-z0-9_]{1,64}$")
 
 
@@ -256,6 +260,12 @@ def _normalize_data(node: Node) -> dict:
         ):
             raise GraphError(f"Node {node.id}: selected must be the index of one of its runs")
         out["selected"] = selected
+    count = data.get("count")
+    if count is not None:
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MAX_VARIANTS:
+            raise GraphError(f"Node {node.id}: count must be between 1 and {MAX_VARIANTS}")
+        if count > 1:
+            out["count"] = count
     return out
 
 

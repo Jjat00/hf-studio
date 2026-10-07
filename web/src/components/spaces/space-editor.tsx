@@ -31,6 +31,7 @@ import {
   KIND_COLOR,
   mediaFields,
   isAssistant,
+  isDerived,
   isTool,
   listValues,
   MAX_RUNS,
@@ -79,7 +80,7 @@ class InputError extends Error {}
 
 type XY = { x: number; y: number };
 /** `exact`: el nodo va justo donde se hizo clic (sin buscar hueco). */
-type Menu = { at: XY; flowAt: XY; from: { nodeId: string; kind: PortKind } | null; exact?: boolean };
+type Menu = { at: XY; flowAt: XY; from: { nodeId: string; kind: PortKind; handle: string } | null; exact?: boolean };
 
 export function SpaceEditor({ id }: { id: string }) {
   const { t } = useI18n();
@@ -164,9 +165,9 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       if (n.type !== "generator") continue;
       const ins = edges
         .filter((e) => e.target === n.id)
-        .map((e) => [e.targetHandle, sourceSig(byId.get(e.source), jobs)])
+        .map((e) => [e.targetHandle, e.sourceHandle ?? "out", sourceSig(byId.get(e.source), jobs)])
         .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-      out[n.id] = JSON.stringify([n.data.model, n.data.values, ins]);
+      out[n.id] = JSON.stringify([n.data.model, n.data.values, n.data.count ?? 1, ins]);
     }
     return out;
   }, [nodes, edges, jobs]);
@@ -268,7 +269,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   // URL vigente de la salida de un paso previo (se sube gratis a Higgsfield y se reutiliza unos días).
   const outputUrls = useRef(new Map<string, string>());
   const sourceMedia = useCallback(
-    async (src: SpaceNode): Promise<{ url: string; local?: string }> => {
+    async (src: SpaceNode, handle?: string | null): Promise<{ url: string; local?: string }> => {
       if (src.type === "media") {
         if (!src.data.url) throw new InputError(s.needsMedia(nodeName(src)));
         return { url: src.data.url };
@@ -277,12 +278,15 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         const jobId = selectedRun(src.data);
         const job = jobId ? jobsRef.current[jobId] : undefined;
         if (!jobId || !job || job.status !== "completed" || !job.outputs[0]) throw new InputError(s.needsUpstream(nodeName(src)));
-        let url = outputUrls.current.get(jobId);
+        // Una salida extra de un video (último fotograma o audio) se extrae y sube aparte en el servidor.
+        const as = isDerived(handle) ? handle : undefined;
+        const cacheKey = as ? `${jobId}:${as}` : jobId;
+        let url = outputUrls.current.get(cacheKey);
         if (!url) {
-          url = (await studio.useOutput(jobId, 0)).url;
-          outputUrls.current.set(jobId, url);
+          url = (await studio.useOutput(jobId, 0, as)).url;
+          outputUrls.current.set(cacheKey, url);
         }
-        return { url, local: outputSrc(job.outputs[0]) };
+        return { url, local: as ? undefined : outputSrc(job.outputs[0]) };
       }
       throw new InputError(s.needsMedia(nodeName(src)));
     },
@@ -303,11 +307,14 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       const groups = incoming(es, nodeId);
       const durations: Promise<number | null>[] = [];
       for (const port of ports) {
-        const sources = (groups.get(port.key) ?? []).map((e) => ns.find((n) => n.id === e.source)).filter((n): n is SpaceNode => !!n);
+        const links = (groups.get(port.key) ?? [])
+          .map((e) => ({ src: ns.find((n) => n.id === e.source), handle: e.sourceHandle }))
+          .filter((l): l is { src: SpaceNode; handle: string | null | undefined } => !!l.src);
+        const sources = links.map((l) => l.src);
         if (!sources.length) continue;
         // Mismas reglas que las corridas del servidor: un tipo que no encaja es un error (también en el prompt)
         // y un campo simple toma la primera conexión (revisiones 55 y 56).
-        if (sources.some((src) => outKind(src, outputOf) !== port.kind)) throw new InputError(s.wrongKind(portLabel(t, detail, port.key)));
+        if (links.some((l) => outKind(l.src, outputOf, l.handle) !== port.kind)) throw new InputError(s.wrongKind(portLabel(t, detail, port.key)));
         // Un elemento de una Lista (lote): el mismo índice en todas las listas conectadas.
         const fromList = (src: SpaceNode) => {
           const values = src.type === "list" ? listValues(src.data) : [];
@@ -333,12 +340,12 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           continue;
         }
         const urls: string[] = [];
-        for (const src of port.multiple ? sources : sources.slice(0, 1)) {
+        for (const { src, handle } of port.multiple ? links : links.slice(0, 1)) {
           if (src.type === "list") {
             urls.push(fromList(src));
             continue;
           }
-          const { url, local } = await sourceMedia(src);
+          const { url, local } = await sourceMedia(src, handle);
           urls.push(url);
           if (port.kind === "video") durations.push(probeDuration(local ?? url, url));
         }
@@ -381,7 +388,13 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         .filter((e) => e.target === nodeId)
         .map((e) => ns.find((n) => n.id === e.source))
         .filter((n): n is ListNode => n?.type === "list");
-      if (!lists.length) return { batch: false, one: await resolve(nodeId) };
+      const count = ns.find((n): n is GeneratorNode => n.id === nodeId && n.type === "generator")?.data.count ?? 1;
+      if (!lists.length) {
+        const one = await resolve(nodeId);
+        // Variantes: un lote de una sola petición repetida `count` veces.
+        return count > 1 ? { batch: true, items: [{ ...one, count }] } : { batch: false, one };
+      }
+      if (count > 1) throw new InputError(s.variantsWithList);
       const sizes = new Set(lists.map((l) => listValues(l.data).length));
       if (sizes.size > 1) throw new InputError(s.batchSizes);
       const size = [...sizes][0];
@@ -409,7 +422,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         credits: null,
         usd: total?.usd ?? null,
         discount_pct: null,
-        basis: s.listBatch(p.items.length),
+        basis: s.listBatch(p.items.reduce((a, i) => a + i.count, 0)),
         missing: complete ? [] : ["price of some items"],
         description: null,
         reserve_usd: total?.reserve_usd ?? null,
@@ -464,7 +477,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         batched = p.batch;
         const request = JSON.stringify(p);
         if (signaturesRef.current[nodeId] !== sig) throw new InputError(s.changed);
-        if (p.batch && node.data.runs.length + p.items.length > MAX_RUNS) throw new InputError(s.tooManyRuns(MAX_RUNS));
+        if (p.batch && node.data.runs.length + p.items.reduce((a, i) => a + i.count, 0) > MAX_RUNS) throw new InputError(s.tooManyRuns(MAX_RUNS));
         const cached = estimatesRef.current[nodeId];
         if (!cached?.value || cached.key !== sig || cached.request !== request) {
           const value = await estimateFor(p, nodeId);
@@ -561,7 +574,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           setEdges((es) =>
             es.filter((e) => {
               if (e.target !== nodeId) return true;
-              const kind = outKind(nodesRef.current.find((n) => n.id === e.source), outputOf);
+              const kind = outKind(nodesRef.current.find((n) => n.id === e.source), outputOf, e.sourceHandle);
               return ports.some((p) => p.key === e.targetHandle && p.kind === kind);
             }),
           );
@@ -578,7 +591,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       const src = ns.find((n) => n.id === c.source);
       const tgt = ns.find((n) => n.id === c.target);
       if (!src || !tgt || tgt.type !== "generator" || !c.targetHandle) return false;
-      const kind = outKind(src, outputOf);
+      const kind = outKind(src, outputOf, c.sourceHandle);
       const detail = detailsRef.current[tgt.data.model];
       const port = detail && inPorts(detail).find((p) => p.key === c.targetHandle);
       if (!kind || !port || port.kind !== kind) return false;
@@ -596,7 +609,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       if (!port) return;
       setEdges((es) => {
         const same = (e: Edge) => e.target === c.target && e.targetHandle === c.targetHandle;
-        if (es.some((e) => same(e) && e.source === c.source)) return es;
+        if (es.some((e) => same(e) && e.source === c.source && (e.sourceHandle ?? "out") === (c.sourceHandle ?? "out"))) return es;
         // Un campo simple recibe una sola conexión: la nueva reemplaza a la anterior.
         let next = es;
         if (!port.multiple) next = es.filter((e) => !same(e));
@@ -622,11 +635,12 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     (event, state) => {
       if (state.isValid || !state.fromNode || state.fromHandle?.type !== "source") return;
       const src = nodesRef.current.find((n) => n.id === state.fromNode!.id);
-      const kind = outKind(src, outputOf);
+      const handle = state.fromHandle.id ?? "out";
+      const kind = outKind(src, outputOf, handle);
       if (!src || !kind) return;
       const point = "changedTouches" in event ? event.changedTouches[0] : event;
       const at = { x: point.clientX, y: point.clientY };
-      setMenu({ at, flowAt: flow.screenToFlowPosition(at), from: { nodeId: src.id, kind } });
+      setMenu({ at, flowAt: flow.screenToFlowPosition(at), from: { nodeId: src.id, kind, handle } });
     },
     [flow, outputOf],
   );
@@ -668,7 +682,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           // Al encadenar, el medio entra por el campo principal: el fotograma final nunca va primero.
           const port = from && ports.filter((p) => p.kind === from.kind).sort((a, b) => +/end|last/.test(a.key) - +/end|last/.test(b.key))[0];
           if (from && port)
-            setEdges((es) => [...es, { id: newId("e"), source: from.nodeId, target: nid, sourceHandle: "out", targetHandle: port.key }]);
+            setEdges((es) => [...es, { id: newId("e"), source: from.nodeId, target: nid, sourceHandle: from.handle, targetHandle: port.key }]);
         },
         () => undefined,
       );
@@ -958,7 +972,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   const styledEdges = useMemo(() => {
     const byId = new Map(nodes.map((n) => [n.id, n]));
     return edges.map((e) => {
-      const kind = outKind(byId.get(e.source), outputOf);
+      const kind = outKind(byId.get(e.source), outputOf, e.sourceHandle);
       const tgt = byId.get(e.target);
       const j = tgt?.type === "generator" ? selectedRun(tgt.data) : undefined;
       const busy = !!j && !!jobs[j] && !jobs[j].terminal;
@@ -973,9 +987,20 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     return sel.length === 1 && sel[0].type === "generator" ? (sel[0] as GeneratorNode) : null;
   }, [nodes]);
 
+  const times = useMemo(() => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const out: Record<string, number> = {};
+    for (const n of nodes) {
+      if (n.type !== "generator") continue;
+      const lists = edges.map((e) => (e.target === n.id ? byId.get(e.source) : undefined)).filter((x): x is ListNode => x?.type === "list");
+      out[n.id] = lists.length ? Math.max(...lists.map((l) => listValues(l.data).length)) : (n.data.count ?? 1);
+    }
+    return out;
+  }, [nodes, edges]);
+
   const ctx = useMemo<SpaceCtx>(
-    () => ({ models, details, jobs, gone, edges, signatures, estimates, runStates, run: runNode, update, setValue, changeModel, runFrom, runNodes, runBusy }),
-    [models, details, jobs, gone, edges, signatures, estimates, runStates, runNode, update, setValue, changeModel, runFrom, runNodes, runBusy],
+    () => ({ models, details, jobs, gone, edges, signatures, estimates, runStates, run: runNode, update, setValue, changeModel, runFrom, runNodes, runBusy, times }),
+    [models, details, jobs, gone, edges, signatures, estimates, runStates, runNode, update, setValue, changeModel, runFrom, runNodes, runBusy, times],
   );
 
   const tools: { icon: typeof Type; label: string; onClick: () => void }[] = [

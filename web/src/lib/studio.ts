@@ -199,8 +199,8 @@ export const studio = {
   cancel: (id: string) => call<Generation>(`/v1/generations/${id}/cancel`, { method: "POST" }),
   elements: () => call<{ elements: StudioElement[] }>("/v1/elements"),
   /** URL vigente de una salida propia para usarla como entrada de otra generación (gratis). */
-  useOutput: (id: string, index = 0) =>
-    call<{ url: string; kind: string; content_type: string }>(`/v1/generations/${id}/outputs/${index}/use`, {
+  useOutput: (id: string, index = 0, as?: "last_frame" | "audio") =>
+    call<{ url: string; kind: string; content_type: string }>(`/v1/generations/${id}/outputs/${index}/use${as ? `?as=${as}` : ""}`, {
       method: "POST",
     }),
   /** 2 a 4 imágenes JPG o PNG; `name` en minúsculas (letras, dígitos y _), se cita como @name. */

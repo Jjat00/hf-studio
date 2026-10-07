@@ -26,6 +26,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .db import TERMINAL, ApiClient, Job, SpaceRun, utcnow
 from .providers.base import ProviderError
 from .service import ServiceError
+from .spaces import DERIVED_OUTPUTS
 
 log = logging.getLogger("hf_studio.space_runs")
 
@@ -90,9 +91,16 @@ def ports(schema: dict) -> list[Port]:
     return out
 
 
-def out_kind(node: dict | None, output_of: Callable[[str], str | None]) -> str | None:
+def out_kind(
+    node: dict | None, output_of: Callable[[str], str | None], handle: str | None = None
+) -> str | None:
+    """Tipo que sale de un nodo por `handle`: la salida principal, o una derivada de un video (último
+    fotograma o audio)."""
     if not node:
         return None
+    if handle in DERIVED_OUTPUTS:
+        base = out_kind(node, output_of) if node["type"] == "generator" else None
+        return DERIVED_OUTPUTS[handle] if base == "video" else None
     if node["type"] == "text":
         return "text"
     if node["type"] in ("media", "list"):
@@ -172,7 +180,8 @@ def split_step(step: str) -> tuple[str, int | None]:
 
 def run_steps(graph: dict, mode: str, start: str | None, output_of: Callable[[str], str | None]) -> list[str]:
     """Pasos de una corrida, en orden. Un generador conectado a una Lista corre una vez por elemento marcado
-    (`nodo#0`, `nodo#1`…) y su lote se propaga en pares por la cadena: 5 prompts → 5 imágenes → 5 videos."""
+    (`nodo#0`, `nodo#1`…) y su lote se propaga en pares por la cadena: 5 prompts → 5 imágenes → 5 videos. Un
+    generador con variantes (`count`) hace lo mismo con su propia entrada repetida."""
     nodes = {n["id"]: n for n in graph["nodes"]}
     scope = run_scope(graph, mode, start)
     # Un nodo en lote lleva índice aunque su lote tenga un solo elemento: así resuelve el valor de la Lista
@@ -180,6 +189,7 @@ def run_steps(graph: dict, mode: str, start: str | None, output_of: Callable[[st
     fan: dict[str, int] = {}
     for node_id in scope:
         sizes = set()
+        count = nodes[node_id]["data"].get("count") or 1
         for src in upstream(graph, node_id):
             if nodes[src]["type"] == "list":
                 values = list_values(nodes[src])
@@ -190,8 +200,12 @@ def run_steps(graph: dict, mode: str, start: str | None, output_of: Callable[[st
                 sizes.add(fan[src])
         if len(sizes) > 1:
             raise NodeInputError(f"The batches connected to {node_id} have different sizes")
+        if count > 1 and sizes:
+            raise NodeInputError(f"{node_id} already runs once per item of a batch: set its variants to 1")
         if sizes:
             fan[node_id] = sizes.pop()
+        elif count > 1:
+            fan[node_id] = count
     steps: list[str] = []
     for node_id in scope:
         steps += [f"{node_id}#{i}" for i in range(fan[node_id])] if node_id in fan else [node_id]
@@ -217,14 +231,15 @@ async def resolve_input(
     schema: dict,
     output_of: Callable[[str], str | None],
     source_job: Callable[[str], str | None],
-    output_url: Callable[[str], Awaitable[str]],
+    output_url: Callable[[str, str | None], Awaitable[str]],
     item: int | None = None,
     output_text: Callable[[str], Awaitable[str]] | None = None,
 ) -> dict:
     """Entrada final de un generador: sus ajustes más lo que traen sus conexiones.
 
     `source_job(id)` dice qué generación usar de un generador de origen (la de esta corrida o la elegida en el
-    lienzo) y `output_url(job_id)` da su URL vigente; lanza NodeInputError si aún no terminó."""
+    lienzo) y `output_url(job_id, derive)` da la URL vigente de su salida, o de su último fotograma o su audio
+    según el `sourceHandle` de la arista; lanza NodeInputError si aún no terminó."""
     nodes = {n["id"]: n for n in graph["nodes"]}
     node = nodes[node_id]
     values = {k: v for k, v in (node["data"].get("values") or {}).items() if v not in (None, "", [])}
@@ -233,13 +248,13 @@ async def resolve_input(
         if e["target"] == node_id:
             by_port.setdefault(e["targetHandle"], []).append(e)
     for port in ports(schema):
-        edges = by_port.get(port.key, [])
-        sources = [nodes[e["source"]] for e in edges if e["source"] in nodes]
+        edges = [e for e in by_port.get(port.key, []) if e["source"] in nodes]
+        sources = [nodes[e["source"]] for e in edges]
         if not sources:
             continue
         # Mismas reglas que el navegador: un tipo que no encaja es un error (no se ignora) y un campo simple
         # toma la primera conexión (revisión 55).
-        if any(out_kind(src, output_of) != port.kind for src in sources):
+        if any(out_kind(nodes[e["source"]], output_of, e.get("sourceHandle")) != port.kind for e in edges):
             raise NodeInputError(f"A connection to {port.key} does not carry {port.kind}")
 
         def from_list(src: dict) -> str:
@@ -268,7 +283,8 @@ async def resolve_input(
                 values.pop(port.key, None)
             continue
         urls: list[str] = []
-        for src in sources if port.multiple else sources[:1]:
+        for edge in edges if port.multiple else edges[:1]:
+            src = nodes[edge["source"]]
             if src["type"] == "list":
                 urls.append(from_list(src))
             elif src["type"] == "media":
@@ -279,7 +295,8 @@ async def resolve_input(
                 job_id = source_job(src["id"])
                 if not job_id:
                     raise NodeInputError(f"Generate the connected step ({src['id']}) first")
-                urls.append(await output_url(job_id))
+                handle = edge.get("sourceHandle")
+                urls.append(await output_url(job_id, handle if handle in DERIVED_OUTPUTS else None))
         values[port.key] = urls[: port.max] if port.multiple else urls[0]
     missing = [p.key for p in ports(schema) if p.required and p.key not in values]
     if missing:
@@ -293,7 +310,7 @@ class Hooks:
 
     plan(session, owner, model_id, arguments) -> Plan; create(session, owner, model_id, arguments, key, plan,
     usd, reserve, accept_unknown) -> Job, sin commit (lo confirma el motor junto con la corrida);
-    output_url(session, owner, job_id) -> str; trusted(session, owner, url) -> bool; schema(model_id) ->
+    output_url(session, owner, job_id, derive=None) -> str; trusted(session, owner, url) -> bool; schema(model_id) ->
     input_schema o None; output_of(model_id) -> tipo de salida; wake() despierta al worker."""
 
     plan: Callable[..., Awaitable[Any]]
@@ -566,7 +583,7 @@ class SpaceRunner:
                 schema,
                 self.hooks.output_of,
                 source_job,
-                lambda job_id: self.hooks.output_url(session, owner, job_id),
+                lambda job_id, derive=None: self.hooks.output_url(session, owner, job_id, derive),
                 item,
                 (lambda job_id: self.hooks.output_text(session, owner, job_id))
                 if self.hooks.output_text

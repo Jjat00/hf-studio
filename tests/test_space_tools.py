@@ -256,3 +256,20 @@ async def test_a_tool_that_finished_meanwhile_is_not_reported_as_canceled(env, t
     tools.cancel_job = cancel_while_it_completes
     res = await http.post(f"/v1/generations/{state.id}/cancel")
     assert res.status_code == 409
+
+
+async def test_a_video_output_gives_its_last_frame_and_audio(env, tmp_path):  # noqa: F811
+    """Fase 4a: `use_output?as=last_frame|audio` sube el último fotograma o el audio de un video propio."""
+    app, http, _ = env
+    a = await upload(http, make_video(tmp_path / "a.mp4", 1, True), "a.mp4", "video/mp4")
+    silent = await upload(http, make_video(tmp_path / "b.mp4", 1, False), "b.mp4", "video/mp4")
+    with_audio = await run_tool(app, http, "hf-studio/combine", {"video_urls": [a, a]})
+    frame = await http.post(f"/v1/generations/{with_audio.id}/outputs/0/use?as=last_frame")
+    assert frame.status_code == 200 and frame.json()["content_type"] == "image/png", frame.text
+    audio = await http.post(f"/v1/generations/{with_audio.id}/outputs/0/use?as=audio")
+    assert audio.status_code == 200 and audio.json()["kind"] == "audio"
+    again = await http.post(f"/v1/generations/{with_audio.id}/outputs/0/use?as=last_frame")
+    assert again.json()["url"] == frame.json()["url"]  # una copia por salida derivada
+    still = await run_tool(app, http, "hf-studio/frame", {"video_url": silent})
+    res = await http.post(f"/v1/generations/{still.id}/outputs/0/use?as=audio")
+    assert res.status_code == 422 and res.json()["error"]["code"] == "not_a_video"

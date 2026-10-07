@@ -16,7 +16,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, Query, Request, UploadFile
@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from .audio import _run as run_ffmpeg
-from .audio import guarded, studio_notes
+from .audio import guarded, has_audio, studio_notes
 from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
 from .db import (
@@ -1194,11 +1194,20 @@ def create_app(
     reuse_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
 
     @app.post("/v1/generations/{job_id}/outputs/{index}/use", tags=["generaciones"])
-    async def use_output(job_id: str, index: int, session: Session, owner: Owner) -> dict:
+    async def use_output(
+        job_id: str,
+        index: int,
+        session: Session,
+        owner: Owner,
+        as_: Annotated[
+            Literal["last_frame", "audio"] | None,
+            Query(alias="as", description="De un video: su último fotograma o su pista de audio"),
+        ] = None,
+    ) -> dict:
         """URL pública y vigente de una salida propia, para usarla como entrada de otra generación (fotograma
         inicial, referencia, video a editar…). Sube la copia local a Higgsfield (gratis) y la registra como
         subida propia; si ya se subió hace menos de 5 días, devuelve esa misma URL."""
-        return await fresh_output(session, owner, job_id, index)
+        return await fresh_output(session, owner, job_id, index, as_)
 
     wav_locks: weakref.WeakValueDictionary[Path, asyncio.Lock] = weakref.WeakValueDictionary()
 
@@ -1226,6 +1235,37 @@ def create_app(
             )
         return wav
 
+    async def derived_file(path: Path, derive: str) -> Path:
+        """Último fotograma (PNG) o pista de audio (WAV) de un video propio, hecho una vez junto a él con
+        ffmpeg. Mismo candado y temporal único que `mp3_as_wav`."""
+        out = path.with_name(f"{path.stem}.{'last.png' if derive == 'last_frame' else 'audio.wav'}")
+        lock = wav_locks.get(out)
+        if lock is None:
+            lock = wav_locks[out] = asyncio.Lock()
+        async with lock:
+            if out.is_file():
+                return out
+            if derive == "audio" and not await has_audio(str(path)):
+                raise ServiceError(422, "no_audio", "That video has no audio track")
+            fd, name = tempfile.mkstemp(prefix=f"{out.stem}.", suffix=f".tmp{out.suffix}", dir=out.parent)
+            os.close(fd)
+            tmp = Path(name)
+            try:
+                if derive == "last_frame":
+                    # Desde el último segundo, cada fotograma reescribe el archivo: queda el último.
+                    args = ["-sseof", "-1", *guarded(str(path)), "-update", "1", str(tmp)]
+                else:
+                    args = [*guarded(str(path)), "-vn", "-c:a", "pcm_s16le", str(tmp)]
+                code, err = await run_ffmpeg("ffmpeg", "-y", "-v", "error", *args)
+                if code != 0 or not tmp.stat().st_size:
+                    raise ServiceError(
+                        422, "derive_failed", f"Could not extract that from the video: {err[:200]}"
+                    )
+                tmp.replace(out)
+            finally:
+                tmp.unlink(missing_ok=True)
+        return out
+
     async def mp3_as_wav(path: Path) -> Path:
         """Copia WAV (junto al MP3, una vez) de una salida de audio propia. Un candado por archivo y un temporal
         único: dos usos a la vez no se pisan, y un fallo no deja medio archivo (revisión 62)."""
@@ -1252,8 +1292,11 @@ def create_app(
                 tmp.unlink(missing_ok=True)
         return wav
 
-    async def fresh_output(session: AsyncSession, owner: ApiClient, job_id: str, index: int) -> dict:
-        """Núcleo de `use_output`; también lo usan las corridas de Spaces para encadenar pasos."""
+    async def fresh_output(
+        session: AsyncSession, owner: ApiClient, job_id: str, index: int, derive: str | None = None
+    ) -> dict:
+        """Núcleo de `use_output`; también lo usan las corridas de Spaces para encadenar pasos. `derive`
+        ("last_frame" o "audio") da en su lugar el último fotograma o el audio de una salida de video."""
         job = await get_owned_job(session, owner, job_id)
         entry = next((f for f in job.files or [] if f["index"] == index), None)
         if job.status != "completed" or entry is None:
@@ -1262,7 +1305,15 @@ def create_app(
         if not path.is_file():
             raise ServiceError(404, "not_found", "The local copy of that output is missing")
         content_type = (entry.get("content_type") or "").split(";")[0].strip().lower()
-        if content_type == "audio/mpeg":
+        kind = entry["kind"]
+        if derive is not None:
+            if kind != "video":
+                raise ServiceError(
+                    422, "not_a_video", "Only a video output has a last frame or an audio track"
+                )
+            path = await derived_file(path, derive)
+            content_type, kind = ("image/png", "image") if derive == "last_frame" else ("audio/wav", "audio")
+        elif content_type == "audio/mpeg":
             # Higgsfield no acepta MP3 (el audio de ElevenLabs): se sube una copia WAV hecha con ffmpeg, así
             # la voz o la música generadas se pueden encadenar como entrada (Spaces, fase 2c).
             path = await mp3_as_wav(path)
@@ -1273,9 +1324,9 @@ def create_app(
             )
         # La asociación salida → subida vive en `Upload.source`, que solo escribe el servidor (revisión 47). Una
         # fila por dueño y salida (índice único); el candado evita dos subidas simultáneas en este proceso.
-        source = f"generation:{job.id}:{index}"
+        source = f"generation:{job.id}:{index}" + (f":{derive}" if derive else "")
         # Valores propios, no del ORM: un rollback por conflicto expira los objetos cargados (revisión 48).
-        owner_id, generation_id, kind = owner.id, job.id, entry["kind"]
+        owner_id, generation_id = owner.id, job.id
         lock = reuse_locks.get((owner_id, source))
         if lock is None:
             lock = reuse_locks[(owner_id, source)] = asyncio.Lock()
@@ -1299,7 +1350,7 @@ def create_app(
                     # mientras funcione (revisión 48). La vigente es una fila nueva.
                     row.source = None
                     await session.flush()
-                row = Upload(owner_id=owner_id, filename=entry["name"], content_type=content_type,
+                row = Upload(owner_id=owner_id, filename=path.name, content_type=content_type,
                              size=len(data), url=url, source=source)  # fmt: skip
                 session.add(row)
                 try:
@@ -1655,9 +1706,11 @@ def create_app(
         async def trusted(session: AsyncSession, owner: ApiClient, url: str) -> bool:
             return await trusted_media(session, owner, url)
 
-        async def output_url(session: AsyncSession, owner: ApiClient, job_id: str) -> str:
+        async def output_url(
+            session: AsyncSession, owner: ApiClient, job_id: str, derive: str | None = None
+        ) -> str:
             try:
-                return (await fresh_output(session, owner, job_id, 0))["url"]
+                return (await fresh_output(session, owner, job_id, 0, derive))["url"]
             except ServiceError as exc:
                 raise NodeInputError(f"A connected step has no usable output ({exc.message})") from None
 
@@ -1695,7 +1748,7 @@ def create_app(
                 arguments = await resolve_input(
                     graph, node_id, hooks.schema(model_id) or {}, hooks.output_of,
                     lambda src: selected_run(nodes[src]["data"]),
-                    lambda job_id: hooks.output_url(session, owner, job_id),
+                    lambda job_id, derive=None: hooks.output_url(session, owner, job_id, derive),
                     index,
                     lambda job_id: hooks.output_text(session, owner, job_id),
                 )  # fmt: skip

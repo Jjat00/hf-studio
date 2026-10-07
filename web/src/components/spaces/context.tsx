@@ -34,6 +34,8 @@ export type SpaceCtx = {
   /** Estado de cada nodo en la corrida activa. */
   runNodes: Record<string, RunNodeState>;
   runBusy: boolean;
+  /** Generaciones que hará cada nodo al pulsar Generar: sus variantes o los elementos de la Lista conectada. */
+  times: Record<string, number>;
 };
 
 export const SpaceContext = createContext<SpaceCtx | null>(null);

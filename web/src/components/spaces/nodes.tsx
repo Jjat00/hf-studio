@@ -2,15 +2,17 @@
 
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileAudio, ImageIcon, ListChecks, Loader2, Play, StickyNote, Type, Upload, Video, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileAudio, ImageIcon, ListChecks, Loader2, Minus, Play, Plus, StickyNote, Type, Upload, Video, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
 import { CreationsPicker } from "@/components/studio/creations-picker";
+import { ModelPicker } from "@/components/studio/model-picker";
 import type { Dict } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
-import { humanize } from "@/lib/schema";
-import { inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, MAX_LIST_ITEMS, newId, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
+import { humanize, type Field } from "@/lib/schema";
+import { DERIVED_OUTPUTS, inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, MAX_LIST_ITEMS, MAX_VARIANTS, newId, settingFields, validValues, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
 import { costShort, modelLabel, outputSrc, studio } from "@/lib/studio";
 import type { ModelDetail, Output } from "@/lib/types";
 import { selectedRun, useSpace } from "./context";
@@ -214,15 +216,71 @@ export function MediaNodeView({ id, data, selected }: NodeProps<MediaNode>) {
   );
 }
 
+/** Ajustes que van a la vista en el propio nodo (como en Magnific); el resto sigue en el inspector. */
+const QUICK = ["aspect_ratio", "duration", "resolution", "quality", "generate_audio", "sound"];
+
+function QuickControls({ id, detail, values }: { id: string; detail: ModelDetail; values: Record<string, unknown> }) {
+  const { t } = useI18n();
+  const { setValue } = useSpace();
+  const valid = validValues(detail, values);
+  const fields = settingFields(detail)
+    .filter((f) => QUICK.includes(f.key))
+    .filter(
+      (f): f is Extract<Field, { kind: "enum" | "toggle" | "range" }> =>
+        f.kind === "enum" || f.kind === "toggle" || (f.kind === "range" && f.integer && f.max - f.min <= 20),
+    )
+    .sort((a, b) => QUICK.indexOf(a.key) - QUICK.indexOf(b.key))
+    .slice(0, 4);
+  if (!fields.length) return null;
+  const pill = "nodrag h-7 rounded-lg bg-surface-3 px-2 text-[12px] text-fg-2 outline-none hover:bg-surface-4";
+  return (
+    <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+      {fields.map((f) => {
+        const v = valid[f.key] ?? f.schema.default;
+        if (f.kind === "toggle")
+          return (
+            <button key={f.key} type="button" onClick={() => setValue(id, f.key, !v)} className={clsx(pill, v ? "text-lime" : "text-fg-3")}>
+              {t.spaces.sound} {v ? "✓" : "✕"}
+            </button>
+          );
+        const options = f.kind === "enum" ? f.options : Array.from({ length: f.max - f.min + 1 }, (_, i) => f.min + i);
+        const suffix = f.key === "duration" ? " s" : "";
+        return (
+          <select
+            key={f.key}
+            aria-label={f.key}
+            value={v === undefined ? "" : String(v)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const opt = options.find((o) => String(o) === raw);
+              setValue(id, f.key, opt);
+            }}
+            className={pill}
+          >
+            {v === undefined && <option value="">{humanize(f.key, {})}</option>}
+            {options.map((o) => (
+              <option key={String(o)} value={String(o)}>
+                {String(o)}
+                {suffix}
+              </option>
+            ))}
+          </select>
+        );
+      })}
+    </div>
+  );
+}
+
 export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNode>) {
   const { t, locale } = useI18n();
   const s = t.spaces;
-  const { models, details, jobs, gone, edges, estimates, signatures, runStates, run, update, setValue, runNodes } = useSpace();
+  const { models, details, jobs, gone, edges, estimates, signatures, runStates, run, update, setValue, changeModel, runNodes, times } = useSpace();
   const updateInternals = useUpdateNodeInternals();
+  const [picking, setPicking] = useState(false);
   const summary = models.get(data.model);
   const detail = details[data.model];
   const ports = detail ? inPorts(detail) : [];
-  const portKey = ports.map((p) => p.key).join(",");
+  const portKey = `${ports.map((p) => p.key).join(",")}|${summary?.output ?? detail?.output ?? ""}`;
   // Los puertos aparecen al cargar el esquema: React Flow debe volver a medir los handles.
   useEffect(() => {
     updateInternals(id);
@@ -254,12 +312,27 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
   const short = costShort(fresh);
   const confirming = !!state.confirm && state.confirm === signatures[id];
   const working = !!job && !job.terminal;
+  // Herramientas, audio y Assistant tienen nombre propio: no cambian de modelo desde el nodo.
+  const switchable = !isTool(data.model) && !isAudioNode(data.model) && !isAssistant(data.model);
+  const count = data.count ?? 1;
+  const n = times[id] ?? 1;
+  const sameOutput = switchable ? [...models.values()].filter((m) => m.output === summary?.output && !isTool(m.id)) : [];
 
   return (
     <div className="w-[320px]">
       <Title icon={Icon} color={KIND_COLOR[outKind]}>
-        <span className="truncate">{name}</span>
-        {workflow && <span className="truncate font-normal text-fg-3">· {workflowLabel(workflow, locale)}</span>}
+        {switchable ? (
+          <button type="button" title={s.changeModel} onClick={() => setPicking(true)} className="nodrag flex min-w-0 items-center gap-1 rounded hover:text-fg">
+            <span className="truncate">{name}</span>
+            {workflow && <span className="truncate font-normal text-fg-3">· {workflowLabel(workflow, locale)}</span>}
+            <ChevronDown className="size-3.5 shrink-0 text-fg-3" />
+          </button>
+        ) : (
+          <>
+            <span className="truncate">{name}</span>
+            {workflow && <span className="truncate font-normal text-fg-3">· {workflowLabel(workflow, locale)}</span>}
+          </>
+        )}
       </Title>
       <Card selected={selected}>
         {ports.length > 0 && (
@@ -328,17 +401,31 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
           </div>
         )}
 
-        <div className="p-3">
+        {detail && <QuickControls id={id} detail={detail} values={data.values} />}
+
+        <div className="flex gap-1.5 p-3">
+          <div className="flex h-10 shrink-0 items-center rounded-xl bg-surface-3 text-[12px] text-fg-2" title={s.variants}>
+            <button type="button" aria-label="-" disabled={count <= 1} onClick={() => update(id, { count: count - 1 > 1 ? count - 1 : undefined })} className="nodrag px-2 disabled:opacity-30">
+              <Minus className="size-3.5" />
+            </button>
+            <span className="w-6 text-center font-mono">×{count}</span>
+            <button type="button" aria-label="+" disabled={count >= MAX_VARIANTS} onClick={() => update(id, { count: count + 1 })} className="nodrag px-2 disabled:opacity-30">
+              <Plus className="size-3.5" />
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => run(id)}
             disabled={state.busy || !detail}
-            className="nodrag flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-lime text-[14px] font-semibold text-ink transition hover:brightness-105 disabled:opacity-50"
+            className="nodrag flex h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-lime text-[14px] font-semibold text-ink transition hover:brightness-105 disabled:opacity-50"
           >
             {state.busy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4 fill-current" />}
             {confirming ? s.runAnyway : s.run}
+            {n > 1 && <span>×{n}</span>}
             {!state.busy && !confirming && short && <span className="opacity-80">· {short}</span>}
           </button>
+        </div>
+        <div className="px-3 pb-3 empty:hidden">
           {state.error && <p className="mt-1.5 text-[12px] text-danger">{state.error}</p>}
           {runNodes[id]?.status === "pending" && <p className="mt-1.5 text-[12px] text-lime">{s.inRun}</p>}
           {runNodes[id]?.status === "skipped" && <p className="mt-1.5 text-[12px] text-warning">{s.skipped}</p>}
@@ -350,7 +437,24 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
             </Link>
           )}
         </div>
+        {outKind === "video" && (
+          // Salidas extra de un video: su último fotograma y su audio, para encadenar sin nodos de herramienta.
+          <div className="flex flex-col border-t border-line pb-1.5 pt-1">
+            {(Object.keys(DERIVED_OUTPUTS) as (keyof typeof DERIVED_OUTPUTS)[]).map((h) => (
+              <div key={h} className="relative flex h-7 items-center justify-end px-3.5 text-[12px] text-fg-3">
+                {h === "last_frame" ? s.lastFrame : s.audioOut}
+                <Dot kind={DERIVED_OUTPUTS[h]} type="source" id={h} />
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
+      {/* Portal: dentro del nodo, el modal quedaría anclado a su transformación y escalaría con el zoom. */}
+      {picking &&
+        createPortal(
+          <ModelPicker open models={sameOutput} selected={data.model} onSelect={(m) => changeModel(id, m)} onClose={() => setPicking(false)} />,
+          document.body,
+        )}
     </div>
   );
 }
@@ -414,6 +518,7 @@ export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
             ))}
           </div>
         )}
+        {data.items.length === 0 && <p className="mb-2 px-1 text-[11px] leading-snug text-fg-4">{s.listEmptyHint}</p>}
         <div className="nowheel thin-scrollbar flex max-h-72 flex-col gap-1.5 overflow-y-auto">
           {data.items.map((item, i) => (
             <div key={item.id} className="group flex items-start gap-1.5 rounded-lg bg-surface-3 p-1.5">

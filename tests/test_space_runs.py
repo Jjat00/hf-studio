@@ -824,3 +824,66 @@ async def test_a_full_queue_makes_steps_wait_instead_of_failing(env):  # noqa: F
     assert statuses.count("pending") == 7 and "failed" not in statuses
     async with app.state.sessions() as s:
         assert len((await s.scalars(select(Job))).all()) == 13  # cada paso creó su trabajo una sola vez
+
+
+def test_variants_run_a_node_several_times_and_pair_downstream():
+    """Fase 4a: `count` (×1 a ×4) repite el generador con la misma entrada; lo que sigue va en pares."""
+    from hf_studio.space_runs import NodeInputError, run_steps
+
+    output_of = {T2V: "video", I2V: "video", SOUL: "image"}.get
+    img = node("img", "generator", model=SOUL, values={"prompt": "x"}, runs=[], count=3)
+    vid = gen("vid", I2V)
+    graph = {"nodes": [img, vid], "edges": [edge("e1", "img", "vid", "image_url")]}
+    assert run_steps(graph, "workflow", None, output_of) == [
+        "img#0",
+        "img#1",
+        "img#2",
+        "vid#0",
+        "vid#1",
+        "vid#2",
+    ]
+    # Variantes sobre un lote: ambiguo, se pide elegir.
+    lst = node("l", "list", kind="text", items=[{"id": "a", "value": "a", "checked": True}])
+    img2 = node("img", "generator", model=SOUL, values={}, runs=[], count=2)
+    bad = {"nodes": [lst, img2], "edges": [edge("e1", "l", "img", "prompt")]}
+    try:
+        run_steps(bad, "workflow", None, output_of)
+        raise AssertionError("expected NodeInputError")
+    except NodeInputError as exc:
+        assert "variants" in str(exc)
+
+
+async def test_count_is_validated(env):  # noqa: F811
+    _, http, _ = env
+    for count, ok in ((4, True), (5, False), (0, False), (True, False)):
+        bad = node("a", "generator", model=T2V, values={}, runs=[], count=count)
+        res = await http.post("/v1/spaces", json={"graph": {"nodes": [bad]}})
+        assert (res.status_code == 201) is ok, (count, res.text)
+
+
+async def test_a_video_feeds_its_last_frame_and_audio_by_handle():
+    """Fase 4a: las salidas extra de un video (último fotograma, audio) llegan por su `sourceHandle`."""
+    from hf_studio.space_runs import NodeInputError, resolve_input
+
+    output_of = {T2V: "video", I2V: "video", SOUL: "image"}.get
+    calls = []
+
+    async def output_url(job_id, derive=None):
+        calls.append((job_id, derive))
+        return f"https://cdn.test/{job_id}/{derive or 'main'}"
+
+    vid = node("vid", "generator", model=T2V, values={}, runs=["job1"])
+    nxt = gen("nxt", I2V, prompt="go")
+    schema = {"type": "object", "required": ["image_url"],
+              "properties": {"prompt": {"type": "string"}, "image_url": {"type": "string"}}}  # fmt: skip
+    framed = {**edge("e1", "vid", "nxt", "image_url"), "sourceHandle": "last_frame"}
+    graph = {"nodes": [vid, nxt], "edges": [framed]}
+    values = await resolve_input(graph, "nxt", schema, output_of, lambda s: "job1", output_url)
+    assert values["image_url"] == "https://cdn.test/job1/last_frame" and calls == [("job1", "last_frame")]
+    # La salida principal de un video no es una imagen.
+    graph["edges"] = [edge("e1", "vid", "nxt", "image_url")]
+    try:
+        await resolve_input(graph, "nxt", schema, output_of, lambda s: "job1", output_url)
+        raise AssertionError("expected NodeInputError")
+    except NodeInputError:
+        pass

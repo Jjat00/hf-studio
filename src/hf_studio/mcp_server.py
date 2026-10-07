@@ -911,10 +911,12 @@ def create_space(title: str, nodes: list[dict] | None = None, edges: list[dict] 
     """Crea un lienzo de nodos (no genera nada ni gasta). El usuario lo ve en la UI, en /spaces.
     nodes: [{id, type, position: {x, y}, data}] con type text (data.text), media (data.url de upload_media o
     use_output, data.kind image|video|audio), note (data.text) o generator (data.model = id del catálogo,
-    data.values = ajustes de su input_schema, p. ej. {"prompt": "…", "duration": 5}). edges: [{id, source,
-    target, targetHandle}]: targetHandle es la clave del campo de entrada del generador destino (prompt,
-    image_url, end_image_url, image_urls, video_url, video_urls, audio_urls…) y el tipo debe encajar (texto →
-    prompt, imagen → campos de imagen…). Sin ciclos."""
+    data.values = ajustes de su input_schema, p. ej. {"prompt": "…", "duration": 5}; data.count de 1 a 4 lo
+    repite como variantes). edges: [{id, source, target, targetHandle, sourceHandle?}]: targetHandle es la
+    clave del campo de entrada del generador destino (prompt, image_url, end_image_url, image_urls, video_url,
+    video_urls, audio_urls…) y el tipo debe encajar (texto → prompt, imagen → campos de imagen…). De un
+    generador de video, sourceHandle "last_frame" lleva su último fotograma (imagen) y "audio" su pista de
+    audio; sin él, va la salida principal. Sin ciclos."""
     graph = {"nodes": nodes or [], "edges": edges or []}
     return _call("POST", "/v1/spaces", json={"title": title, "graph": graph})
 

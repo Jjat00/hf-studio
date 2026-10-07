@@ -18,7 +18,15 @@ export type TextData = { text: string };
 export type NoteData = { text: string };
 export type MediaData = { url?: string; kind?: "image" | "video" | "audio"; name?: string };
 /** `values`: ajustes propios del nodo (los campos conectados los pone la arista). `runs`: ids de trabajos. */
-export type GeneratorData = { model: string; values: Record<string, unknown>; runs: string[]; selected?: number };
+export type GeneratorData = { model: string; values: Record<string, unknown>; runs: string[]; selected?: number; count?: number };
+/** Variantes por generador (mismo límite que la API): corre varias veces con la misma entrada. */
+export const MAX_VARIANTS = 4;
+/** Salidas extra de un generador de video (mismo `sourceHandle` que la API): su último fotograma y su audio. */
+export const DERIVED_OUTPUTS = { last_frame: "image", audio: "audio" } as const;
+export type DerivedOutput = keyof typeof DERIVED_OUTPUTS;
+export function isDerived(handle: string | null | undefined): handle is DerivedOutput {
+  return handle === "last_frame" || handle === "audio";
+}
 /** Lista para lotes: cada elemento marcado es una corrida del generador al que se conecta. */
 export type ListItem = { id: string; value: string; checked: boolean };
 export type ListData = { kind: PortKind; items: ListItem[] };
@@ -78,9 +86,11 @@ export function mediaFields(detail: ModelDetail) {
   return fieldsFor(detail.input_schema, detail.id).filter((f): f is Extract<Field, { kind: "media" }> => f.kind === "media");
 }
 
-/** Lo que sale de un nodo: texto, el medio que contiene o lo que genera su modelo. */
-export function outKind(node: SpaceNode | undefined, outputOf: (model: string) => string | undefined): PortKind | null {
+/** Lo que sale de un nodo: texto, el medio que contiene o lo que genera su modelo. Por una salida extra
+ * (`handle`) de un video: su último fotograma (imagen) o su audio. */
+export function outKind(node: SpaceNode | undefined, outputOf: (model: string) => string | undefined, handle?: string | null): PortKind | null {
   if (!node) return null;
+  if (isDerived(handle)) return node.type === "generator" && outKind(node, outputOf) === "video" ? DERIVED_OUTPUTS[handle] : null;
   if (node.type === "text") return "text";
   if (node.type === "media") return node.data.kind ?? null;
   if (node.type === "list") return node.data.kind;
@@ -170,7 +180,15 @@ export function validValues(detail: ModelDetail, values: Record<string, unknown>
 export function normalizeNode(n: SpaceNode): SpaceNode {
   const data = (n.data ?? {}) as Record<string, unknown>;
   if (n.type === "generator")
-    return { ...n, data: { ...n.data, values: (data.values as Record<string, unknown>) ?? {}, runs: Array.isArray(data.runs) ? (data.runs as string[]) : [] } };
+    return {
+      ...n,
+      data: {
+        ...n.data,
+        values: (data.values as Record<string, unknown>) ?? {},
+        runs: Array.isArray(data.runs) ? (data.runs as string[]) : [],
+        count: Number.isInteger(data.count) && (data.count as number) > 1 && (data.count as number) <= MAX_VARIANTS ? (data.count as number) : undefined,
+      },
+    };
   if (n.type === "text" || n.type === "note") return { ...n, data: { ...n.data, text: typeof data.text === "string" ? data.text : "" } } as SpaceNode;
   if (n.type === "list")
     return { ...n, data: { kind: (data.kind as PortKind) ?? "text", items: Array.isArray(data.items) ? (data.items as ListItem[]) : [] } };
