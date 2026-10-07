@@ -24,6 +24,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
+import { CreationsPicker } from "@/components/studio/creations-picker";
 import { ModelPicker } from "@/components/studio/model-picker";
 import { probeDuration } from "@/lib/media";
 import { NodeBar, type BarOutput } from "./node-bar";
@@ -163,6 +164,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   const [runStates, setRunStates] = useState<Record<string, RunState>>({});
   const [menu, setMenu] = useState<Menu | null>(null);
   const [picker, setPicker] = useState<"image" | "video" | null>(null);
+  const [assetPick, setAssetPick] = useState<{ kind: "image" | "video"; position: XY } | null>(null);
   const [save, setSave] = useState<"saved" | "saving" | "error" | "conflict">("saved");
 
   // Firmas de entrada por generador: si cambian, la cotización anterior deja de valer.
@@ -674,8 +676,14 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         if (!nodesRef.current.some((n) => Math.abs(n.position.x - p.x) < 300 && Math.abs(n.position.y - p.y) < 200)) break;
         position = { x: p.x + 380, y: p.y };
       }
+      if (choice.type === "asset") {
+        // Mis medios: primero se elige la creación; el nodo de medio nace con ella en este mismo sitio.
+        setAssetPick({ kind: choice.kind, position });
+        return;
+      }
       let node: SpaceNode;
-      if (choice.type === "generator") node = { id: nid, type: "generator", position, data: { model: choice.model, values: {}, runs: [] } };
+      if (choice.type === "generator")
+        node = { id: nid, type: "generator", position, data: { model: choice.model, values: { ...choice.preset?.values }, runs: [], count: choice.preset?.count } };
       else if (choice.type === "media") node = { id: nid, type: "media", position, data: {} };
       else if (choice.type === "list") node = { id: nid, type: "list", position, data: { kind: "text", items: [] } };
       else node = { id: nid, type: choice.type, position, data: { text: "" } };
@@ -1225,6 +1233,17 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         </div>
       </div>
 
+      {assetPick && (
+        <CreationsPicker
+          kind={assetPick.kind}
+          onPick={(url) => {
+            const { kind, position } = assetPick;
+            const node: SpaceNode = { id: newId("media"), type: "media", position, data: { url, kind, name: kind === "image" ? s.creationsImage : s.creationsVideo } };
+            setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true }]);
+          }}
+          onClose={() => setAssetPick(null)}
+        />
+      )}
       {publishing && (
         <PublishDialog
           initial={published ?? { title: title || s.untitled, description: "", inputs: [] }}
@@ -1253,6 +1272,8 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         />
       )}
       <AddMenu
+        // Cada apertura empieza en «Todo» y sin búsqueda: una pestaña anterior no puede vaciar la conexión rápida.
+        key={menu ? `${menu.at.x}:${menu.at.y}:${menu.from?.nodeId ?? ""}:${menu.from?.handle ?? ""}` : "closed"}
         at={menu?.at ?? null}
         from={menu?.from?.kind ?? null}
         models={list}
