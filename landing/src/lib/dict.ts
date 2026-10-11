@@ -49,6 +49,7 @@ const es = {
   },
   spaces: {
     kicker: "Spaces · lienzo de nodos",
+    shot: "Un lienzo real: referencias de Frostbyte, duelo de modelos de imagen y video encadenado.",
     title: "Genera por pasos, en un lienzo",
     body: "Conecta textos, listas, imágenes y cualquier modelo: la salida de cada paso alimenta al siguiente. Cada nodo muestra su costo antes de generar, y todo el lienzo corre en el servidor con un tope de gasto que apruebas tú.",
     diagram: {
@@ -213,6 +214,7 @@ const en: Dict = {
   },
   spaces: {
     kicker: "Spaces · node canvas",
+    shot: "A real canvas: Frostbyte references, an image model face-off and chained video.",
     title: "Generate step by step, on a canvas",
     body: "Connect texts, lists, images and any model: each step's output feeds the next one. Every node shows its cost before generating, and the whole canvas runs on the server under a budget you approve.",
     diagram: {

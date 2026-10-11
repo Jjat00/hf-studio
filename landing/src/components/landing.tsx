@@ -287,6 +287,11 @@ function Spaces() {
         <h2 className="headline mt-3 text-[36px] md:text-[48px]">{sp.title}</h2>
         <p className="mt-3 text-[17px] text-fg-2">{sp.body}</p>
       </div>
+      <figure className="mb-4 overflow-hidden rounded-[24px] border border-line bg-surface-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`${M}/spaces-lienzo.webp`} alt={sp.shot} width={1911} height={858} loading="lazy" className="w-full" />
+        <figcaption className="px-4 py-3 text-[14px] font-medium text-fg-2">{sp.shot}</figcaption>
+      </figure>
       <SpacesDiagram />
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sp.points.map((pt) => (
