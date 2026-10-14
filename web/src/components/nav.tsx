@@ -157,7 +157,7 @@ function NavLinks() {
 
   return (
     <div ref={root} className="flex min-w-0 flex-1 items-center">
-      <div className="hidden min-w-0 items-center lg:flex" onMouseLeave={() => hover(null)}>
+      <div className="hidden shrink-0 items-center lg:flex" onMouseLeave={() => hover(null)}>
         {PRIMARY.map((item) =>
           item.mega ? (
             <div key={item.href} onMouseEnter={() => hover(item.mega!)} onFocus={() => hover(item.mega!)}>
@@ -219,7 +219,13 @@ function NavLinks() {
               </div>
             ))}
           </div>
-          <div className="pt-3 lg:pt-0">
+          {/* En escritorio estrecho la fila de productos se recorta: aquí siempre están todos. */}
+          <div className="hidden border-b border-line pb-3 lg:block 2xl:hidden">
+            {PRODUCTS.map((item) => (
+              <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
+            ))}
+          </div>
+          <div className="pt-3">
             <p className="px-2.5 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{t.nav.groupAccount}</p>
             {MORE.map((item) => (
               <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
@@ -250,7 +256,7 @@ function ApiStatus() {
   }, []);
   const label = t.nav.status[state];
   return (
-    <span className="hidden items-center gap-2 rounded-lg bg-glass px-2.5 py-1 text-sm font-medium text-fg-2 md:flex">
+    <span className="hidden items-center gap-2 rounded-lg bg-glass px-2.5 py-1 text-sm font-medium text-fg-2 xl:flex">
       <span
         className={clsx(
           "size-1.5 rounded-full",
