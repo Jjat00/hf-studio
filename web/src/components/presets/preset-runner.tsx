@@ -3,7 +3,7 @@
 import { ArrowLeft, Code2, Folder, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { useI18n } from "@/components/i18n-provider";
@@ -18,7 +18,7 @@ import type { Preset } from "@/lib/types";
 const FALLBACK = { video: "/art/text-to-video.webp", image: "/art/text-to-image.webp" };
 
 /** Formulario de un preset: variables → vista previa con costo → Generate. */
-export function PresetRunner({ slug }: { slug: string }) {
+export function PresetRunner({ slug, back = "/presets", tabs }: { slug: string; back?: string; tabs?: ReactNode }) {
   const { t, locale } = useI18n();
   const router = useRouter();
   const [raw, setPreset] = useState<Preset | null>(null);
@@ -124,7 +124,7 @@ export function PresetRunner({ slug }: { slug: string }) {
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100dvh-56px)] lg:flex-none lg:flex-row">
       <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[470px]">
         <div className="flex items-center gap-3 px-6 pt-5 pb-3">
-          <Link href="/presets" className="text-fg-3 hover:text-fg" aria-label={t.presets.back}>
+          <Link href={back} className="text-fg-3 hover:text-fg" aria-label={t.presets.back}>
             <ArrowLeft className="size-5" />
           </Link>
           <span className="font-mono text-[15px] text-fg-2">/{preset.slug}</span>
@@ -144,6 +144,7 @@ export function PresetRunner({ slug }: { slug: string }) {
           )}
         </div>
         <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-3">
+          {tabs}
           <div className="grain relative h-[196px] shrink-0 overflow-hidden rounded-2xl bg-surface-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={preset.cover ?? FALLBACK[preset.output]} alt="" className="absolute inset-0 size-full object-cover" />

@@ -3,7 +3,8 @@
 import clsx from "clsx";
 import { Bookmark, ImageIcon, Video, Workflow } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { localizePreset, presetCategory } from "@/lib/i18n/presets";
 import type { FlowSummary } from "@/lib/spaces";
@@ -13,9 +14,20 @@ import type { Preset } from "@/lib/types";
 const FALLBACK = { video: "/art/text-to-video.webp", image: "/art/text-to-image.webp" };
 
 export default function PresetsPage() {
+  return (
+    <Suspense>
+      <PresetsGallery />
+    </Suspense>
+  );
+}
+
+function PresetsGallery() {
   const { t, locale } = useI18n();
   const [presets, setPresets] = useState<Preset[]>([]);
-  const [category, setCategory] = useState<string | null>(null);
+  // La categoría vive en la URL (?c=Apps), así la barra puede abrir una ya filtrada.
+  const router = useRouter();
+  const category = useSearchParams().get("c");
+  const setCategory = (c: string | null) => router.replace(c ? `/presets?c=${encodeURIComponent(c)}` : "/presets", { scroll: false });
   const [error, setError] = useState<string | null>(null);
   const [flows, setFlows] = useState<FlowSummary[]>([]);
   useEffect(() => {

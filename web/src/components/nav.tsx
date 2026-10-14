@@ -6,51 +6,60 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import type { Dict } from "@/lib/i18n";
+import { MEGA_MENUS, type MegaMenu, type MenuEntry } from "@/lib/menu";
 import { useI18n } from "./i18n-provider";
 import { Logo } from "./logo";
 
 type Label = Exclude<keyof Dict["nav"], "status">;
-type Item = { href: string; label: Label; badge?: boolean; match: (p: string, tab: string | null) => boolean };
+type Item = {
+  href: string;
+  label: Label;
+  badge?: "new" | "top";
+  mega?: MegaMenu["key"];
+  match: (p: string, q: URLSearchParams) => boolean;
+};
 
+const tabIs = (q: URLSearchParams, ...tabs: (string | null)[]) => tabs.includes(q.get("tab"));
+
+/** Barra principal, en el orden de Higgsfield: secciones por medio (con menú) y luego los productos estrella. */
 const PRIMARY: Item[] = [
   { href: "/", label: "explore", match: (p) => p === "/" },
-  { href: "/image", label: "image", match: (p) => p.startsWith("/image") },
-  { href: "/video", label: "video", match: (p, t) => p.startsWith("/video") && (!t || t === "create") },
-  { href: "/use-cases", label: "useCases", badge: true, match: (p) => p.startsWith("/use-cases") },
-  { href: "/presets", label: "presets", match: (p) => p.startsWith("/presets") },
-  { href: "/spaces", label: "spaces", badge: true, match: (p) => p.startsWith("/spaces") },
+  { href: "/image", label: "image", mega: "image", match: (p) => p.startsWith("/image") },
+  { href: "/video", label: "video", mega: "video", match: (p, q) => p.startsWith("/video") && tabIs(q, null, "create", "edit", "motion") },
+  { href: "/audio", label: "audio", mega: "audio", match: (p) => ["/audio", "/voice", "/voices", "/sounds"].some((r) => p === r || p.startsWith(r + "/")) },
   { href: "/mcp", label: "mcp", match: (p) => p.startsWith("/mcp") },
+];
+const PRODUCTS: Item[] = [
+  { href: "/video?tab=genjutsu", label: "genjutsu", badge: "top", match: (p, q) => p.startsWith("/video") && tabIs(q, "genjutsu") },
+  { href: "/spaces", label: "spaces", badge: "new", match: (p) => p.startsWith("/spaces") || p.startsWith("/flows") },
+  { href: "/influencer", label: "influencer", badge: "new", match: (p) => p.startsWith("/influencer") },
+  { href: "/presets?c=Apps", label: "apps", match: (p, q) => p.startsWith("/presets") && q.get("c") === "Apps" },
+  { href: "/use-cases", label: "useCases", match: (p) => p.startsWith("/use-cases") },
+  { href: "/presets", label: "presets", match: (p, q) => p.startsWith("/presets") && q.get("c") !== "Apps" },
+];
+/** Lo que no cabe en la barra: el menú «Más». */
+const MORE: Item[] = [
   { href: "/models", label: "models", match: (p) => p.startsWith("/models") },
+  { href: "/elements", label: "elements", match: (p) => p.startsWith("/elements") },
+  { href: "/history", label: "history", match: (p) => p.startsWith("/history") },
+  { href: "/providers", label: "providers", match: (p) => p.startsWith("/providers") },
+  { href: "/usage", label: "usage", match: (p) => p.startsWith("/usage") },
 ];
-/** Lo que no cabe en la barra: el menú «Más», agrupado por tema. */
-const GROUPS: { label: Label; items: Item[] }[] = [
-  {
-    label: "groupVideo",
-    items: [
-      { href: "/video?tab=genjutsu", label: "genjutsu", match: (p, t) => p.startsWith("/video") && t === "genjutsu" },
-      { href: "/video?tab=edit", label: "editVideo", match: (p, t) => p.startsWith("/video") && t === "edit" },
-      { href: "/video?tab=motion", label: "motionControl", match: (p, t) => p.startsWith("/video") && t === "motion" },
-      { href: "/elements", label: "elements", match: (p) => p.startsWith("/elements") },
-    ],
-  },
-  {
-    label: "groupAudio",
-    items: [
-      { href: "/voice", label: "voice", match: (p) => p === "/voice" || p.startsWith("/voice/") },
-      { href: "/voices", label: "voices", match: (p) => p.startsWith("/voices") },
-      { href: "/audio", label: "audio", match: (p) => p.startsWith("/audio") },
-      { href: "/sounds", label: "sounds", match: (p) => p.startsWith("/sounds") },
-    ],
-  },
-  {
-    label: "groupAccount",
-    items: [
-      { href: "/history", label: "history", match: (p) => p.startsWith("/history") },
-      { href: "/providers", label: "providers", match: (p) => p.startsWith("/providers") },
-      { href: "/usage", label: "usage", match: (p) => p.startsWith("/usage") },
-    ],
-  },
-];
+
+function Badge({ kind }: { kind: "new" | "top" | "TOP" | "NEW" }) {
+  const { t } = useI18n();
+  const top = kind.toLowerCase() === "top";
+  return (
+    <span
+      className={clsx(
+        "rounded-md px-1.5 py-0.5 text-[10px] leading-3 font-bold",
+        top ? "bg-lime text-ink" : "bg-lime/20 text-lime",
+      )}
+    >
+      {top ? t.nav.top : t.nav.new}
+    </span>
+  );
+}
 
 function NavLink({ item, active, onClick, block }: { item: Item; active: boolean; onClick?: () => void; block?: boolean }) {
   const { t } = useI18n();
@@ -66,46 +75,118 @@ function NavLink({ item, active, onClick, block }: { item: Item; active: boolean
       )}
     >
       {t.nav[item.label]}
-      {item.badge && (
-        <span className="rounded-md bg-lime/20 px-1.5 py-0.5 text-[10px] leading-3 font-bold text-lime">{t.nav.new}</span>
-      )}
+      {item.badge && <Badge kind={item.badge} />}
     </Link>
   );
 }
 
-function NavLinks() {
+function MenuRow({ entry, onClick }: { entry: MenuEntry; onClick: () => void }) {
+  const { locale } = useI18n();
+  const Icon = entry.icon;
+  return (
+    <Link href={entry.href} onClick={onClick} className="group flex items-center gap-3 rounded-xl px-2 py-1.5 hover:bg-surface-4">
+      <span className="relative flex size-10 shrink-0 items-center justify-center rounded-xl border border-line-2 bg-surface-2 text-fg-2 group-hover:text-lime">
+        <Icon className="size-[18px]" />
+        {entry.badge && (
+          <span className="absolute -top-1.5 -left-1.5">
+            <Badge kind={entry.badge} />
+          </span>
+        )}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-[14px] font-medium text-fg">{entry.title[locale]}</span>
+        <span className="block truncate text-[12.5px] text-fg-3">{entry.description[locale]}</span>
+      </span>
+    </Link>
+  );
+}
+
+/** Panel desplegable de una sección: «Funciones» a la izquierda y «Modelos» a la derecha. */
+function MegaPanel({ menu, onClose }: { menu: MegaMenu; onClose: () => void }) {
   const { t } = useI18n();
+  return (
+    <div className="thin-scrollbar grid max-h-[calc(100dvh-5rem)] w-[min(880px,calc(100vw-1rem))] grid-cols-2 gap-4 overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl">
+      {[
+        [t.nav.features, menu.features],
+        [t.nav.modelsCol, menu.models],
+      ].map(([title, entries]) => (
+        <div key={title as string} className="min-w-0">
+          <p className="px-2 pb-1.5 text-[12px] font-medium text-fg-4">{title as string}</p>
+          {(entries as MenuEntry[]).map((e) => (
+            <MenuRow key={e.href + e.title.en} entry={e} onClick={onClose} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NavLinks() {
+  const { t, locale } = useI18n();
   const pathname = usePathname();
-  const tab = useSearchParams().get("tab");
+  const query = useSearchParams();
   const [open, setOpen] = useState(false);
+  const [mega, setMega] = useState<MegaMenu["key"] | null>(null);
   const root = useRef<HTMLDivElement>(null);
-  const isActive = (item: Item) => item.match(pathname, tab);
-  const inMenu = GROUPS.some((g) => g.items.some(isActive));
-  const close = () => setOpen(false);
+  const closer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isActive = (item: Item) => item.match(pathname, query);
+  const inMenu = MORE.some(isActive);
+  const close = () => {
+    setOpen(false);
+    setMega(null);
+  };
+  const hover = (key: MegaMenu["key"] | null) => {
+    if (closer.current) clearTimeout(closer.current);
+    if (key) setMega(key);
+    else closer.current = setTimeout(() => setMega(null), 140);
+  };
+  const menu = MEGA_MENUS.find((m) => m.key === mega);
 
   // Se cierra con Escape o con un clic fuera del menú.
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    const onClick = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
+    if (!open && !mega) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onClick = (e: MouseEvent) => !root.current?.contains(e.target as Node) && close();
     document.addEventListener("keydown", onKey);
     document.addEventListener("mousedown", onClick);
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onClick);
     };
-  }, [open]);
+  }, [open, mega]);
 
   return (
     <div ref={root} className="flex min-w-0 flex-1 items-center">
+      <div className="hidden min-w-0 items-center lg:flex" onMouseLeave={() => hover(null)}>
+        {PRIMARY.map((item) =>
+          item.mega ? (
+            <div key={item.href} onMouseEnter={() => hover(item.mega!)} onFocus={() => hover(item.mega!)}>
+              <NavLink item={item} active={isActive(item) || mega === item.mega} onClick={close} />
+            </div>
+          ) : (
+            <div key={item.href} onMouseEnter={() => hover(null)}>
+              <NavLink item={item} active={isActive(item)} />
+            </div>
+          ),
+        )}
+        {menu && (
+          <div className="absolute top-full left-2 z-50 pt-1" onMouseEnter={() => hover(menu.key)}>
+            <MegaPanel menu={menu} onClose={close} />
+          </div>
+        )}
+      </div>
+      <span className="mx-2 hidden h-4 w-px shrink-0 bg-line-2 lg:block" />
       <div className="hide-scrollbar hidden min-w-0 items-center overflow-x-auto lg:flex">
-        {PRIMARY.map((item) => (
+        {PRODUCTS.map((item) => (
           <NavLink key={item.href} item={item} active={isActive(item)} />
         ))}
       </div>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setMega(null);
+          setOpen(!open);
+        }}
         aria-expanded={open}
         aria-haspopup="true"
         className={clsx(
@@ -119,21 +200,29 @@ function NavLinks() {
         <ChevronDown className={clsx("hidden size-3.5 transition-transform lg:block", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute inset-x-2 top-full z-50 mt-1 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl lg:inset-x-auto lg:left-1/2 lg:w-[640px] lg:-translate-x-1/2">
-          {/* En pantallas angostas la barra no muestra las secciones principales: van aquí arriba. */}
+        <div className="absolute inset-x-2 top-full z-50 mt-1 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl lg:inset-x-auto lg:right-2 lg:w-[260px]">
+          {/* En pantallas angostas la barra no muestra las secciones: van aquí, con sus funciones. */}
           <div className="grid grid-cols-2 gap-0.5 border-b border-line pb-3 sm:grid-cols-4 lg:hidden">
-            {PRIMARY.map((item) => (
+            {[...PRIMARY, ...PRODUCTS].map((item) => (
               <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-3 pt-3 sm:grid-cols-3 lg:pt-0">
-            {GROUPS.map((group) => (
-              <div key={group.label}>
-                <p className="px-2.5 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{t.nav[group.label]}</p>
-                {group.items.map((item) => (
-                  <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
+          <div className="grid grid-cols-1 gap-3 border-b border-line py-3 sm:grid-cols-3 lg:hidden">
+            {MEGA_MENUS.map((m) => (
+              <div key={m.key}>
+                <p className="px-2.5 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{t.nav[m.key]}</p>
+                {m.features.map((e) => (
+                  <Link key={e.href + e.title.en} href={e.href} onClick={close} className="block rounded-lg px-2.5 py-1.5 text-sm text-fg-3 hover:bg-surface-4 hover:text-fg">
+                    {e.title[locale]}
+                  </Link>
                 ))}
               </div>
+            ))}
+          </div>
+          <div className="pt-3 lg:pt-0">
+            <p className="px-2.5 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{t.nav.groupAccount}</p>
+            {MORE.map((item) => (
+              <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
             ))}
           </div>
         </div>
