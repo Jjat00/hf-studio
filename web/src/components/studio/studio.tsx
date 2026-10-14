@@ -61,11 +61,12 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Record<string, string>>({});
   const modelParam = params.get("model");
-  // Un ?model= nuevo (p. ej. desde el menú de la barra) manda sobre lo elegido antes en el selector.
+  // Un ?model= nuevo (p. ej. desde el menú de la barra) manda sobre lo elegido antes en el selector. Que el
+  // parámetro desaparezca (al reutilizar una generación, por ejemplo) no borra lo elegido.
   const [seenModelParam, setSeenModelParam] = useState(modelParam);
   if (seenModelParam !== modelParam) {
     setSeenModelParam(modelParam);
-    setChosen({});
+    if (modelParam) setChosen({});
   }
   const [detail, setDetail] = useState<ModelDetail | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});

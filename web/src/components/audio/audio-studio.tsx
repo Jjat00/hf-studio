@@ -66,8 +66,10 @@ export function AudioStudio() {
   const [seen, setSeen] = useState({ tab: tabParam, model: modelParam });
   if (seen.tab !== tabParam || seen.model !== modelParam) {
     setSeen({ tab: tabParam, model: modelParam });
-    if ((SERVICES as string[]).includes(tabParam ?? "")) setService(tabParam as AudioService);
-    if ((TTS_MODELS as readonly string[]).includes(modelParam ?? "")) setTtsModel(modelParam as (typeof TTS_MODELS)[number]);
+    // Cada uno solo cuando cambia el suyo: cambiar de pestaña no debe pisar el modelo elegido a mano.
+    if (seen.tab !== tabParam && (SERVICES as string[]).includes(tabParam ?? "")) setService(tabParam as AudioService);
+    if (seen.model !== modelParam && (TTS_MODELS as readonly string[]).includes(modelParam ?? ""))
+      setTtsModel(modelParam as (typeof TTS_MODELS)[number]);
   }
   const [language, setLanguage] = useState<string | null>(null);
   // Efectos
@@ -237,7 +239,15 @@ export function AudioStudio() {
               <SettingCard label={a.model}>
                 <div className="flex flex-wrap gap-1.5">
                   {TTS_MODELS.map((m) => (
-                    <Chip key={m} active={ttsModel === m} onClick={() => setTtsModel(m)}>
+                    <Chip key={m} active={ttsModel === m} onClick={() => {
+                      setTtsModel(m);
+                      // Elegido a mano: ?model= sale de la URL para que el menú pueda volver a aplicarlo.
+                      if (modelParam) {
+                        const next = new URLSearchParams(params.toString());
+                        next.delete("model");
+                        router.replace(`/audio?${next}`, { scroll: false });
+                      }
+                    }}>
                       {a.models[m]}
                     </Chip>
                   ))}
