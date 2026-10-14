@@ -153,7 +153,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
 
   const [nodes, setNodes, onNodesChange] = useNodesState<SpaceNode>(space.graph.nodes.map(normalizeNode));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(space.graph.edges);
-  const { undo, redo, duplicate, recordRuns } = useCanvasEdit({ nodes, edges, setNodes, setEdges });
+  const { undo, redo, duplicate, recordRuns, patchHistory } = useCanvasEdit({ nodes, edges, setNodes, setEdges });
   // Herramienta del lienzo, como en Magnific: seleccionar (arrastrar marca una caja), mano (arrastrar mueve la
   // vista) o tijera (clic en una conexión la corta).
   const [mode, setMode] = useState<"select" | "hand" | "cut">("select");
@@ -697,23 +697,28 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
           const ports = inPorts(d);
           const defaults = defaultsFor(d.input_schema);
           for (const p of ports) delete defaults[p.key];
-          setNodes((ns) => ns.map((n) => (n.id === nid && n.type === "generator" ? { ...n, data: { ...n.data, values: { ...defaults, ...n.data.values } } } : n)));
+          const fill = (ns: SpaceNode[]) =>
+            ns.map((n) => (n.id === nid && n.type === "generator" ? { ...n, data: { ...n.data, values: { ...defaults, ...n.data.values } } } : n));
           // Al encadenar, el medio entra por el campo principal: el fotograma final nunca va primero.
           const port = from && ports.filter((p) => p.kind === from.kind).sort((a, b) => +/end|last/.test(a.key) - +/end|last/.test(b.key))[0];
-          // El esquema llega más tarde: si entretanto se deshizo o borró el nodo nuevo (o su origen), no se
-          // conecta nada (una arista huérfana bloquearía el guardado, revisión 76).
-          const alive = (id: string) => nodesRef.current.some((n) => n.id === id);
-          if (from && port && alive(nid) && alive(from.nodeId))
-            setEdges((es) =>
-              es.some((e) => e.target === nid && e.targetHandle === port.key)
-                ? es
-                : [...es, { id: newId("e"), source: from.nodeId, target: nid, sourceHandle: from.handle, targetHandle: port.key }],
-            );
+          const link = (ns: SpaceNode[], es: Edge[]) =>
+            !from || !port || !ns.some((n) => n.id === nid) || !ns.some((n) => n.id === from.nodeId) || es.some((e) => e.target === nid && e.targetHandle === port.key)
+              ? es
+              : [...es, { id: newId("e"), source: from.nodeId, target: nid, sourceHandle: from.handle, targetHandle: port.key }];
+          // El esquema llega más tarde: si entretanto se deshizo o borró el nodo nuevo, se completa donde siga
+          // (la historia), para que rehacer lo devuelva con sus valores y su conexión (tarea 119).
+          if (!nodesRef.current.some((n) => n.id === nid)) {
+            patchHistory((snap) => (snap.nodes.some((n) => n.id === nid) ? { nodes: fill(snap.nodes), edges: link(snap.nodes, snap.edges) } : snap));
+            return;
+          }
+          setNodes(fill);
+          // Sin su origen (deshecho o borrado) no se conecta nada: una arista huérfana bloquearía el guardado (revisión 76).
+          setEdges((es) => link(nodesRef.current, es));
         },
         () => undefined,
       );
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, patchHistory],
   );
 
   // «/» abre el buscador de nodos (salvo escribiendo en un campo).

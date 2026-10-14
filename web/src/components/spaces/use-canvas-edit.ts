@@ -93,6 +93,18 @@ export function useCanvasEdit({
     current.current = { nodes: clean(nodesRef.current), edges: edgesRef.current, key };
   }, []);
 
+  /** Corrige el lienzo guardado en la historia (deshacer, rehacer y el estado vigente). Para lo que llega tarde
+   * a un nodo que ya no está: rehacer lo devuelve completo (tarea 119). */
+  const patchHistory = useCallback((fn: (s: { nodes: SpaceNode[]; edges: Edge[] }) => { nodes: SpaceNode[]; edges: Edge[] }) => {
+    const fix = (s: Snapshot): Snapshot => {
+      const r = fn(s);
+      return r.nodes === s.nodes && r.edges === s.edges ? s : { nodes: clean(r.nodes), edges: r.edges, key: keyOf(r.nodes, r.edges) };
+    };
+    past.current = past.current.map(fix);
+    future.current = future.current.map(fix);
+    current.current = fix(current.current);
+  }, []);
+
   const restore = useCallback(
     (snap: Snapshot) => {
       const ids = new Set(snap.nodes.map((n) => n.id));
@@ -194,5 +206,5 @@ export function useCanvasEdit({
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, copy, paste, duplicate]);
 
-  return { undo, redo, duplicate, recordRuns };
+  return { undo, redo, duplicate, recordRuns, patchHistory };
 }
