@@ -57,6 +57,8 @@ const T = {
   noPhoto: l("no admite foto", "no photo"),
   type: l("Tipo de personaje", "Character type"),
   brief: l("Descripción extra", "Extra description"),
+  exampleBrief: l("Brief del ejemplo (editable)", "Example brief (editable)"),
+  dropBrief: l("Quitar el brief del ejemplo", "Discard the example brief"),
   briefHint: l("Ropa, rasgo estrella, actitud… (en inglés funciona mejor)", "Outfit, signature feature, attitude… (English works best)"),
   picked: l("Ajustes elegidos", "Picked settings"),
   reset: l("Quitar todo", "Reset all"),
@@ -110,7 +112,7 @@ function rememberMine(id: string) {
     // Sin almacenamiento local solo se pierde el filtro del historial (la generación sigue en la biblioteca).
   }
 }
-const LEGACY = ["Full-body fashion portrait of a", "same face and outfit, smooth realistic motion", "Two-panel character sheet"];
+const LEGACY = ["Full-body fashion portrait of a", "same face and outfit, smooth realistic motion", "Two-panel character sheet", "Traits:"];
 
 function GenderIcon({ id }: { id: string }) {
   const Icon = id === "female" ? Venus : id === "male" ? Mars : VenusAndMars;
@@ -383,6 +385,19 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                   </div>
                 );
               })}
+              {exampleBrief && (
+                <SettingCard label={pick(T.exampleBrief)}>
+                  <textarea
+                    value={exampleBrief}
+                    onChange={(e) => setExampleBrief(e.target.value)}
+                    rows={5}
+                    className="thin-scrollbar w-full resize-none bg-transparent text-[13px] leading-relaxed text-fg-2 outline-none"
+                  />
+                  <button type="button" onClick={() => setExampleBrief("")} className="mt-1 text-[12px] text-fg-3 hover:text-danger">
+                    {pick(T.dropBrief)}
+                  </button>
+                </SettingCard>
+              )}
               <SettingCard label={pick(T.brief)}>
                 <textarea
                   value={brief}

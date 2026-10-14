@@ -430,13 +430,21 @@ export function buildPrompt(
   const base = exampleBrief.trim() ? `${TIER_PROMPT[tier]}. ${exampleBrief.trim()}` : TIER_PROMPT[tier];
   const end = (x: string) => (x && !/[.!?]$/.test(x) ? `${x}.` : x);
   const join = (b: string, sheet: string) => [head, end(b), traitText, end(extraText), sheet].filter(Boolean).join(" ");
-  let prompt = join(base, SHEET);
-  if (!maxLength || prompt.length <= maxLength) return prompt;
-  prompt = join(base, SHORT_SHEET);
-  if (prompt.length <= maxLength) return prompt;
-  const room = maxLength - join("", SHORT_SHEET).length - 1;
-  const cut = room > 40 ? base.slice(0, room).replace(/\s+\S*$/, "") : TIER_PROMPT[tier].slice(0, Math.max(room, 0));
-  return join(cut, SHORT_SHEET).slice(0, maxLength);
+  const full = join(base, SHEET);
+  if (!maxLength || full.length <= maxLength) return full;
+  // Lo obligatorio (foto, tipo, rasgos y hoja corta) se reserva; lo opcional (brief del ejemplo y descripción) se recorta.
+  const fixed = [head, end(TIER_PROMPT[tier]), traitText, SHORT_SHEET].filter(Boolean).join(" ");
+  let room = maxLength - fixed.length - 2;
+  const fit = (x: string) => {
+    if (room <= 20 || !x) return "";
+    const out = x.length <= room ? x : x.slice(0, room).replace(/\s+\S*$/, "");
+    room -= out.length + 1;
+    return out;
+  };
+  const brief = fit(exampleBrief.trim());
+  const extraFit = fit(extraText);
+  const opt = [head, end(TIER_PROMPT[tier]), end(brief), traitText, end(extraFit), SHORT_SHEET].filter(Boolean).join(" ");
+  return opt.slice(0, maxLength);
 }
 
 /** Elige al azar una opción permitida por grupo (las de varias, a veces ninguna), como el dado de Higgsfield. */
