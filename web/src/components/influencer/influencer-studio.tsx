@@ -11,7 +11,7 @@ import { Chip, SettingCard } from "@/components/studio/controls";
 import { CostPanel, costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { l } from "@/lib/i18n";
-import { ANIMALS, CDN, EXAMPLES, GROUPS, TIERS, buildPrompt, randomSelection, type Example, type Selection, type Tier } from "@/lib/influencer-data";
+import { ANIMALS, EXAMPLES, GROUPS, IMAGE_GROUPS, SWATCH, TIERS, buildPrompt, randomSelection, thumb, tierThumb, type Example, type Selection, type Tier } from "@/lib/influencer-data";
 import { costShort, fieldErrors, studio, StudioError, type Estimate } from "@/lib/studio";
 import type { ModelDetail } from "@/lib/types";
 
@@ -113,6 +113,22 @@ function rememberMine(id: string) {
   }
 }
 const LEGACY = ["Full-body fashion portrait of a", "same face and outfit, smooth realistic motion", "Two-panel character sheet", "Traits:"];
+
+/** Miniatura de una opción; si aún no existe la imagen, muestra el emoji de respaldo (o nada). */
+function Thumb({ src, fallback, fill }: { src: string; fallback?: string; fill?: boolean }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) return fallback ? <span className="text-[34px] leading-none">{fallback}</span> : null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      onError={() => setBroken(true)}
+      className={fill ? "absolute inset-0 size-full object-cover" : "size-16 rounded-lg object-cover"}
+    />
+  );
+}
 
 function GenderIcon({ id }: { id: string }) {
   const Icon = id === "female" ? Venus : id === "male" ? Mars : VenusAndMars;
@@ -351,12 +367,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                         tier === x.id ? "border-lime" : "border-transparent hover:border-line-2",
                       )}
                     >
-                      {x.face ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={CDN + x.face} alt="" className="size-14 rounded-lg object-cover object-top" />
-                      ) : (
-                        <span className="text-[34px] leading-none">{x.emoji}</span>
-                      )}
+                      <Thumb src={tierThumb(x.id)} fallback={x.emoji} />
                       <span className="text-[12px] font-medium">{pick(x)}</span>
                     </button>
                   ))}
@@ -371,16 +382,36 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                       grp.id,
                       pick(grp),
                       opts.length,
-                      <div className="flex flex-wrap gap-1.5">
-                        {opts.map((o) => (
-                          <Chip key={o.id} active={(sel[grp.id] ?? []).includes(o.id)} onClick={() => toggle(grp.id, o.id, grp.max)}>
-                            <span className="flex items-center gap-1">
-                              {grp.id === "gender" && <GenderIcon id={o.id} />}
-                              {pick(o)}
-                            </span>
-                          </Chip>
-                        ))}
-                      </div>,
+                      IMAGE_GROUPS.has(grp.id) ? (
+                        <div className="grid grid-cols-3 gap-2">
+                          {opts.map((o) => (
+                            <button
+                              key={o.id}
+                              type="button"
+                              onClick={() => toggle(grp.id, o.id, grp.max)}
+                              className={clsx(
+                                "relative flex aspect-square flex-col items-center justify-end overflow-hidden rounded-xl border-2 bg-white text-ink transition-colors",
+                                (sel[grp.id] ?? []).includes(o.id) ? "border-lime" : "border-transparent hover:border-line-2",
+                              )}
+                            >
+                              <Thumb src={thumb(o.id)} fill />
+                              <span className="relative w-full bg-white/85 px-1 py-0.5 text-center text-[11px] leading-tight font-medium">{pick(o)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {opts.map((o) => (
+                            <Chip key={o.id} active={(sel[grp.id] ?? []).includes(o.id)} onClick={() => toggle(grp.id, o.id, grp.max)}>
+                              <span className="flex items-center gap-1.5">
+                                {grp.id === "gender" && <GenderIcon id={o.id} />}
+                                {SWATCH[o.id] && <span className="size-3 rounded-full ring-1 ring-white/30" style={{ background: SWATCH[o.id] }} />}
+                                {pick(o)}
+                              </span>
+                            </Chip>
+                          ))}
+                        </div>
+                      ),
                     )}
                   </div>
                 );

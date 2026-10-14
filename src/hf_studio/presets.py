@@ -21,7 +21,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Product",
         "output": "image",
         "model": "higgsfield-ai/soul/v2/standard",
-        "cover": "/art/object-swap.webp",
+        "cover": "/art/presets/hero-shot.webp",
         "variables": [
             {
                 "key": "product",
@@ -58,7 +58,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Social",
         "output": "image",
         "model": "z-image/turbo",
-        "cover": "/art/text-to-image.webp",
+        "cover": "/art/presets/reel-cover.webp",
         "variables": [
             {
                 "key": "subject",
@@ -88,7 +88,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Cinematic",
         "output": "video",
         "model": "bytedance/seedance-2.0/text-to-video",
-        "cover": "/art/explore-hero.webp",
+        "cover": "/art/presets/cinematic-establishing.webp",
         "variables": [
             {
                 "key": "place",
@@ -132,7 +132,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Animate",
         "output": "video",
         "model": "bytedance/seedance-2.0/image-to-video",
-        "cover": "/art/text-to-video.webp",
+        "cover": "/art/presets/photo-to-life.webp",
         "variables": [
             {"key": "photo", "label": "Photo", "type": "image", "required": True},
             {
@@ -164,7 +164,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Animate",
         "output": "video",
         "model": "bytedance/seedance-2.0/image-to-video",
-        "cover": "/art/frames.webp",
+        "cover": "/art/presets/morph.webp",
         "variables": [
             {"key": "start", "label": "Start frame", "type": "image", "required": True},
             {"key": "end", "label": "End frame", "type": "image", "required": True},
@@ -191,7 +191,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Product",
         "output": "video",
         "model": "bytedance/seedance-2.0/image-to-video",
-        "cover": "/art/video-extend.webp",
+        "cover": "/art/presets/product-orbit.webp",
         "variables": [
             {"key": "photo", "label": "Product photo", "type": "image", "required": True},
             {
@@ -217,7 +217,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Motion",
         "output": "video",
         "model": "kling-video/v3/motion-control/std",
-        "cover": "/art/motion.webp",
+        "cover": "/art/presets/dance-transfer.webp",
         "variables": [
             {"key": "character", "label": "Character image", "type": "image", "required": True},
             {"key": "dance", "label": "Dance video (3–30 s)", "type": "video", "required": True},
@@ -231,7 +231,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Product",
         "output": "video",
         "model": "higgsfiled/genjutsu/object-swap/v1.0",
-        "cover": "/art/object-swap.webp",
+        "cover": "/art/presets/ad-multiplier.webp",
         "variables": [
             {"key": "ad", "label": "Original ad (4–30 s)", "type": "video", "required": True},
             {"key": "product", "label": "New product", "type": "images", "required": True},
@@ -256,7 +256,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Cinematic",
         "output": "video",
         "model": "bytedance/seedance-2.0/reference-to-video",
-        "cover": "/art/references.webp",
+        "cover": "/art/presets/character-in-scene.webp",
         "variables": [
             {"key": "refs", "label": "Character references", "type": "images", "required": True},
             {
@@ -283,7 +283,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "image",
         "model": "xai/grok-imagine-image-2.0",
-        "cover": "/art/image-edit.webp",
+        "cover": "/art/presets/relight.webp",
         "variables": [
             {"key": "photo", "label": "Photo", "type": "image", "required": True},
             {
@@ -314,7 +314,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "image",
         "model": "xai/grok-imagine-image-2.0",
-        "cover": "/art/text-to-image.webp",
+        "cover": "/art/presets/color-palette.webp",
         "variables": [
             {"key": "photo", "label": "Photo", "type": "image", "required": True},
             {
@@ -345,7 +345,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "image",
         "model": "marketing-studio/image/sunburst",
-        "cover": "/art/references.webp",
+        "cover": "/art/presets/face-swap.webp",
         "variables": [
             {"key": "photo", "label": "Target photo", "type": "image", "required": True},
             {"key": "face", "label": "Face to use", "type": "image", "required": True},
@@ -371,7 +371,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "image",
         "model": "marketing-studio/image/sunburst",
-        "cover": "/art/object-swap.webp",
+        "cover": "/art/presets/character-swap.webp",
         "variables": [
             {"key": "scene", "label": "Scene", "type": "image", "required": True},
             {"key": "character", "label": "Your character", "type": "image", "required": True},
@@ -397,7 +397,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "image",
         "model": "xai/grok-imagine-image-2.0",
-        "cover": "/art/frames.webp",
+        "cover": "/art/presets/reframe-image.webp",
         "variables": [
             {"key": "photo", "label": "Photo", "type": "image", "required": True},
             {
@@ -421,7 +421,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "video",
         "model": "bytedance/seedance-2.5/video-edit",
-        "cover": "/art/video-edit.webp",
+        "cover": "/art/presets/video-relight.webp",
         "variables": [
             {"key": "video", "label": "Video", "type": "video", "required": True},
             {
@@ -452,7 +452,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Apps",
         "output": "video",
         "model": "bytedance/seedance-2.5/video-edit",
-        "cover": "/art/video-extend.webp",
+        "cover": "/art/presets/video-color-grade.webp",
         "variables": [
             {"key": "video", "label": "Video", "type": "video", "required": True},
             {
@@ -484,7 +484,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Influencer",
         "output": "image",
         "model": "higgsfield-ai/soul/v2/standard",
-        "cover": "/art/text-to-image.webp",
+        "cover": "/art/presets/ai-influencer.webp",
         "variables": [
             {
                 "key": "type",
@@ -620,7 +620,7 @@ BUILTIN: list[dict[str, Any]] = [
         "category": "Influencer",
         "output": "video",
         "model": "bytedance/seedance-2.0/image-to-video",
-        "cover": "/art/motion.webp",
+        "cover": "/art/presets/influencer-motion.webp",
         "variables": [
             {"key": "character", "label": "Character image", "type": "image", "required": True},
             {

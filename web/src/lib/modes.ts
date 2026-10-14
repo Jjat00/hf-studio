@@ -103,7 +103,7 @@ export const VIDEO_TABS: Tab[] = [
         icon: "move",
         defaultModel: "higgsfiled/genjutsu/motion-transfer/v1.0",
         filter: (m) => m.id.includes("genjutsu/motion-transfer"),
-        hero: { title: genjutsu, subtitle: l("Manipula la realidad · cambia quién hace el movimiento", "Reality manipulation · recast the motion"), tone: "lime", art: "/art/references.webp" },
+        hero: { title: genjutsu, subtitle: l("Manipula la realidad · cambia quién hace el movimiento", "Reality manipulation · recast the motion"), tone: "lime", art: "/art/genjutsu-motion.webp" },
         labels: {
           video_url: [l("Añade un video de referencia", "Add a reference video"), l("para extraer el movimiento · 4–30 segundos", "to extract motion · 4–30 seconds")],
           image_urls: [l("Añade tus elementos", "Add your elements"), l("Personajes, lugares o productos · hasta 8", "Characters, locations or products · up to 8")],

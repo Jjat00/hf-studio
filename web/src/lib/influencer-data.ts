@@ -10,10 +10,10 @@ export type Tier = "normal" | "freak" | "total" | "insects" | "frogs" | "cats" |
 
 export const ANIMALS: Tier[] = ["insects", "frogs", "cats", "dogs", "capybaras", "birds"];
 
-export const TIERS: { id: Tier; es: string; en: string; emoji: string; face?: string }[] = [
-  { id: "normal", es: "Normal", en: "Average", emoji: "🙂", face: "263e937568b3798baa500c358cd9eabc52e6f5e9e70fc928951fd8374cf9a37f.webp" },
-  { id: "freak", es: "Atrevido", en: "Bold", emoji: "😎", face: "published/1f47e7fff8f467c11975a089935c002c03c80084cce7db04e52e23fa4ef2e6a4" },
-  { id: "total", es: "Extremo", en: "Extreme", emoji: "🤪", face: "published/537d9815f150f6b610320e835392d36e8fd67401d9ef926a5f2b49e9473a09e4" },
+export const TIERS: { id: Tier; es: string; en: string; emoji: string }[] = [
+  { id: "normal", es: "Normal", en: "Average", emoji: "🙂" },
+  { id: "freak", es: "Atrevido", en: "Bold", emoji: "😎" },
+  { id: "total", es: "Extremo", en: "Extreme", emoji: "🤪" },
   { id: "insects", es: "Insecto", en: "Insect", emoji: "🪲" },
   { id: "frogs", es: "Rana", en: "Frog", emoji: "🐸" },
   { id: "cats", es: "Gato", en: "Cat", emoji: "🐱" },
@@ -31,6 +31,21 @@ const SCOPES: Record<Scope, Tier[]> = {
   ft: ["freak", "total"],
   t: ["total"],
   ta: ["total", ...ANIMALS],
+};
+
+/** Miniaturas propias (generadas con Codex) para los tipos y los grupos visuales, como las tarjetas de Higgsfield. */
+export const thumb = (id: string) => `/art/influencer/${id}.webp`;
+export const tierThumb = (tier: Tier) => `/art/influencer/tier-${tier}.webp`;
+export const IMAGE_GROUPS = new Set(["body_type", "hair", "aesthetic", "facial_hair", "accessory"]);
+/** Muestras de color para los grupos que son colores. */
+export const SWATCH: Record<string, string> = {
+  hc_black: "#0b0b0c", hc_darkbrown: "#3b2416", hc_chestnut: "#6b3a1f", hc_ginger: "#c25a1c", hc_red: "#a3161f",
+  hc_blonde: "#d9b766", hc_platinum: "#ece6d6", hc_grey: "#9a9a9a", hc_white: "#f4f4f2", hc_pink: "#f2a7c3",
+  hc_lilac: "#b9a2e0", hc_blue: "#2f6fd6", hc_green: "#3e9d4e",
+  st_porcelain: "#f6e3d7", st_fair: "#efd2bd", st_light: "#e3bb9c", st_olive: "#c69c6d", st_tan: "#b07d52",
+  st_brown: "#8b5a3c", st_deep: "#5e3a26", st_ebony: "#3a2418",
+  eye_black: "#151212", eye_brown: "#5b3a1e", eye_hazel: "#8e6b33", eye_green: "#4f7d3a", eye_blue: "#3d77c2",
+  eye_ice_blue: "#a8d4ef", eye_amber: "#c2862a", eye_grey: "#8c959c",
 };
 
 export type Option = { id: string; en: string; es: string; tiers: Tier[] };

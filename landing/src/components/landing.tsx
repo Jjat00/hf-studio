@@ -547,7 +547,7 @@ function Footer() {
     <footer className="mx-auto w-full max-w-[1400px] px-4 pb-10">
       <div className="grain relative overflow-hidden rounded-[28px] bg-surface-3 px-6 py-16 text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/art/text-to-video.webp" alt="" className="absolute inset-0 size-full object-cover opacity-50" />
+        <img src="/art/landing-cta.webp" alt="" className="absolute inset-0 size-full object-cover opacity-50" />
         <div className="absolute inset-0 bg-gradient-to-b from-black/70 to-black/85" />
         <div className="relative flex flex-col items-center">
           <Star className="size-10 text-lime" fill="currentColor" />
