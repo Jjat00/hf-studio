@@ -402,9 +402,20 @@ const TIER_PROMPT: Record<Tier, string> = {
 
 const SHEET =
   "Two-panel character sheet: left half a tight frontal close-up portrait with the entire head and hair in frame, right half a full-body standing shot of the exact same person head to toe; both front-facing, arms down, blank deadpan expression. PURE WHITE seamless studio background, bright soft even light, faint floor shadow. Hyper-realistic, natural uniform skin tone, crisp texture, 85mm lens, sharp focus. No text, no logos.";
+const SHORT_SHEET = "Two-panel character sheet: close-up portrait left, full body right, pure white background, photoreal.";
 
-/** Prompt en inglés a partir del tipo, los rasgos elegidos y el brief (el de un ejemplo o el del usuario). */
-export function buildPrompt(tier: Tier, sel: Selection, brief: string, withPhoto: boolean): string {
+/**
+ * Prompt en inglés: el brief de un ejemplo (o la base del tipo), los rasgos, la descripción extra del usuario y la
+ * hoja de dos paneles. Con `maxLength` (Z-Image admite 800) se acorta la hoja y luego el brief, nunca los rasgos.
+ */
+export function buildPrompt(
+  tier: Tier,
+  sel: Selection,
+  exampleBrief: string,
+  extra: string,
+  withPhoto: boolean,
+  maxLength?: number,
+): string {
   const traits = GROUPS.flatMap((grp) => {
     const labels = (sel[grp.id] ?? [])
       .filter((id) => !["acc_none", "fh_none", "neck_normal", "head_oval"].includes(id))
@@ -412,14 +423,20 @@ export function buildPrompt(tier: Tier, sel: Selection, brief: string, withPhoto
       .filter(Boolean);
     return labels.length ? [`${grp.prompt}: ${labels.join(", ")}`] : [];
   });
-  return [
-    withPhoto ? "Use the face and identity of the person in the reference photo." : "",
-    brief.trim() || TIER_PROMPT[tier],
-    traits.length ? `Traits: ${traits.join("; ")}.` : "",
-    brief.trim() ? "" : SHEET,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const head = withPhoto ? "Use the face and identity of the person in the reference photo." : "";
+  const traitText = traits.length ? `Traits: ${traits.join("; ")}.` : "";
+  const extraText = extra.trim() ? `Details: ${extra.trim()}` : "";
+  // El tipo va siempre: el brief de un ejemplo lo complementa, no lo sustituye.
+  const base = exampleBrief.trim() ? `${TIER_PROMPT[tier]}. ${exampleBrief.trim()}` : TIER_PROMPT[tier];
+  const end = (x: string) => (x && !/[.!?]$/.test(x) ? `${x}.` : x);
+  const join = (b: string, sheet: string) => [head, end(b), traitText, end(extraText), sheet].filter(Boolean).join(" ");
+  let prompt = join(base, SHEET);
+  if (!maxLength || prompt.length <= maxLength) return prompt;
+  prompt = join(base, SHORT_SHEET);
+  if (prompt.length <= maxLength) return prompt;
+  const room = maxLength - join("", SHORT_SHEET).length - 1;
+  const cut = room > 40 ? base.slice(0, room).replace(/\s+\S*$/, "") : TIER_PROMPT[tier].slice(0, Math.max(room, 0));
+  return join(cut, SHORT_SHEET).slice(0, maxLength);
 }
 
 /** Elige al azar una opción permitida por grupo (las de varias, a veces ninguna), como el dado de Higgsfield. */

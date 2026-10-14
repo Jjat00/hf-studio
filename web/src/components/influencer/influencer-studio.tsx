@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { ChevronDown, Compass, Dices, History, Loader2, Mars, Minus, Plus, Sparkles, Venus, VenusAndMars } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { useI18n } from "@/components/i18n-provider";
@@ -83,8 +83,34 @@ const T = {
   emptyHistory: l("Aún no has creado ningún influencer.", "You haven't created any influencer yet."),
 };
 
-/** Marca en el prompt para reconocer en el historial lo creado desde aquí. */
 const MOTION_TAG = "same character, same face and outfit";
+/** Lo generado desde aquí se recuerda por id en este navegador; los presets anteriores, por su prompt. */
+const MINE_KEY = "hfs-influencer-generations";
+function readMine() {
+  try {
+    return localStorage.getItem(MINE_KEY) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+function subscribeMine(onChange: () => void) {
+  window.addEventListener(MINE_KEY, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(MINE_KEY, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+function rememberMine(id: string) {
+  try {
+    const prev = JSON.parse(readMine()) as string[];
+    localStorage.setItem(MINE_KEY, JSON.stringify([id, ...prev.filter((x) => x !== id)].slice(0, 300)));
+    window.dispatchEvent(new Event(MINE_KEY));
+  } catch {
+    // Sin almacenamiento local solo se pierde el filtro del historial (la generación sigue en la biblioteca).
+  }
+}
+const LEGACY = ["Full-body fashion portrait of a", "same face and outfit, smooth realistic motion", "Two-panel character sheet"];
 
 function GenderIcon({ id }: { id: string }) {
   const Icon = id === "female" ? Venus : id === "male" ? Mars : VenusAndMars;
@@ -128,7 +154,8 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const [modelKey, setModelKey] = useState(CREATE_MODELS[0].id);
   const [tier, setTier] = useState<Tier>("normal");
   const [sel, setSel] = useState<Selection>({});
-  const [brief, setBrief] = useState("");
+  const [brief, setBrief] = useState(""); // descripción extra del usuario
+  const [exampleBrief, setExampleBrief] = useState(""); // brief del ejemplo recreado
   const [seed, setSeed] = useState<number | undefined>();
   const [batch, setBatch] = useState(1);
   const [open, setOpen] = useState<string | null>("type");
@@ -143,7 +170,10 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const idempotency = useRef<string | null>(null);
+  // La clave se reutiliza solo para reintentar la misma petición (mismo quoteKey) tras un error de red.
+  const idempotency = useRef<{ key: string; id: string } | null>(null);
+  const mineRaw = useSyncExternalStore(subscribeMine, readMine, () => "[]");
+  const mine = useMemo(() => JSON.parse(mineRaw) as string[], [mineRaw]);
   const { items, add, remove } = useGenerations();
 
   const createModel = CREATE_MODELS.find((m) => m.id === modelKey)!;
@@ -162,8 +192,10 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
       return buildInput(detail, { prompt, image: character, ratio: "9:16", motion: true });
     }
     const usePhoto = !!photo && !!createModel.photo;
-    return buildInput(detail, { prompt: buildPrompt(tier, sel, brief, usePhoto), image: usePhoto ? photo : undefined, ratio: "16:9", seed, batch });
-  }, [detail, tab, character, motion, motionExtra, photo, createModel.photo, tier, sel, brief, seed, batch]);
+    const maxLength = (detail.input_schema.properties?.prompt as { maxLength?: number } | undefined)?.maxLength;
+    const prompt = buildPrompt(tier, sel, exampleBrief, brief, usePhoto, maxLength);
+    return buildInput(detail, { prompt, image: usePhoto ? photo : undefined, ratio: "16:9", seed, batch });
+  }, [detail, tab, character, motion, motionExtra, photo, createModel.photo, tier, sel, exampleBrief, brief, seed, batch]);
   const quoteKey = input ? `${modelId}|${JSON.stringify(input)}` : null;
   const current = quote && quote.key === quoteKey ? quote : null;
 
@@ -191,7 +223,6 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   }
 
   function toggle(gid: string, oid: string, max: number) {
-    idempotency.current = null;
     setSel((prev) => {
       const cur = prev[gid] ?? [];
       const next = cur.includes(oid) ? cur.filter((x) => x !== oid) : max === 1 ? [oid] : [...cur, oid].slice(-max);
@@ -205,7 +236,8 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
     setTab("create");
     setTier(ex.tier);
     setSel(ex.sel);
-    setBrief(ex.brief);
+    setExampleBrief(ex.brief);
+    setBrief("");
     setSeed(ex.seed);
     setOpen("type");
   }
@@ -219,12 +251,12 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
     setConfirmKey(null);
     setSubmitting(true);
     setFormError(null);
-    idempotency.current ??= crypto.randomUUID();
+    if (idempotency.current?.key !== quoteKey) idempotency.current = { key: quoteKey!, id: crypto.randomUUID() };
     try {
       const g = await studio.generate(
         modelId,
         input,
-        idempotency.current,
+        idempotency.current.id,
         false,
         current?.value?.usd ?? null,
         {},
@@ -233,6 +265,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
         !costAllowsDirectSubmit(current?.value ?? null),
       );
       add(g);
+      rememberMine(g.id);
       setView("history");
       idempotency.current = null;
     } catch (e) {
@@ -246,8 +279,9 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
 
   const picked = GROUPS.flatMap((grp) => (sel[grp.id] ?? []).map((id) => ({ grp, opt: grp.options.find((o) => o.id === id)! })));
   const history = items.filter((g) => {
+    if (mine.includes(g.id)) return true;
     const p = String((g.input as Record<string, unknown>)?.prompt ?? "");
-    return p.includes("Two-panel character sheet") || p.includes("Traits:") || p.includes(MOTION_TAG);
+    return LEGACY.some((m) => p.includes(m));
   });
   const short = costShort(current?.value ?? null);
   const confirming = confirmKey === quoteKey && !!quoteKey;
@@ -362,7 +396,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                 <div className="px-1">
                   <div className="flex items-center justify-between text-[12px] text-fg-3">
                     <span>{pick(T.picked)}</span>
-                    <button type="button" onClick={() => { setSel({}); setBrief(""); setSeed(undefined); }} className="hover:text-fg">
+                    <button type="button" onClick={() => { setSel({}); setBrief(""); setExampleBrief(""); setSeed(undefined); }} className="hover:text-fg">
                       {pick(T.reset)}
                     </button>
                   </div>
