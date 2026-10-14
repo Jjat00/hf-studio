@@ -61,4 +61,4 @@ Manual MCP config (any stdio client): command `uv run --directory /absolute/path
 ## Optional
 
 - Spanish README: https://raw.githubusercontent.com/Jjat00/hf-studio/main/README.es.md
-- Website with examples: https://hf-studio-gold.vercel.app
+- Website with examples: https://hf-studio.jato.run

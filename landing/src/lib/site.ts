@@ -1,4 +1,3 @@
-// Dominio de producción que da Vercel (o uno propio con NEXT_PUBLIC_SITE_URL).
+// Dominio de producción (o otro con NEXT_PUBLIC_SITE_URL); en local, el servidor de desarrollo.
 export const SITE =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3100");
+  process.env.NEXT_PUBLIC_SITE_URL ?? (process.env.VERCEL ? "https://hf-studio.jato.run" : "http://localhost:3100");
