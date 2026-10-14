@@ -220,7 +220,7 @@ function NavLinks() {
             ))}
           </div>
           {/* En escritorio estrecho la fila de productos se recorta: aquí siempre están todos. */}
-          <div className="hidden border-b border-line pb-3 lg:block 2xl:hidden">
+          <div className="hidden border-b border-line pb-3 lg:block min-[1800px]:hidden">
             {PRODUCTS.map((item) => (
               <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
             ))}
@@ -290,8 +290,12 @@ export function Nav() {
   const { t } = useI18n();
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 bg-page/95 px-4 backdrop-blur-md">
-      <Link href="/" className="shrink-0" aria-label="HF Studio">
+      <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="HF Studio">
         <Logo />
+        <span className="hidden flex-col leading-tight min-[1800px]:flex">
+          <span className="text-[15px] font-semibold tracking-[-0.01em]">HF Studio</span>
+          <span className="text-[10.5px] text-fg-3">{t.meta.tagline}</span>
+        </span>
       </Link>
       <Suspense fallback={<div className="flex-1" />}>
         <NavLinks />

@@ -8,7 +8,7 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], axes: ["opsz"] });
 const grotesk = Space_Grotesk({ variable: "--font-grotesk", subsets: ["latin"], weight: ["500", "700"] });
 
-const title = "HF Studio · Tu propio estudio de IA, open source";
+const title = "HF Studio · Tu estudio de IA para video, imagen y audio, open source";
 const description =
   "Estudio de IA open source: 82 modelos de video e imagen por el proveedor más barato (Higgsfield, APIMart o KIE), voz, música y efectos con ElevenLabs, y un servidor MCP para Claude Code y Codex. Ves la cotización en USD antes de generar y pagas solo lo que usas.";
 

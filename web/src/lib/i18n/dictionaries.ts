@@ -2,6 +2,7 @@
 
 const es = {
   meta: {
+    tagline: "Tu estudio de IA para video, imagen y audio",
     description: "Tu propio estudio de video e imagen con IA sobre Higgsfield",
     image: "Imagen",
     video: "Video",
@@ -883,6 +884,7 @@ export type Dict = typeof es;
 
 const en: Dict = {
   meta: {
+    tagline: "Your AI studio for video, image and audio",
     description: "Your own AI video and image studio on top of Higgsfield",
     image: "Image",
     video: "Video",

@@ -11,7 +11,7 @@ const grotesk = Space_Grotesk({ variable: "--font-grotesk", subsets: ["latin"], 
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getDict();
-  return { title: "HF Studio", description: t.meta.description };
+  return { title: `HF Studio · ${t.meta.tagline}`, description: t.meta.description };
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

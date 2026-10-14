@@ -37,7 +37,10 @@ function Nav() {
       <nav className="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-4">
         <a href="#" className="flex items-center gap-2.5">
           <Logo size={30} />
-          <span className="text-[17px] font-semibold tracking-[-0.01em]">HF Studio</span>
+          <span className="flex flex-col leading-tight">
+            <span className="text-[17px] font-semibold tracking-[-0.01em]">HF Studio</span>
+            <span className="hidden text-[11px] text-fg-3 xl:block">{t.tagline}</span>
+          </span>
         </a>
         <div className="ml-4 hidden items-center md:flex">
           {links.map(([href, label]) => (
@@ -562,7 +565,7 @@ function Footer() {
         <div className="flex items-center gap-2.5">
           <Logo size={24} />
           <span className="font-semibold text-fg-2">HF Studio</span>
-          <span>· MIT</span>
+          <span>· {t.tagline} · MIT</span>
         </div>
         <p className="max-w-xl text-center">{t.footer.disclaimer}</p>
         <p>

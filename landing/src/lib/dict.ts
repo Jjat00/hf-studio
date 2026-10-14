@@ -5,6 +5,7 @@ export const AUTHOR = "https://jaimeaza.tech";
 
 /** Textos de la landing. Misma forma en los dos idiomas: el tipo sale del español. */
 const es = {
+  tagline: "Tu estudio de IA para video, imagen y audio",
   nav: { examples: "Ejemplos", spaces: "Spaces", providers: "Proveedores", audio: "Audio", agents: "Agentes", start: "Empezar", star: "Estrella en GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS y Linux",
@@ -159,6 +160,7 @@ const es = {
 export type Dict = typeof es;
 
 const en: Dict = {
+  tagline: "Your AI studio for video, image and audio",
   nav: { examples: "Examples", spaces: "Spaces", providers: "Providers", audio: "Audio", agents: "Agents", start: "Get started", star: "Star on GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS and Linux",

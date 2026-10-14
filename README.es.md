@@ -1,5 +1,7 @@
 # HF Studio
 
+**Tu estudio de IA para video, imagen y audio.**
+
 [![CI](https://github.com/Jjat00/hf-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/Jjat00/hf-studio/actions/workflows/ci.yml)
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
