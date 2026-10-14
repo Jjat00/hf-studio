@@ -66,7 +66,7 @@ export function AppCard({ f }: { f: Feature }) {
   const KindIcon = KIND_ICON[f.kind];
   return (
     <Link href={f.href} className="group block">
-      <div className="grain relative aspect-[3/4] overflow-hidden rounded-[18px] bg-surface-3">
+      <div className="grain relative aspect-[16/10] overflow-hidden rounded-[18px] bg-surface-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={f.art} alt="" className="size-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />

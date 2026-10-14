@@ -42,9 +42,9 @@ export default async function Explore() {
       <section className="px-4">
         <Link href="/influencer" className="grain group relative flex min-h-[380px] items-center justify-center overflow-hidden rounded-[24px] border border-line bg-surface-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/art/explore/influencer-left.webp" alt="" className="absolute inset-y-0 left-0 hidden h-full w-[34%] object-cover opacity-80 [mask-image:linear-gradient(to_right,black_40%,transparent)] md:block" />
+          <img src="/art/explore/influencer-left.webp" alt="" className="absolute inset-y-0 left-0 hidden h-full w-auto opacity-90 [mask-image:linear-gradient(to_right,black_55%,transparent)] md:block" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/art/explore/influencer-right.webp" alt="" className="absolute inset-y-0 right-0 hidden h-full w-[34%] object-cover opacity-80 [mask-image:linear-gradient(to_left,black_40%,transparent)] md:block" />
+          <img src="/art/explore/influencer-right.webp" alt="" className="absolute inset-y-0 right-0 hidden h-full w-auto opacity-90 [mask-image:linear-gradient(to_left,black_55%,transparent)] md:block" />
           <div className="relative flex flex-col items-center px-6 py-10 text-center">
             <span className="flex items-center gap-1.5 rounded-lg bg-lime/15 px-2.5 py-1 text-[13px] font-semibold text-lime">
               <Sparkles className="size-3.5" /> {e.influencerTag}
@@ -68,7 +68,7 @@ export default async function Explore() {
             {e.appsAll}
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 2xl:grid-cols-8">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {APPS.map((f) => (
             <AppCard key={f.href} f={f} />
           ))}
