@@ -57,7 +57,18 @@ export function AudioStudio() {
   // Texto a voz
   const [text, setText] = useState(() => promptFor("text-to-speech"));
   const [voice, setVoice] = useState<Voice | null>(null);
-  const [ttsModel, setTtsModel] = useState<(typeof TTS_MODELS)[number]>("eleven_v4");
+  const modelParam = params.get("model");
+  const [ttsModel, setTtsModel] = useState<(typeof TTS_MODELS)[number]>(() =>
+    (TTS_MODELS as readonly string[]).includes(modelParam ?? "") ? (modelParam as (typeof TTS_MODELS)[number]) : "eleven_v4",
+  );
+  // Los enlaces del menú cambian ?tab= y ?model= sin desmontar la página: se aplican al cambiar.
+  const tabParam = params.get("tab");
+  const [seen, setSeen] = useState({ tab: tabParam, model: modelParam });
+  if (seen.tab !== tabParam || seen.model !== modelParam) {
+    setSeen({ tab: tabParam, model: modelParam });
+    if ((SERVICES as string[]).includes(tabParam ?? "")) setService(tabParam as AudioService);
+    if ((TTS_MODELS as readonly string[]).includes(modelParam ?? "")) setTtsModel(modelParam as (typeof TTS_MODELS)[number]);
+  }
   const [language, setLanguage] = useState<string | null>(null);
   // Efectos
   const [sfx, setSfx] = useState(() => promptFor("sound-effects"));
@@ -195,7 +206,12 @@ export function AudioStudio() {
             <button
               key={s}
               type="button"
-              onClick={() => setService(s)}
+              onClick={() => {
+                setService(s);
+                const next = new URLSearchParams(params.toString());
+                next.set("tab", s);
+                router.replace(`/audio?${next}`, { scroll: false });
+              }}
               className={`shrink-0 border-b-2 pb-2.5 text-[17px] font-medium tracking-[-0.01em] transition-colors ${
                 service === s ? "border-fg text-fg" : "border-transparent text-fg-3 hover:text-fg-2"
               }`}

@@ -110,9 +110,9 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Sonoteca", "Sound library"), description: l("Tus sonidos ordenados y reutilizables", "Your sounds, sorted and reusable"), href: "/sounds", icon: Layers },
     ],
     models: [
-      { title: l("Eleven v4", "Eleven v4"), description: l("Narración expresiva con control de estabilidad", "Expressive narration with stability controls"), href: "/audio?tab=text-to-speech", icon: AudioLines, badge: "NEW" },
-      { title: l("Eleven v4 Turbo", "Eleven v4 Turbo"), description: l("Voz expresiva y rápida", "Fast expressive speech"), href: "/audio?tab=text-to-speech", icon: AudioLines, badge: "NEW" },
-      { title: l("Eleven v3", "Eleven v3"), description: l("Emoción y entonación con etiquetas", "Emotion and delivery control via inline tags"), href: "/audio?tab=text-to-speech", icon: AudioLines },
+      { title: l("Eleven v4", "Eleven v4"), description: l("Narración expresiva con control de estabilidad", "Expressive narration with stability controls"), href: "/audio?tab=text-to-speech&model=eleven_v4", icon: AudioLines, badge: "NEW" },
+      { title: l("Eleven v4 Turbo", "Eleven v4 Turbo"), description: l("Voz expresiva y rápida", "Fast expressive speech"), href: "/audio?tab=text-to-speech&model=eleven_v4_turbo", icon: AudioLines, badge: "NEW" },
+      { title: l("Eleven v3", "Eleven v3"), description: l("Emoción y entonación con etiquetas", "Emotion and delivery control via inline tags"), href: "/audio?tab=text-to-speech&model=eleven_v3", icon: AudioLines },
       { title: l("Eleven Music", "Eleven Music"), description: l("Música con o sin letra", "Music with or without lyrics"), href: "/audio?tab=music", icon: Music },
       { title: l("Eleven Sound Effects", "Eleven Sound Effects"), description: l("Efectos y ambientes en bucle", "Effects and loopable ambiences"), href: "/audio?tab=sound-effects", icon: Volume2 },
     ],
