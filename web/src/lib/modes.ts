@@ -101,7 +101,7 @@ export const VIDEO_TABS: Tab[] = [
         key: "motion",
         label: l("Transferir movimiento", "Motion transfer"),
         icon: "move",
-        defaultModel: "higgsfiled/genjutsu/motion-transfer/v1.0",
+        defaultModel: "higgsfield/genjutsu/motion-transfer/v1.0",
         filter: (m) => m.id.includes("genjutsu/motion-transfer"),
         hero: { title: genjutsu, subtitle: l("Manipula la realidad · cambia quién hace el movimiento", "Reality manipulation · recast the motion"), tone: "lime", art: "/art/genjutsu-motion.webp" },
         labels: {
@@ -113,7 +113,7 @@ export const VIDEO_TABS: Tab[] = [
         key: "swap",
         label: l("Cambiar objetos", "Objects swap"),
         icon: "swap",
-        defaultModel: "higgsfiled/genjutsu/object-swap/v1.0",
+        defaultModel: "higgsfield/genjutsu/object-swap/v1.0",
         filter: (m) => m.id.includes("genjutsu/object-swap"),
         hero: { title: genjutsu, subtitle: l("Manipula la realidad · cambia un elemento y conserva el resto", "Reality manipulation · swap one element, keep the rest"), tone: "violet", art: "/art/object-swap.webp" },
         labels: {

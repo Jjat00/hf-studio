@@ -19,7 +19,7 @@ const es = {
     generate: "Generar",
   },
   stats: [
-    { value: "82", label: "modelos de video e imagen" },
+    { value: "84", label: "modelos de video e imagen" },
     { value: "3", label: "proveedores, el más barato primero" },
     { value: "40", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
@@ -45,7 +45,7 @@ const es = {
   },
   caps: {
     title: "Cada forma de crear video e imagen",
-    body: "Los 82 endpoints de Higgsfield con su esquema completo, buscables por lo que hacen y no por la marca. El formulario sale del esquema de cada modelo.",
+    body: "Los 84 endpoints de Higgsfield con su esquema completo, buscables por lo que hacen y no por la marca. El formulario sale del esquema de cada modelo.",
     items: [
       { art: "text-to-video", title: "Texto a video", desc: "Seedance, Kling, Wan, Hailuo, LTX, Grok Imagine…" },
       { art: "frames", title: "Inicio y final", desc: "Das el primer y el último fotograma; el modelo anima el resto." },
@@ -184,7 +184,7 @@ const en: Dict = {
     generate: "Generate",
   },
   stats: [
-    { value: "82", label: "video and image models" },
+    { value: "84", label: "video and image models" },
     { value: "3", label: "providers, cheapest first" },
     { value: "40", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
@@ -210,7 +210,7 @@ const en: Dict = {
   },
   caps: {
     title: "Every way to make video and images",
-    body: "All 82 Higgsfield endpoints with their full schema, searchable by what they do instead of by brand. Each model's form is built from its schema.",
+    body: "All 84 Higgsfield endpoints with their full schema, searchable by what they do instead of by brand. Each model's form is built from its schema.",
     items: [
       { art: "text-to-video", title: "Text to video", desc: "Seedance, Kling, Wan, Hailuo, LTX, Grok Imagine…" },
       { art: "frames", title: "First & last frame", desc: "Give the first and last frame; the model animates the rest." },

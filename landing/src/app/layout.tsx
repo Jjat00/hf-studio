@@ -10,7 +10,7 @@ const grotesk = Space_Grotesk({ variable: "--font-grotesk", subsets: ["latin"], 
 
 const title = "HF Studio · Tu estudio de IA para video, imagen y audio, open source";
 const description =
-  "Estudio de IA open source: 82 modelos de video e imagen por el proveedor más barato (Higgsfield, APIMart o KIE), voz, música y efectos con ElevenLabs, y un servidor MCP para Claude Code y Codex. Ves la cotización en USD antes de generar y pagas solo lo que usas.";
+  "Estudio de IA open source: 84 modelos de video e imagen por el proveedor más barato (Higgsfield, APIMart o KIE), voz, música y efectos con ElevenLabs, y un servidor MCP para Claude Code y Codex. Ves la cotización en USD antes de generar y pagas solo lo que usas.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),

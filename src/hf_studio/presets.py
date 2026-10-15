@@ -230,7 +230,7 @@ BUILTIN: list[dict[str, Any]] = [
         "description": "Swap the product in an existing ad and keep everything else.",
         "category": "Product",
         "output": "video",
-        "model": "higgsfiled/genjutsu/object-swap/v1.0",
+        "model": "higgsfield/genjutsu/object-swap/v1.0",
         "cover": "/art/presets/ad-multiplier.webp",
         "variables": [
             {"key": "ad", "label": "Original ad (4–30 s)", "type": "video", "required": True},

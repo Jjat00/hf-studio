@@ -242,7 +242,7 @@ async def test_forcing_a_provider(env):
 
 async def test_models_only_higgsfield_has_stay_there(env):
     _, http, _ = env
-    body = (await http.post("/v1/estimate", json={"model": "higgsfiled/genjutsu/object-swap/v1.0", "input": {
+    body = (await http.post("/v1/estimate", json={"model": "higgsfield/genjutsu/object-swap/v1.0", "input": {
         "video_url": "https://cdn.test/v.mp4", "image_urls": ["https://cdn.test/a.png"]}})).json()  # fmt: skip
     assert [o["provider"] for o in body["options"]] == ["higgsfield"]
 
@@ -795,3 +795,13 @@ async def test_two_retries_of_the_same_batch_key_run_one_after_the_other(env):
     router.plan = real_plan
     assert a.status_code == 202 and b.status_code == 200
     assert a.json()["generations"][0]["id"] == b.json()["generations"][0]["id"] and planning == 1
+
+
+def test_renamed_genjutsu_ids_still_resolve():
+    from hf_studio.catalog import get_catalog
+
+    catalog = get_catalog()
+    old, new = "higgsfiled/genjutsu/object-swap/v1.0", "higgsfield/genjutsu/object-swap/v1.0"
+    assert catalog.get(old)["id"] == new
+    assert catalog.validate(old, {}) == catalog.validate(new, {})
+    assert all(not m["id"].startswith("higgsfiled/") for m in catalog.search())

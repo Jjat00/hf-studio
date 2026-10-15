@@ -13,6 +13,13 @@ CATALOG_PATH = Path(__file__).with_name("catalog.json")
 
 _formats = FormatChecker()
 
+# Ids que Higgsfield renombró (2026-10: corrigió la errata «higgsfiled»). Presets propios, Spaces e historial
+# guardados con el id viejo siguen funcionando; se resuelven al nuevo y se envían con él.
+ALIASES = {
+    "higgsfiled/genjutsu/motion-transfer/v1.0": "higgsfield/genjutsu/motion-transfer/v1.0",
+    "higgsfiled/genjutsu/object-swap/v1.0": "higgsfield/genjutsu/object-swap/v1.0",
+}
+
 
 @_formats.checks("uri", raises=ValueError)
 def _is_public_url(value: object) -> bool:
@@ -44,7 +51,8 @@ class Catalog:
         }
 
     def get(self, model_id: str) -> dict | None:
-        return self.models.get(model_id.strip("/"))
+        model_id = model_id.strip("/")
+        return self.models.get(ALIASES.get(model_id, model_id))
 
     def search(
         self, capability: str | None = None, output: str | None = None, query: str | None = None
@@ -61,7 +69,8 @@ class Catalog:
     def validate(self, model_id: str, arguments: dict) -> list[dict]:
         """Devuelve los errores de validación como `[{path, message}]`; lista vacía si es válido."""
         errors = sorted(
-            self._validators[model_id].iter_errors(arguments), key=lambda e: list(e.absolute_path)
+            self._validators[ALIASES.get(model_id, model_id)].iter_errors(arguments),
+            key=lambda e: list(e.absolute_path),
         )
         return [
             {

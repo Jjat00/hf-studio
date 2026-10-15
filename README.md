@@ -24,7 +24,7 @@ so it always has a price to show you before it generates.
 
 - **The cheapest provider for each video:** the same model through Higgsfield, APIMart or KIE, quoted on all of
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
-- **One place for 82 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
+- **One place for 84 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
   (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand.
 - **Agents that quote before they spend.** Every MCP tool that starts a paid run requires a single-use `quote_id` from a prior quote of
   the same request, and the server tells the agent to show you that cost and wait for your OK.
@@ -101,7 +101,7 @@ the cheapest provider that offers **the exact same model and settings**:
   then animate it with 7 video models and 8 movements. Every step is quoted before it runs.
 - **One-click Apps:** relight, change color palette, face swap, character swap, reframe, video relight, video color
   grade and ad multiplier, each a built-in preset over a catalog model: upload, adjust and generate.
-- **82 Higgsfield endpoints** (66 video, 15 image, 1 custom references), each with its JSON Schema taken from the
+- **84 Higgsfield endpoints** (67 video, 16 image, 1 custom references), each with its JSON Schema taken from the
   official docs (`hf-studio sync-catalog`).
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
   edit and extend, motion transfer, object swap (Genjutsu), text-to-image and image editing.
@@ -284,7 +284,7 @@ Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name
   Audio, Sound library, AI Influencer (`/influencer`), Elements (`/elements`), Use cases, Presets and Apps (with
   published flows at `/flows/<id>`), Spaces (`/spaces`), Library (with detail at `/history/<id>`), Usage (`/usage`:
   spend by day, provider and model, plus each provider's balance), Models (`/models`) and MCP.
-- **Forms** are generated from each model's `input_schema`, so all 82 endpoints work without model-specific code.
+- **Forms** are generated from each model's `input_schema`, so all 84 endpoints work without model-specific code.
 - **Voice** (`/voice`): pick a video, mark the segment on the timeline, search a voice (your account or the ElevenLabs
   public library, with preview), add an effect and choose how much of the original audio stays.
 - **Audio** (`/audio`): text-to-speech (expressive v3, stable v2 or cheap Flash, with language), sound effects, music

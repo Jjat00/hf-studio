@@ -20,8 +20,11 @@ PLACEHOLDER = {
     "video": "https://example.com/hf-studio-placeholder.mp4",
     "audio": "https://example.com/hf-studio-placeholder.wav",
 }
+PLACEHOLDER_PRESET = "c2143317-f28d-4c3c-a0b8-39bd547e08a7"  # el de ejemplo de la documentación de Restyle
 SHORT_SIDE = {"480p": 480, "720p": 720, "1080p": 1080, "2k": 1440, "4k": 2160}
 MONEY = r"\$(\d+(?:\.\d+)?)"  # sin el punto final de la frase
+RESTYLE = "higgsfield/genjutsu/restyle/v1.0"
+RESTYLE_MAX_SECONDS = 30  # Restyle recorta el video de origen a sus primeros 30 s (y cobra solo esos)
 
 
 def _media_kind(key: str) -> str | None:
@@ -34,16 +37,18 @@ def _media_kind(key: str) -> str | None:
     return "image"
 
 
+def _branch_required(schema: dict, args: dict) -> set[str]:
+    """Campos que exigen las ramas if/then/else que aplican a `args`, también anidadas (Seedance 2.5:
+    si no hay imágenes, videos; si no hay videos, audios)."""
+    cond = set(schema.get("if", {}).get("required", []))
+    branch = schema.get("then" if cond and cond <= args.keys() else "else", {})
+    return set(branch.get("required", [])) | (_branch_required(branch, args) if "if" in branch else set())
+
+
 def fill_placeholders(schema: dict, args: dict) -> tuple[dict, list[str]]:
     """Devuelve (entrada con medios de ejemplo, campos rellenados). Respeta if/then/else."""
     props = schema.get("properties", {})
-    required = set(schema.get("required", []))
-    cond_if = set(schema.get("if", {}).get("required", []))
-    if cond_if:
-        branch = "then" if cond_if <= args.keys() else "else"
-        required |= set(schema.get(branch, {}).get("required", []))
-    else:
-        required |= set(schema.get("else", {}).get("required", []))
+    required = set(schema.get("required", [])) | _branch_required(schema, args)
     filled = dict(args)
     added = []
     for key in sorted(required - args.keys()):
@@ -54,6 +59,10 @@ def fill_placeholders(schema: dict, args: dict) -> tuple[dict, list[str]]:
             added.append(key)
         elif key in ("prompt", "multi_prompt") and props.get(key, {}).get("type") == "string":
             filled[key] = "cost preview"
+            added.append(key)
+        elif key == "preset_id" and props.get(key, {}).get("format") == "uuid":
+            # Genjutsu Restyle: el estilo no cambia el precio; se cotiza antes de elegirlo.
+            filled[key] = PLACEHOLDER_PRESET
             added.append(key)
     return filled, added
 
@@ -80,12 +89,18 @@ def _count_video_inputs(args: dict) -> int:
     return n
 
 
-def approximate(description: str, args: dict, hints: dict) -> dict:
-    """Interpreta la fórmula de precio. Devuelve usd (o None), base del cálculo y datos que faltan."""
+def approximate(
+    description: str, args: dict, hints: dict, model_id: str | None = None, output_follows_input: bool = False
+) -> dict:
+    """Interpreta la fórmula de precio. Devuelve usd (o None), base del cálculo y datos que faltan.
+    `output_follows_input`: el modelo no tiene `duration` y su salida dura lo que el video de entrada
+    (Seedance 2.5 video-edit); sin esto se cotizarían 5 s de salida."""
     seconds = float(args.get("duration") or 5)
     res = str(args.get("resolution") or "720p").lower()
     input_secs = hints.get("input_video_seconds")
     has_video_input = _count_video_inputs(args) > 0
+    if output_follows_input and has_video_input and input_secs is not None:
+        seconds = float(input_secs)
     missing: list[str] = []
     text = description
 
@@ -99,10 +114,24 @@ def approximate(description: str, args: dict, hints: dict) -> dict:
                 "missing": [],
             }
 
+    # A2) Por segundo total (salida + videos de referencia), según resolución (Wan 3.0 reference-to-video).
+    if m := re.search(r"Priced per total video second: (.*?)\. Total billable", text):
+        rates = dict(re.findall(r"(\d+p) " + MONEY + r"/s", m.group(1)))
+        if res in rates:
+            billable, basis = seconds, f"{seconds:g}s"
+            if has_video_input:
+                if input_secs is None:
+                    missing.append("input video duration")
+                else:
+                    billable += float(input_secs)
+                    basis = f"({seconds:g}s + {float(input_secs):g}s of input video)"
+            return {"usd": billable * float(rates[res]), "basis": f"{basis} × ${rates[res]}/s at {res}",
+                    "missing": missing}  # fmt: skip
+
     # B) Tokens de video: segundos × ancho × alto × 24 / 1024.
     if "video tokens" in text.lower():
         billable = seconds
-        if "input video seconds" in text and has_video_input:
+        if ("input video seconds" in text or "input video duration" in text) and has_video_input:
             if input_secs is None:
                 missing.append("input video duration")
             else:
@@ -112,6 +141,27 @@ def approximate(description: str, args: dict, hints: dict) -> dict:
         big = res == "4k"
         # Tarifas por 1.000 tokens, de la más específica a la más general.
         patterns = [
+            # Seedance 2.5 (a 2026-10): «Each 1,000 video tokens costs $A at 480p or 720p and $B at 1080p», y en
+            # reference-to-video además «If video inputs are provided, … $C per 1,000 tokens at 480p or 720p and
+            # $D at 1080p».
+            (
+                has_video_input and res != "4k",
+                r"If video inputs are provided.*?"
+                + MONEY
+                + r" per 1,000 tokens at 480p or 720p and "
+                + MONEY
+                + r" at 1080p",
+                2 if res == "1080p" else 1,
+            ),
+            (
+                res != "4k",
+                r"[Ee]ach 1,000 video tokens costs? "
+                + MONEY
+                + r" at 480p or 720p and "
+                + MONEY
+                + r" at 1080p",
+                2 if res == "1080p" else 1,
+            ),
             (
                 has_video_input,
                 r"with video input — 480p/720p/1080p " + MONEY + r", 4K " + MONEY,
@@ -136,18 +186,30 @@ def approximate(description: str, args: dict, hints: dict) -> dict:
                 basis += " (16:9 assumed)"
             return {"usd": tokens / 1000 * rate, "basis": basis, "missing": missing}
 
-    # C) Por segundo de video de entrada.
-    if m := re.search(
-        r"Each second of input video costs " + MONEY + r" at 480p or " + MONEY + r" at 720p", text
-    ):
-        rate = float(m.group(2) if res == "720p" else m.group(1))
+    # C) Por segundo de video de entrada (Genjutsu): «costs $0.318 at 480p, $0.681 at 720p, $1.632 at 1080p».
+    # C2) Restyle: «Roughly costs $0.318 per second at 480p, …»; se cobra por segundo del video de origen,
+    # recortado a 30 s y redondeado hacia arriba.
+    per_input = re.search(r"Each second of input video costs (.*?)(?:\.\s|\.$)", text)
+    per_source = (
+        re.search(r"costs (" + MONEY + r" per second at \d+p.*)", text)
+        if has_video_input and model_id == RESTYLE
+        else None
+    )
+    if found := per_input or per_source:
+        rates = {
+            r: float(usd) for usd, r in re.findall(MONEY + r"(?: per second)? at (\d+p)", found.group(1))
+        }
+        if res not in rates:
+            return {"usd": None, "basis": f"no published rate for {res}", "missing": []}
+        rate = rates[res]
         if input_secs is None:
             return {
                 "usd": None,
                 "basis": f"${rate}/s of input video at {res}",
                 "missing": ["input video duration"],
             }
-        secs = math.ceil(float(input_secs))
+        secs = float(input_secs) if per_input else min(float(input_secs), RESTYLE_MAX_SECONDS)
+        secs = math.ceil(secs)
         return {"usd": secs * rate, "basis": f"{secs}s of input video × ${rate}/s", "missing": []}
 
     # D) Salida 2K por segundo + imágenes de referencia extra.
@@ -207,10 +269,21 @@ def _image_tokens_estimate(text: str, args: dict, out: re.Match) -> dict | None:
     basis = f"≈{out_tokens:,} image tokens ({quality}, {resolution}) × ${out.group(1)}/1M"
     if refs:
         basis += f" + {refs} refs × ${in_rate:g}/1M"
+    # Ads Studio: cada concepto del lote es una imagen (2k y calidad alta fijas) y se cobra la suma. Higgsfield
+    # publica ≈$0.084 por imagen como ejemplo, sin ser un tope: se cotiza por lo alto, igual que Marketing Studio.
+    if (n := int(args.get("batch_size") or 1)) > 1:
+        usd, basis = usd * n, f"{n} images × ({basis})"
     return {"usd": usd, "basis": basis + " (upper estimate; billed by actual tokens)", "missing": []}
 
 
-def normalize(raw: dict[str, Any], args: dict, hints: dict, placeholders: list[str]) -> dict:
+def normalize(
+    raw: dict[str, Any],
+    args: dict,
+    hints: dict,
+    placeholders: list[str],
+    model_id: str | None = None,
+    output_follows_input: bool = False,
+) -> dict:
     if raw.get("type") == "estimate" or "credits" in raw:
         discount = raw.get("discount") or {}
         return {
@@ -223,7 +296,7 @@ def normalize(raw: dict[str, Any], args: dict, hints: dict, placeholders: list[s
             "description": None,
         }
     desc = raw.get("pricing_description", "")
-    approx = approximate(desc, args, hints)
+    approx = approximate(desc, args, hints, model_id, output_follows_input)
     return {
         "kind": "approx" if approx["usd"] is not None else "formula",
         "credits": None,
@@ -257,7 +330,8 @@ async def quote(hf, catalog, model: dict, args: dict, hints: dict) -> dict:
         )
         return {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
                 "basis": reason, "missing": placeholders, "description": None}  # fmt: skip
-    return normalize(raw, filled, hints, placeholders)
+    follows = model.get("output") == "video" and "duration" not in model["input_schema"].get("properties", {})
+    return normalize(raw, filled, hints, placeholders, model["id"], follows)
 
 
 def total(quotes: list[dict], counts: list[int]) -> dict:

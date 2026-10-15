@@ -54,7 +54,7 @@ const ACTIONS: { key: string; models: string[]; tab: "image" | "video"; icon: ty
   { key: "modifyVideo", models: ["kling-video/o3/video-edit", "bytedance/seedance-2.5/video-edit", "kling-video/omni/video-edit"], tab: "video", icon: Film },
   { key: "extendVideo", models: ["bytedance/seedance-2.5/video-extend"], tab: "video", icon: ArrowRight },
   { key: "motion", models: ["kling-video/v3/motion-control/std", "kling-video/motion-control/std"], tab: "video", icon: Video },
-  { key: "objectSwap", models: ["higgsfiled/genjutsu/object-swap/v1.0"], tab: "video", icon: Shuffle },
+  { key: "objectSwap", models: ["higgsfield/genjutsu/object-swap/v1.0"], tab: "video", icon: Shuffle },
 ];
 
 const PINNED_KEY = "hfs.spaces.pinned";

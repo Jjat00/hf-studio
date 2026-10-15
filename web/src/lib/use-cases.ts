@@ -278,9 +278,9 @@ export const USE_CASES: UseCase[] = [
     output: "video",
     channels: ["ui", "mcp"],
     art: "/art/use-cases/ad-multiplier.webp",
-    model: "higgsfiled/genjutsu/object-swap/v1.0",
+    model: "higgsfield/genjutsu/object-swap/v1.0",
     sample: { video_url: "https://example.com/a.mp4", image_urls: ["https://example.com/a.png"], prompt: "cost preview", resolution: "720p" },
-    uiHref: studioHref("video", "genjutsu", "swap", "higgsfiled/genjutsu/object-swap/v1.0"),
+    uiHref: studioHref("video", "genjutsu", "swap", "higgsfield/genjutsu/object-swap/v1.0"),
     preset: "ad-multiplier",
     ui: [
       { title: l("Abre Genjutsu › Cambiar objetos", "Open Genjutsu › Objects swap"), body: l("Sube el anuncio original (4–30 s, al menos 409.600 píxeles por fotograma, p. ej. 640×640).", "Upload the original ad (4–30 s, at least 409,600 pixels per frame, e.g. 640×640).") },
@@ -575,9 +575,9 @@ export const USE_CASES: UseCase[] = [
     output: "video",
     channels: ["ui", "mcp"],
     art: "/art/use-cases/genjutsu-recast.webp",
-    model: "higgsfiled/genjutsu/motion-transfer/v1.0",
+    model: "higgsfield/genjutsu/motion-transfer/v1.0",
     sample: { video_url: "https://example.com/a.mp4", image_urls: ["https://example.com/a.png"], resolution: "480p" },
-    uiHref: studioHref("video", "genjutsu", "motion", "higgsfiled/genjutsu/motion-transfer/v1.0"),
+    uiHref: studioHref("video", "genjutsu", "motion", "higgsfield/genjutsu/motion-transfer/v1.0"),
     ui: [
       { title: l("Abre Genjutsu › Transferir movimiento", "Open Genjutsu › Motion transfer"), body: l("Sube el clip original, de 4 a 30 s.", "Upload the original clip, 4 to 30 s.") },
       { title: l("Añade el nuevo reparto", "Add the new cast"), body: l("Hasta 8 imágenes: personajes, lugar o vestuario.", "Up to 8 images: characters, location or wardrobe.") },

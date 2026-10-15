@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -26,13 +27,21 @@ TITLE_RE = re.compile(r"^# (.+)$", re.MULTILINE)
 SUMMARY_RE = re.compile(r"^> (?!##|Fetch|Use this)(.+)$", re.MULTILINE)
 SCHEMA_RE = re.compile(r"Complete JSON schema\">\s*```json[^\n]*\n(.*?)```", re.DOTALL)
 OUTPUT_RE = re.compile(r"completed response includes.*?```json[^\n]*\n(.*?)```", re.DOTALL)
+# Páginas sin esa frase (p. ej. Ads Studio) muestran la respuesta en un bloque titulado «Completed».
+COMPLETED_RE = re.compile(r"```json Completed[^\n]*\n(.*?)```", re.DOTALL)
 NOTES_RE = re.compile(r"## Usage notes\s*\n(.*?)\n## ", re.DOTALL)
 
 
-def fetch(path: str) -> str:
+def fetch(path: str, attempts: int = 3) -> str:
     url = DOCS + (path if path.endswith(".md") else path + ".md")
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        return resp.read().decode()
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                return resp.read().decode()
+        except (TimeoutError, urllib.error.URLError):
+            if attempt == attempts - 1:
+                raise
+    raise AssertionError("unreachable")
 
 
 def links(markdown: str) -> set[str]:
@@ -64,7 +73,15 @@ def capabilities(workflow: str, output: str, schema: dict) -> list[str]:
         caps.add("image-references")
     if props & {"audio_url", "audio_urls"}:
         caps.add("audio-input")
-    for w in ("video-edit", "video-extend", "motion-transfer", "object-swap", "reference-to-video", "edit"):
+    for w in (
+        "video-edit",
+        "video-extend",
+        "motion-transfer",
+        "object-swap",
+        "restyle",
+        "reference-to-video",
+        "edit",
+    ):
         if w in workflow:
             caps.add(w)
     if "motion-control" in workflow:
@@ -79,7 +96,7 @@ def parse_workflow(path: str) -> dict | None:
     if not endpoint or not schema:
         return None
     output_type = "unknown"
-    if out := OUTPUT_RE.search(md):
+    if out := OUTPUT_RE.search(md) or COMPLETED_RE.search(md):
         keys = json.loads(out.group(1)).keys()
         output_type = next((k for k in ("video", "images", "audio") if k in keys), "unknown")
     summary = SUMMARY_RE.search(md)
