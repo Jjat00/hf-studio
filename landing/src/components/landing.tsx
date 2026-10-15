@@ -139,6 +139,36 @@ function Hero() {
   );
 }
 
+function Tour() {
+  const { t } = useI18n();
+  const tour = t.tour;
+  return (
+    <section id="interfaz" className="mx-auto w-full max-w-[1400px] scroll-mt-20 px-4">
+      <div className="mb-8 max-w-3xl">
+        <Kicker>{tour.kicker}</Kicker>
+        <h2 className="headline mt-2 text-[40px] md:text-[56px]">{tour.title}</h2>
+        <p className="mt-3 text-[17px] text-fg-2">{tour.body}</p>
+      </div>
+      <figure className="overflow-hidden rounded-[24px] border border-line bg-surface-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`${M}/ui-home.webp`} alt={tour.home} loading="lazy" className="aspect-[16/10] w-full object-cover object-top" />
+      </figure>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {tour.cards.map((c) => (
+          <figure key={c.src} className="overflow-hidden rounded-[20px] border border-line bg-surface-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`${M}/${c.src}.webp`} alt={c.title} loading="lazy" className="aspect-[3/2] w-full object-cover object-top" />
+            <figcaption className="px-5 py-4">
+              <p className="text-[19px] font-semibold tracking-[-0.01em]">{c.title}</p>
+              <p className="mt-1.5 text-[15px] leading-snug text-fg-3">{c.desc}</p>
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function Promo() {
   const { t } = useI18n();
   return (
@@ -465,7 +495,7 @@ const MORE_ICONS = { library: Library, coins: Coins, layers: Layers, sparkles: S
 
 function More() {
   const { t } = useI18n();
-  const shots = ["doc-estudio-video", "doc-modelos", "doc-casos-de-uso"];
+  const shots = ["ui-estudio-video", "ui-modelos", "ui-casos-de-uso"];
   return (
     <section className="mx-auto w-full max-w-[1400px] px-4">
       <h2 className="headline mb-8 text-[36px] md:text-[48px]">{t.more.title}</h2>
@@ -585,6 +615,7 @@ export function Landing() {
       <Nav />
       <main className="flex flex-col gap-24 pb-8 md:gap-32">
         <Hero />
+        <Tour />
         <Promo />
         <Examples />
         <Capabilities />

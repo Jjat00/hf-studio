@@ -15,7 +15,22 @@ Tu propio estudio de video, imagen y audio con IA sobre la [API de Higgsfield](h
 Claude Desktop, ChatGPT…) generen por ti, y una **interfaz web** para hacerlo a mano. Todo comparte la misma
 biblioteca.
 
-![Estudio de video](docs/img/estudio-video.png)
+![Portada de HF Studio: modelos destacados, AI Influencer, Apps de un clic y accesos](docs/img/portada.webp)
+
+## Por qué
+
+- **El proveedor más barato para cada video:** el mismo modelo por Higgsfield, APIMart o KIE, cotizado en todos, con
+  un respaldo seguro (ver [Más barato con varios proveedores](#más-barato-con-varios-proveedores)).
+- **Un solo lugar para 82 endpoints de Higgsfield** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine,
+  Ideogram, Recraft…), que se buscan por lo que hacen (texto a video, fotograma inicial y final, edición de video,
+  transferencia de movimiento…) y no por marca.
+- **Agentes que cotizan antes de gastar.** Toda herramienta MCP que inicia una generación de pago exige un `quote_id`
+  de un solo uso, sacado de una cotización previa de esa misma petición, y el servidor le pide al agente que te
+  muestre el costo y espere tu OK.
+- **Trabajos persistentes.** Trabajos asíncronos guardados en base de datos, con validación antes de gastar,
+  deduplicación, `Idempotency-Key`, una cola local que respeta la concurrencia de tu cuenta y copia local de cada
+  resultado (Higgsfield solo los guarda 7 días). Los trabajos de Higgsfield se siguen tras un reinicio; los de audio
+  que corta un reinicio quedan como fallidos, no se reanudan.
 
 ## Más barato con varios proveedores
 
@@ -79,6 +94,14 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   - **Nodo Assistant** (Claude, `ANTHROPIC_API_KEY` opcional): escribe o mejora prompts, describe imágenes y redacta
     guiones; su texto alimenta a otros nodos.
   - **Flujos:** publica un lienzo con entradas etiquetadas y córrelo desde Presets llenando un formulario.
+- **AI Influencer** (`/influencer`): diseña tu propio personaje por rasgos, con el catálogo de Higgsfield (9 tipos de
+  personaje, de normal a animal, y 18 grupos de rasgos: cara, pelo, cuerpo, estilo, accesorios…) y sus 39 ejemplos,
+  listos para recrear. Genera la hoja de personaje de dos paneles (primer plano y cuerpo entero) con Soul 2.0, Soul
+  Cinema, Sunburst, Flare, Grok Imagine, Qwen Image, Z-Image, Recraft o Ideogram, si quieres a partir de tu foto, y
+  luego anímalo con 7 modelos de video y 8 movimientos. Cada paso se cotiza antes de correr.
+- **Apps de un clic:** reiluminar, cambiar paleta, cambio de cara, cambio de personaje, reencuadrar, reiluminar video,
+  etalonar video y multiplicador de anuncios, cada una un preset de serie sobre un modelo del catálogo: subes,
+  ajustas y generas.
 - **82 endpoints de Higgsfield** (66 de video, 15 de imagen y 1 de referencias personalizadas), cada uno con su JSON
   Schema sacado de la documentación oficial (`hf-studio sync-catalog`).
 - **Todas las capacidades de video e imagen:** texto a video, imagen a video, fotograma inicial y final, videos de
@@ -104,9 +127,11 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   natural (es/en) y **22 casos de uso** con tutorial paso a paso para la UI y para los agentes.
 - **Interfaz bilingüe:** español por defecto e inglés con un clic.
 
-| Casos de uso | Catálogo de modelos |
+| AI Influencer y Apps | Menús de Funciones y Modelos |
 | --- | --- |
-| ![Casos de uso](docs/img/casos-de-uso.png) | ![Modelos](docs/img/modelos.png) |
+| ![Banner de AI Influencer y Apps de un clic](docs/img/influencer-apps.webp) | ![Menú de Video con Funciones y Modelos](docs/img/menu.webp) |
+| **Estudio de video** | **Casos de uso** |
+| ![Estudio de video con el costo antes de generar](docs/img/estudio-video.webp) | ![Casos de uso](docs/img/casos-de-uso.webp) |
 
 ## Requisitos
 
@@ -175,28 +200,6 @@ ElevenLabs solo las conoce la API.
 > **Aviso:** el proxy de la UI no autentica a quien la visita, así que con `see-all` cualquiera que alcance el
 > servidor Next puede ver, borrar y lanzar generaciones. `pnpm dev` y `pnpm start` escuchan solo en `127.0.0.1`; no lo
 > expongas a otras máquinas sin poner autenticación delante.
-
-## UI web (`web/`)
-
-Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nombre y las ilustraciones son propios.
-
-- **Páginas:** Explorar, Imagen, Video (Crear: texto, fotograma inicial y final, referencias · Genjutsu · Editar
-  video · Movimiento), Voz, Audio, Sonoteca, Casos de uso, Presets (con los flujos publicados en `/flows/<id>`), Spaces
-  (`/spaces`), Biblioteca (con detalle en `/history/<id>`), Modelos y MCP.
-- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 82 endpoints funcionan sin código
-  específico. El formato muestra un rectángulo con su proporción.
-- **Voz** (`/voice`): elige un video, marca el tramo sobre la línea de tiempo, busca una voz (tu cuenta o la
-  biblioteca pública de ElevenLabs, con escucha previa), añade un efecto y decide cuánto del audio original se oye.
-- **Audio** (`/audio`): texto a voz (modelos expresivo v3, estable v2 o económico Flash, con idioma), efectos de
-  sonido, música y aislamiento de voz de un video o audio.
-- **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave
-  `hfs_…`. La clave nunca llega al cliente.
-- **Casos de uso** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): `?case=<slug>` abre uno y «Usar en el
-  estudio» abre el estudio (o Audio) con `?prompt=` ya relleno.
-- **Idiomas:** el idioma se guarda en la cookie `hfs-lang`, así que las URLs no cambian. Los textos están en
-  `web/src/lib/i18n/dictionaries.ts` y los datos bilingües usan `l("es", "en")`. La API y el MCP siguen en inglés,
-  así que la UI traduce en el cliente los presets de serie, las frases de costo y los nombres de flujo del
-  catálogo. Los prompts de ejemplo y las opciones de los presets se envían en inglés.
 
 ## Conectar agentes (MCP)
 
@@ -275,6 +278,37 @@ Repetir `run_space` con el mismo `quote_id` devuelve la misma corrida. Una corri
 motivo y el nuevo total en `pause.needed_total_usd`; con el OK del usuario, `approve_space_run`. Un flujo publicado se
 corre con `inputs`.
 
+## UI web (`web/`)
+
+Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nombre y las ilustraciones son propios.
+
+![Catálogo de modelos, que se busca por capacidad](docs/img/modelos.webp)
+
+- **Navegación** como la de higgsfield.ai: Explorar, Imagen, Video y Audio abren un menú dividido en **Funciones** y
+  **Modelos**; luego vienen MCP, Genjutsu, Spaces, AI Influencer, Apps, Casos de uso y Presets, y el resto está en
+  **Más**.
+- **Portada** (`/`): modelos destacados, una promo con accesos, el banner de AI Influencer, las Apps de un clic, una
+  barra de prompt, lo que pueden hacer tus agentes y tus últimas creaciones.
+- **Páginas:** Imagen, Video (Crear: texto, fotograma inicial y final, referencias · Genjutsu · Editar video ·
+  Movimiento), Voz, Audio, Sonoteca, AI Influencer (`/influencer`), Elementos (`/elements`), Casos de uso, Presets y
+  Apps (con los flujos publicados en `/flows/<id>`), Spaces (`/spaces`), Biblioteca (con detalle en
+  `/history/<id>`), Uso (`/usage`: gasto por día, proveedor y modelo, y el saldo de cada proveedor), Modelos
+  (`/models`) y MCP.
+- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 82 endpoints funcionan sin código
+  específico. El formato muestra un rectángulo con su proporción.
+- **Voz** (`/voice`): elige un video, marca el tramo sobre la línea de tiempo, busca una voz (tu cuenta o la
+  biblioteca pública de ElevenLabs, con escucha previa), añade un efecto y decide cuánto del audio original se oye.
+- **Audio** (`/audio`): texto a voz (modelos expresivo v3, estable v2 o económico Flash, con idioma), efectos de
+  sonido, música y aislamiento de voz de un video o audio.
+- **Proxy:** el navegador solo habla con `/api/studio/*`, un proxy en el servidor de Next que añade la clave
+  `hfs_…`. La clave nunca llega al cliente.
+- **Casos de uso** (`/use-cases`, datos en `web/src/lib/use-cases.ts`): `?case=<slug>` abre uno y «Usar en el
+  estudio» abre el estudio (o Audio) con `?prompt=` ya relleno.
+- **Idiomas:** el idioma se guarda en la cookie `hfs-lang`, así que las URLs no cambian. Los textos están en
+  `web/src/lib/i18n/dictionaries.ts` y los datos bilingües usan `l("es", "en")`. La API y el MCP siguen en inglés,
+  así que la UI traduce en el cliente los presets de serie, las frases de costo y los nombres de flujo del
+  catálogo. Los prompts de ejemplo y las opciones de los presets se envían en inglés.
+
 ## API REST
 
 Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
@@ -349,6 +383,10 @@ uv run pytest            # Higgsfield y ElevenLabs simulados con httpx.MockTrans
 uv run ruff check src tests
 cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 ```
+
+## Contribuir
+
+Los issues y pull requests son bienvenidos. Si HF Studio te sirve, una estrella ayuda a que más gente lo encuentre.
 
 ## Licencia
 

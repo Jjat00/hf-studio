@@ -24,6 +24,16 @@ const es = {
     { value: "40", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
   ],
+  tour: {
+    kicker: "Así se ve",
+    title: "Tu estudio, por dentro",
+    body: "La portada que abres en localhost:3000: los modelos destacados, AI Influencer, las Apps de un clic y un acceso a todo lo demás.",
+    home: "Portada de HF Studio con modelos destacados, AI Influencer y accesos",
+    cards: [
+      { src: "ui-influencer-apps", title: "AI Influencer y Apps de un clic", desc: "Diseña tu personaje por rasgos, genera su hoja con 9 modelos de imagen y anímalo con 7 de video. Y 8 Apps: reiluminar, cambio de cara, etalonar video, multiplicador de anuncios…" },
+      { src: "ui-menu", title: "Funciones y modelos, a un clic", desc: "Imagen, Video y Audio abren un menú con lo que puedes hacer y con qué modelo, como en Higgsfield." },
+    ],
+  },
   promo: {
     title: "69 segundos hechos con HF Studio",
     body: "La voz del narrador (Zabra, de ElevenLabs) y la música salieron del propio estudio, y las pantallas son la interfaz real.",
@@ -137,7 +147,7 @@ const es = {
       { icon: "book", title: "22 casos de uso", desc: "Tutoriales paso a paso para la UI y para tus agentes." },
       { icon: "shield", title: "Trabajos persistentes", desc: "Cola local, idempotencia y copia local de cada resultado (Higgsfield solo los guarda 7 días)." },
     ],
-    shots: ["Estudio de video", "Catálogo de modelos", "Casos de uso"],
+    shots: ["Estudio de video, con el costo antes de generar", "Catálogo de modelos", "Casos de uso"],
   },
   start: {
     kicker: "Empieza en un minuto",
@@ -179,6 +189,16 @@ const en: Dict = {
     { value: "40", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
   ],
+  tour: {
+    kicker: "A look inside",
+    title: "Your studio, inside",
+    body: "The home page you open at localhost:3000: featured models, AI Influencer, one-click Apps and a shortcut to everything else.",
+    home: "HF Studio home with featured models, AI Influencer and shortcuts",
+    cards: [
+      { src: "ui-influencer-apps", title: "AI Influencer and one-click Apps", desc: "Design your character from traits, generate its sheet with 9 image models and animate it with 7 video models. Plus 8 Apps: relight, face swap, video color grade, ad multiplier…" },
+      { src: "ui-menu", title: "Features and models, one click away", desc: "Image, Video and Audio open a menu with what you can do and with which model, like on Higgsfield." },
+    ],
+  },
   promo: {
     title: "69 seconds made with HF Studio",
     body: "The narrator's voice (Zabra, from ElevenLabs) and the music came out of the studio itself, and the screens are the real interface (narration in Spanish).",
@@ -292,7 +312,7 @@ const en: Dict = {
       { icon: "book", title: "22 use cases", desc: "Step-by-step tutorials for the UI and for your agents." },
       { icon: "shield", title: "Persistent jobs", desc: "Local queue, idempotency and a local copy of every output (Higgsfield only keeps them 7 days)." },
     ],
-    shots: ["Video studio", "Model catalog", "Use cases"],
+    shots: ["Video studio, with the cost before generating", "Model catalog", "Use cases"],
   },
   start: {
     kicker: "Up and running in a minute",

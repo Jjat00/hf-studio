@@ -18,7 +18,7 @@ lands in the same library.
 Its MCP server is built around one rule: **an agent cannot spend credits without first quoting that exact request**,
 so it always has a price to show you before it generates.
 
-![Video studio](docs/img/estudio-video.png)
+![HF Studio home: featured models, AI Influencer, one-click Apps and shortcuts](docs/img/portada.webp)
 
 ## Why
 
@@ -94,6 +94,13 @@ the cheapest provider that offers **the exact same model and settings**:
   - **Assistant node** (Claude, optional `ANTHROPIC_API_KEY`): writes or improves prompts, describes images and drafts
     scripts; its text feeds other nodes.
   - **Flows:** publish a canvas with labeled inputs and run it from Presets by filling a form.
+- **AI Influencer** (`/influencer`): design your own character from traits, with Higgsfield's catalog (9 character
+  types, from normal to animal, and 18 trait groups: face, hair, body, style, accessories…) and its 39 examples,
+  each one ready to recreate. Generate the two-panel character sheet (close-up and full body) with Soul 2.0, Soul
+  Cinema, Sunburst, Flare, Grok Imagine, Qwen Image, Z-Image, Recraft or Ideogram, optionally from your own photo,
+  then animate it with 7 video models and 8 movements. Every step is quoted before it runs.
+- **One-click Apps:** relight, change color palette, face swap, character swap, reframe, video relight, video color
+  grade and ad multiplier, each a built-in preset over a catalog model: upload, adjust and generate.
 - **82 Higgsfield endpoints** (66 video, 15 image, 1 custom references), each with its JSON Schema taken from the
   official docs (`hf-studio sync-catalog`).
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
@@ -114,9 +121,11 @@ the cheapest provider that offers **the exact same model and settings**:
   (English and Spanish) and **22 use cases** with step-by-step tutorials for the UI and for agents.
 - **Bilingual UI:** Spanish by default, English one click away.
 
-| Use cases | Model catalog |
+| AI Influencer and Apps | Features and Models menus |
 | --- | --- |
-| ![Use cases](docs/img/casos-de-uso.png) | ![Models](docs/img/modelos.png) |
+| ![AI Influencer banner and one-click Apps](docs/img/influencer-apps.webp) | ![Video menu with Features and Models](docs/img/menu.webp) |
+| **Video studio** | **Use cases** |
+| ![Video studio with its cost before generating](docs/img/estudio-video.webp) | ![Use cases](docs/img/casos-de-uso.webp) |
 
 ## Requirements
 
@@ -264,10 +273,17 @@ the new total in `pause.needed_total_usd`; with the user's OK, `approve_space_ru
 
 Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name and illustrations are original.
 
-- **Pages:** Explore, Image, Video (Create: text, first and last frame, references · Genjutsu · Edit video · Motion),
-  Voice, Audio, Sound library, Use cases, Presets (with published flows at `/flows/<id>`), Spaces (`/spaces`), Library
-  (with detail at `/history/<id>`), Usage (`/usage`: spend by day, provider and model, plus each provider's balance),
-  Models and MCP.
+![Model catalog, searchable by capability](docs/img/modelos.webp)
+
+- **Navigation** like higgsfield.ai: Explore, Image, Video and Audio open a menu split into **Features** and
+  **Models**, followed by MCP, Genjutsu, Spaces, AI Influencer, Apps, Use cases and Presets; the rest lives under
+  **More**.
+- **Home** (`/`): featured models, a promo with shortcuts, the AI Influencer banner, one-click Apps, a prompt bar,
+  what your agents can do and your latest creations.
+- **Pages:** Image, Video (Create: text, first and last frame, references · Genjutsu · Edit video · Motion), Voice,
+  Audio, Sound library, AI Influencer (`/influencer`), Elements (`/elements`), Use cases, Presets and Apps (with
+  published flows at `/flows/<id>`), Spaces (`/spaces`), Library (with detail at `/history/<id>`), Usage (`/usage`:
+  spend by day, provider and model, plus each provider's balance), Models (`/models`) and MCP.
 - **Forms** are generated from each model's `input_schema`, so all 82 endpoints work without model-specific code.
 - **Voice** (`/voice`): pick a video, mark the segment on the timeline, search a voice (your account or the ElevenLabs
   public library, with preview), add an effect and choose how much of the original audio stays.
@@ -352,6 +368,8 @@ Issues and pull requests are welcome. If HF Studio is useful to you, a star help
 ## License
 
 [MIT](LICENSE).
+
+## Disclaimer
 
 Personal project, not affiliated with Higgsfield or ElevenLabs. It uses their public APIs with your own keys and
 credits. Higgsfield, ElevenLabs and the model names belong to their owners.
