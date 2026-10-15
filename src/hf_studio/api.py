@@ -30,6 +30,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from .audio import _run as run_ffmpeg
 from .audio import guarded, has_audio, studio_notes
+from .catalog import ALIASES as CATALOG_ALIASES
 from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
 from .db import (
@@ -136,6 +137,7 @@ from .spaces import (
     graph_refs,
     input_kinds,
 )
+from .styles import StyleCatalog
 from .usage import UsageRow, summarize
 from .voice import (
     VOICE_MODEL,
@@ -348,6 +350,7 @@ def create_app(
         app.state.providers = provider_registry.build(settings, transport)
         # Higgsfield también guarda los medios de entrada y cotiza su catálogo.
         app.state.hf = app.state.providers[provider_registry.DEFAULT_PROVIDER]
+        app.state.styles = StyleCatalog(app.state.hf)
         # El worker conoce además el proveedor interno de las herramientas locales (no se lista como proveedor).
         app.state.local_tools = LocalTools(settings, transport, plain=app.state.hf.plain)
         app.state.local_tools.sweep()
@@ -608,7 +611,7 @@ def create_app(
         for model, provider, plan, index, created in (await session.execute(query)).tuples():
             option = plan[index] if plan and index < len(plan) else {}
             rows.append(UsageRow(
-                model=model,
+                model=CATALOG_ALIASES.get(model, model),  # ids renombrados: una sola fila por modelo
                 # Como en job_out: los trabajos de audio corren en ElevenLabs aunque la columna diga otra cosa.
                 provider="elevenlabs" if model in LOCAL_MODELS else provider,
                 usd=option.get("usd"),
@@ -648,6 +651,14 @@ def create_app(
             raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
         return model_out(model, full=True)
 
+    @app.get("/v1/model-styles/{model_id:path}", tags=["modelos"])
+    async def list_model_styles(model_id: str, request: Request, _: Owner, catalog: CatalogDep) -> dict:
+        """Estilos vigentes de un modelo que los elige por `preset_id` (Genjutsu Restyle). Gratis."""
+        model = catalog.get(model_id)
+        if not model:
+            raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
+        return {"model": model["id"], "styles": await request.app.state.styles.list(model["id"])}
+
     async def complete_hints(
         request: Request, session: AsyncSession, owner: ApiClient, arguments: dict, hints: dict
     ) -> dict:
@@ -673,6 +684,7 @@ def create_app(
         provider: str | None = None,
     ) -> Plan:  # fmt: skip
         hints = await complete_hints(request, session, owner, arguments, hints)
+        await request.app.state.styles.check(model["id"], arguments)
         # Una petición nueva solo cita elementos vivos; sus imágenes las pone el router desde la base, nunca
         # el cliente (las pistas no llevan elementos).
         hints.pop("elements", None)

@@ -309,6 +309,42 @@ export const USE_CASES: UseCase[] = [
     ],
   },
   {
+    slug: "genjutsu-restyle",
+    title: l("El mismo video en otro estilo", "The same video in another style"),
+    tagline: l("Elige un estilo (anime, stop motion de fieltro, 3D low-poly…) y Genjutsu lo aplica sin tocar el movimiento ni el audio.", "Pick a style (anime, felt stop motion, low-poly 3D…) and Genjutsu applies it without touching the motion or the audio."),
+    category: "Edit",
+    output: "video",
+    channels: ["ui", "mcp"],
+    art: "/art/use-cases/restyle.webp",
+    model: "higgsfield/genjutsu/restyle/v1.0",
+    sample: { video_url: "https://example.com/a.mp4", resolution: "720p" },
+    uiHref: studioHref("video", "genjutsu", "restyle", "higgsfield/genjutsu/restyle/v1.0"),
+    ui: [
+      { title: l("Abre Genjutsu › Cambiar estilo", "Open Genjutsu › Restyle"), body: l("Sube un clip de 4 a 30 s (lo que pase de 30 s se recorta).", "Upload a 4 to 30 s clip (anything past 30 s is trimmed).") },
+      { title: l("Elige el estilo", "Pick the style"), body: l("Cada miniatura es un estilo de Higgsfield; la lista cambia con el tiempo.", "Each thumbnail is a Higgsfield style; the list changes over time.") },
+      { title: l("Personajes, si quieres", "Characters, if you want"), body: l("Hasta 5 imágenes para fijar cómo se ve cada sujeto en el nuevo estilo.", "Up to 5 images to set how each subject looks in the new style.") },
+      { title: l("Mira el costo y genera", "Check the cost and generate"), body: l("Se cobra por segundo del clip original y sube mucho en 1080p.", "It bills per second of the source clip and costs much more at 1080p.") },
+    ],
+    ask: l(
+      "Pasa ./baile.mp4 a estilo anime cel-shaded a 720p, conservando el audio. Muéstrame los estilos y cotiza antes.",
+      "Turn ./dance.mp4 into cel-shaded anime at 720p, keeping the audio. Show me the styles and quote first.",
+    ),
+    mcp: [
+      { title: l("Sube el clip", "Upload the clip"), tool: "upload_media" },
+      { title: l("Elige el estilo", "Pick the style"), tool: "list_styles" },
+      { title: l("Cotiza con la duración", "Quote with the length"), tool: "estimate_cost (input_video_seconds)" },
+      { title: l("Genera y descarga", "Generate and download"), tool: "generate → get_generation → download_outputs" },
+    ],
+    prompts: [
+      { label: l("Mantener el personaje", "Keep the character"), text: "Keep the referenced character's pink hair and outfit consistent across shots while preserving the original movement." },
+      { label: l("Sin prompt", "No prompt"), text: "" },
+    ],
+    tips: [
+      l("El prompt es opcional: el estilo lo da el preset, el prompt solo afina.", "The prompt is optional: the preset sets the style, the prompt only refines it."),
+      l("Para un look libre descrito con palabras, usa «Cambia el estilo de un clip» (Seedance).", "For a free-form look described in words, use “Restyle a clip” (Seedance)."),
+    ],
+  },
+  {
     slug: "restyle",
     title: l("Cambia el estilo de un clip", "Restyle a clip"),
     tagline: l("Reescribe cualquier video con un prompt: anime, plastilina, look de película, del día a la noche.", "Rewrite any video with a prompt: anime, claymation, film look, day to night."),
@@ -453,6 +489,43 @@ export const USE_CASES: UseCase[] = [
     tips: [
       l("Pide siempre que la etiqueta y los colores no cambien: es lo que más se deforma.", "Always ask to keep the label and colors unchanged: it is what distorts most."),
       l("Para muchas variantes, cambia solo la escena y deja igual el resto del prompt.", "For many variants, change only the scene and keep the rest of the prompt the same."),
+    ],
+  },
+  {
+    slug: "ads-studio",
+    title: l("Varios anuncios desde un brief", "Several ads from one brief"),
+    tagline: l("Ads Studio escribe los conceptos y los renderiza: de 1 a 8 anuncios en imagen con tu producto y tu copy.", "Ads Studio writes the concepts and renders them: 1 to 8 image ads with your product and your copy."),
+    category: "Product",
+    output: "image",
+    channels: ["ui", "mcp"],
+    art: "/art/use-cases/product-ad-image.webp",
+    model: "higgsfield/ads-studio/v1.0",
+    sample: { prompt: "cost preview", batch_size: 3, aspect_ratio: "4:5" },
+    costNote: l("Higgsfield cobra por tokens: el precio es su estimación publicada por imagen.", "Higgsfield bills by tokens: the price is its published per-image estimate."),
+    uiHref: studioHref("image", "create", "ads", "higgsfield/ads-studio/v1.0"),
+    ui: [
+      { title: l("Abre Imagen › Anuncios", "Open Image › Ads"), body: l("Sube fotos del producto si quieres que aparezca (hasta 10, mejor sobre fondo liso).", "Upload product photos if it should appear (up to 10, ideally on a plain background).") },
+      { title: l("Escribe el brief", "Write the brief"), body: l("Qué vendes, el mensaje y la dirección visual. El titular entre comillas si debe salir tal cual.", "What you sell, the message and the visual direction. Put the headline in quotes if it must appear as is.") },
+      { title: l("Afina en Avanzado", "Refine under Advanced"), body: l("Nicho, público objetivo e idioma del texto guían los conceptos.", "Niche, target audience and copy language guide the concepts.") },
+      { title: l("Elige cuántos y el formato", "Pick how many and the format"), body: l("Cada imagen es un concepto distinto. 4:5 para el feed, 9:16 para historias.", "Each image is a different concept. 4:5 for the feed, 9:16 for stories.") },
+    ],
+    ask: l(
+      "Con ./perfume.png haz tres anuncios 4:5 para regalo de San Valentín, en español, con el titular «Deja una nota que dure». Cotiza primero.",
+      "Using ./perfume.png make three 4:5 ads for a Valentine's gift, in English, with the headline 'Leave a lasting note'. Quote first.",
+    ),
+    mcp: [
+      { title: l("Sube el producto", "Upload the product"), tool: "upload_media" },
+      { title: l("Cotiza el lote", "Quote the batch"), body: l("batch_size es el número de imágenes; el costo se multiplica por él.", "batch_size is the number of images; the cost scales with it."), tool: "estimate_cost" },
+      { title: l("Genera con tu OK y descarga", "Generate on your OK and download"), tool: "generate → get_generation → download_outputs" },
+    ],
+    prompts: [
+      { label: l("Perfume", "Perfume"), text: "Create three distinct premium perfume ads. Preserve the bottle and label. Use the headline \"Leave a lasting note\"." },
+      { label: l("App", "App"), text: "Three ads for a budgeting app for freelancers: show the phone screen, a calm workspace and the line \"Know what you can spend today\"." },
+      { label: l("Café", "Coffee"), text: "Launch ads for a specialty coffee shop opening on Saturday: warm morning light, latte art close-ups and the headline \"Your new morning ritual\"." },
+    ],
+    tips: [
+      l("La etiqueta y el texto del producto pueden cambiar un poco: revísalos antes de publicar.", "The product label and text may shift slightly: check them before posting."),
+      l("Prueba con 1 o 2 imágenes antes de pedir 8.", "Try 1 or 2 images before asking for 8."),
     ],
   },
   {

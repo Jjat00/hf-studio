@@ -22,6 +22,7 @@ export type EmptyState = {
 
 const has = (m: ModelSummary, cap: string) => m.capabilities.includes(cap);
 const isVideo = (m: ModelSummary) => m.output === "video";
+const isAds = (m: ModelSummary) => m.id.startsWith("higgsfield/ads-studio/");
 const genjutsu = l("Higgsfield Genjutsu", "Higgsfield Genjutsu");
 const generate = l("Generar", "Generate");
 const writePrompt = l("Escribe el prompt", "Write the prompt");
@@ -93,7 +94,7 @@ export const VIDEO_TABS: Tab[] = [
       steps: [
         { title: l("Añade un video de referencia", "Add a reference video"), body: l("De 4 a 30 segundos. Se conservan su movimiento, su ritmo y su cámara.", "4 to 30 seconds. Its motion, timing and camera are kept.") },
         { title: l("Añade tus elementos", "Add your elements"), body: l("Hasta ocho personajes, lugares o productos para cambiar el reparto de la escena.", "Up to eight characters, locations or products to recast the scene.") },
-        { title: generate, body: l("Cambia el reparto del movimiento, o sustituye elementos concretos sin tocar el resto.", "Recast the motion, or swap specific elements while keeping the rest untouched.") },
+        { title: generate, body: l("Cambia el reparto del movimiento, sustituye elementos concretos o dale otro estilo sin tocar el resto.", "Recast the motion, swap specific elements or restyle it while keeping the rest untouched.") },
       ],
     },
     modes: [
@@ -119,6 +120,18 @@ export const VIDEO_TABS: Tab[] = [
         labels: {
           video_url: [l("Añade un video de referencia", "Add a reference video"), l("4–30 segundos · al menos 640×640 px por fotograma", "4–30 seconds · at least 640×640 px per frame")],
           image_urls: [l("Añade el objeto nuevo", "Add the new object"), l("Producto, prenda o accesorio a colocar · hasta 8", "Product, outfit or prop to swap in · up to 8")],
+        },
+      },
+      {
+        key: "restyle",
+        label: l("Cambiar estilo", "Restyle"),
+        icon: "brush",
+        defaultModel: "higgsfield/genjutsu/restyle/v1.0",
+        filter: (m) => m.id.includes("genjutsu/restyle"),
+        hero: { title: genjutsu, subtitle: l("Manipula la realidad · otro estilo, mismo movimiento y audio", "Reality manipulation · new style, same motion and audio"), tone: "pink", art: "/art/use-cases/restyle.webp" },
+        labels: {
+          video_url: [l("Añade el video a reestilizar", "Add the video to restyle"), l("4–30 segundos · se conservan el movimiento, el encuadre y el audio", "4–30 seconds · motion, framing and audio are kept")],
+          image_urls: [l("Añade personajes", "Add characters"), l("Cómo deben verse los sujetos en el nuevo estilo · hasta 5", "How the subjects should look in the new style · up to 5")],
         },
       },
     ],
@@ -202,7 +215,7 @@ export const IMAGE_TABS: Tab[] = [
         label: l("Texto a imagen", "Text to image"),
         icon: "sparkles",
         defaultModel: "higgsfield-ai/soul/v2/standard",
-        filter: (m) => m.output === "image" && has(m, "text-to-image"),
+        filter: (m) => m.output === "image" && has(m, "text-to-image") && !isAds(m),
         hero: { title: l("Texto a imagen", "Text to image"), subtitle: l("Fotografía editorial a partir de una frase", "Editorial photography from a sentence"), tone: "pink", art: "/art/text-to-image.webp" },
       },
       {
@@ -210,9 +223,18 @@ export const IMAGE_TABS: Tab[] = [
         label: l("Editar imagen", "Edit image"),
         icon: "brush",
         defaultModel: "alibaba/qwen-image-3/edit",
-        filter: (m) => m.output === "image" && (has(m, "edit") || has(m, "image-edit") || has(m, "image-references")),
+        filter: (m) => m.output === "image" && (has(m, "edit") || has(m, "image-edit") || has(m, "image-references")) && !isAds(m),
         hero: { title: l("Editar imagen", "Image edit"), subtitle: l("Cambia partes de una foto con un prompt", "Change parts of a photo with a prompt"), tone: "blue", art: "/art/image-edit.webp" },
         labels: { image_urls: [l("Añade imágenes para editar", "Add images to edit"), l("La foto y, si quieres, referencias", "The photo plus optional references")] },
+      },
+      {
+        key: "ads",
+        label: l("Anuncios", "Ads"),
+        icon: "layers",
+        defaultModel: "higgsfield/ads-studio/v1.0",
+        filter: isAds,
+        hero: { title: l("Ads Studio", "Ads Studio"), subtitle: l("De un brief a varios anuncios listos para publicar", "From one brief to several ready-to-post ads"), tone: "amber", art: "/art/use-cases/product-ad-image.webp" },
+        labels: { image_urls: [l("Añade tu producto", "Add your product"), l("Fotos del producto o de la marca · hasta 10", "Product or brand photos · up to 10")] },
       },
     ],
   },

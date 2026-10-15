@@ -176,6 +176,15 @@ class HiggsfieldClient(Provider):
         _raise_for(response)
         return response.json()
 
+    async def model_presets(self, model: str) -> dict:
+        """Catálogo de estilos de un modelo (Genjutsu Restyle): `{model, items: [{id, name, preview_url}]}`."""
+        try:
+            response = await self._api.get(f"/models/{model}/presets")
+        except httpx.TransportError as exc:
+            raise HiggsfieldError("network", f"Network error while listing styles: {exc}") from exc
+        _raise_for(response)
+        return response.json()
+
     async def check_credentials(self) -> bool:
         """Comprueba la clave sin gastar créditos: el estado de una solicitud inexistente
         responde 404 con credenciales válidas y 401 con inválidas."""

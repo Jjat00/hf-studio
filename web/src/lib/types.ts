@@ -209,6 +209,9 @@ export type Sound = {
 };
 
 /** Elemento de HF Studio para Kling 3.0 (APIMart y KIE): se cita en el prompt con `mention` (@nombre). */
+/** Un estilo del catálogo de un modelo (Genjutsu Restyle): su `id` va en `preset_id`. */
+export type ModelStyle = { id: string; name: string; preview_url: string | null };
+
 export type StudioElement = {
   id: string;
   name: string;

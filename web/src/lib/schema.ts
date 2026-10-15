@@ -10,7 +10,8 @@ export type Field =
   | { kind: "toggle"; key: string; schema: JSONSchema; required: boolean }
   | { kind: "text"; key: string; schema: JSONSchema; required: boolean; multiline: boolean }
   | { kind: "json"; key: string; schema: JSONSchema; required: boolean }
-  | { kind: "elements"; key: string; schema: JSONSchema; required: boolean };
+  | { kind: "elements"; key: string; schema: JSONSchema; required: boolean }
+  | { kind: "style"; key: string; schema: JSONSchema; required: boolean };
 
 /** Orden en que aparecen los ajustes, imitando a Higgsfield: calidad, duración, formato, audio. */
 const ORDER = ["mode", "resolution", "quality", "duration", "aspect_ratio", "generate_audio", "sound", "seed"];
@@ -36,6 +37,13 @@ export function takesStudioElements(modelId: string) {
   return modelId.startsWith("kling-video/v3.0/");
 }
 
+/** Modelos que eligen un estilo por id (`preset_id`) de un catálogo que publica Higgsfield (GET /v1/model-styles). */
+const STYLE_MODELS = new Set(["higgsfield/genjutsu/restyle/v1.0"]);
+export const hasStyles = (modelId: string) => STYLE_MODELS.has(modelId);
+
+/** Conservan el audio del video de origen por sí mismos: no se ofrece remezclarlo (igual que en la API). */
+export const keepsSourceAudio = (modelId: string) => modelId === "higgsfield/genjutsu/restyle/v1.0";
+
 export function fieldsFor(schema: JSONSchema, modelId = ""): Field[] {
   const props = schema.properties ?? {};
   const req = requiredKeys(schema);
@@ -47,6 +55,8 @@ export function fieldsFor(schema: JSONSchema, modelId = ""): Field[] {
     if (key === "elements" && type === "array" && takesStudioElements(modelId)) {
       // Kling 3.0: elementos de HF Studio (selector propio) en vez de ids de Higgsfield escritos a mano.
       fields.push({ kind: "elements", key, schema: s, required });
+    } else if (key === "preset_id" && hasStyles(modelId)) {
+      fields.push({ kind: "style", key, schema: s, required });
     } else if (key === "prompt" && type === "string") {
       fields.push({ kind: "prompt", key, schema: s, required });
     } else if (media) {

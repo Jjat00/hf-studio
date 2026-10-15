@@ -7,6 +7,7 @@ import { useI18n } from "@/components/i18n-provider";
 import { FieldControl } from "@/components/studio/controls";
 import { CostPanel } from "@/components/studio/cost-panel";
 import { ElementPicker } from "@/components/studio/element-picker";
+import { StylePicker } from "@/components/studio/style-picker";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { ModelPicker, ModelRow } from "@/components/studio/model-picker";
 import { isAssistant, isAudioNode, isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
@@ -41,7 +42,8 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
   const values = detail ? validValues(detail, data.values) : {};
   const fields = detail ? settingFields(detail) : [];
   const main = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind));
-  const advanced = fields.filter((f) => !["enum", "range", "toggle", "elements"].includes(f.kind) && f.key !== "voice_id");
+  const advanced = fields.filter((f) => !["enum", "range", "toggle", "elements", "style"].includes(f.kind) && f.key !== "voice_id");
+  const styleField = fields.find((f) => f.kind === "style");
   const voiceField = fields.some((f) => f.key === "voice_id");
   const loose = detail ? mediaFields(detail).filter((f) => !connected.has(f.key)) : [];
   const est = ctx.estimates[id];
@@ -79,6 +81,14 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
             {main.map((f) => (
               <FieldControl key={`${data.model}/${f.key}`} field={f} value={values[f.key]} onChange={(v) => setValue(f.key, v)} />
             ))}
+            {styleField && (
+              <StylePicker
+                key={`${data.model}/style`}
+                model={data.model}
+                value={values[styleField.key] as string | undefined}
+                onChange={(v) => setValue(styleField.key, v)}
+              />
+            )}
             {fields.some((f) => f.kind === "elements") && (
               <ElementPicker
                 key={`${data.model}/elements`}

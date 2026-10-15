@@ -57,7 +57,7 @@ import {
   type SpaceGraph,
   type SpaceNode,
 } from "@/lib/spaces";
-import { fieldErrors, formatUsd, modelLabel, outputSrc, studio, StudioError, type Estimate } from "@/lib/studio";
+import { fieldErrors, formatUsd, modelLabel, outputSrc, studio, StudioError, type Estimate, modelMap } from "@/lib/studio";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { AddMenu, type AddChoice } from "./add-menu";
 import { SpaceContext, selectedRun, type NodeEstimate, type RunState, type SpaceCtx } from "./context";
@@ -148,7 +148,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   const { t } = useI18n();
   const s = t.spaces;
   const flow = useReactFlow();
-  const models = useMemo(() => new Map(list.map((m) => [m.id, m])), [list]);
+  const models = useMemo(() => modelMap(list), [list]);
   const outputOf = useCallback((m: string) => models.get(m)?.output, [models]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<SpaceNode>(space.graph.nodes.map(normalizeNode));

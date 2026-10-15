@@ -24,9 +24,10 @@ import { useI18n } from "@/components/i18n-provider";
 import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { ElementPicker } from "@/components/studio/element-picker";
-import { cleanInput, defaultsFor, fieldsFor, takesStudioElements, type Field } from "@/lib/schema";
+import { StylePicker } from "@/components/studio/style-picker";
+import { cleanInput, defaultsFor, fieldsFor, keepsSourceAudio, takesStudioElements, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
-import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate } from "@/lib/studio";
+import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate, modelMap } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { Masonry } from "@/components/masonry";
@@ -89,7 +90,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
       .catch((e) => setCatalogError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models]);
+  const byId = useMemo(() => modelMap(models), [models]);
   const paramModel = modelParam ? byId.get(modelParam) : undefined;
   const modelId =
     chosen[`${tab.key}/${mode.key}`] ?? (paramModel && mode.filter(paramModel) ? paramModel.id : mode.defaultModel);
@@ -136,9 +137,11 @@ export function Studio({ output }: { output: "video" | "image" }) {
     .sort((a, b) => rankMedia(a.key) - rankMedia(b.key));
   const prompt = fields.find((f) => f.kind === "prompt");
   const elementsField = fields.find((f) => f.kind === "elements");
+  const styleField = fields.find((f) => f.kind === "style");
   const settings = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
   // Opción de HF Studio (no de Higgsfield): mismo criterio que audio.supports_source_audio en la API.
-  const canKeepAudio = detail?.output === "video" && "video_url" in (detail.input_schema.properties ?? {});
+  const canKeepAudio =
+    detail?.output === "video" && "video_url" in (detail.input_schema.properties ?? {}) && !keepsSourceAudio(detail.id);
   const advanced = fields.filter((f) => ["text", "number", "json"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
 
   const setValue = useCallback((key: string, v: unknown) => {
@@ -276,6 +279,12 @@ export function Studio({ output }: { output: "video" | "image" }) {
 
   async function submit() {
     if (!detail || submitting) return;
+    // Restyle: sin estilo Higgsfield rechaza el pedido; se avisa en el selector antes de enviar.
+    if (styleField?.required && !values[styleField.key]) {
+      setErrors((prev) => ({ ...prev, [styleField.key]: t.styles.required }));
+      setFormError(t.studio.checkFields);
+      return;
+    }
     // Nunca se genera sin que Jaime vea el costo: si no hay precio, se pide una segunda confirmación.
     if (!costAllowsDirectSubmit(current?.value ?? null) && confirmUnknown !== estimateKey) {
       setConfirmUnknown(estimateKey);
@@ -427,6 +436,16 @@ export function Studio({ output }: { output: "video" | "image" }) {
                     const text = (values.prompt as string) ?? "";
                     if (!text.includes(el.mention)) setValue("prompt", text ? `${text.trimEnd()} ${el.mention}` : el.mention);
                   }}
+                />
+              )}
+
+              {styleField && (
+                <StylePicker
+                  key={`${detail.id}/style`}
+                  model={detail.id}
+                  value={values[styleField.key] as string | undefined}
+                  onChange={(v) => setValue(styleField.key, v)}
+                  error={errors[styleField.key]}
                 />
               )}
 

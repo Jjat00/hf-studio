@@ -22,10 +22,16 @@ NO_SOURCE_AUDIO = "source_has_no_audio"
 FAILED = "mux_failed"
 
 
+# Conservan el audio del video de origen por sí mismos (y su duración puede variar: remezclarlo lo desfasaría).
+KEEPS_SOURCE_AUDIO = frozenset({"higgsfield/genjutsu/restyle/v1.0"})
+
+
 def supports_source_audio(model: dict) -> bool:
-    """Modelos de video que reciben un video de origen en `video_url`."""
+    """Modelos de video que reciben un video de origen en `video_url` y no conservan ya su audio."""
     props = model.get("input_schema", {}).get("properties", {})
-    return model.get("output") == "video" and SOURCE_KEY in props
+    return (
+        model.get("output") == "video" and SOURCE_KEY in props and model.get("id") not in KEEPS_SOURCE_AUDIO
+    )
 
 
 def studio_notes(model: dict) -> list[str]:
@@ -36,6 +42,11 @@ def studio_notes(model: dict) -> list[str]:
         notes.append(
             "elements also takes HF Studio element ids (el_…, see list_elements / create_element): cite each in "
             "the prompt as @name. They run only on APIMart and KIE (KIE also needs image_url), never on Higgsfield."
+        )
+    if "preset_id" in props and model["id"] == "higgsfield/genjutsu/restyle/v1.0":
+        notes.append(
+            "preset_id is the id of one current style: list them with list_styles (GET /v1/model-styles/<model>). "
+            "Restyle keeps the source audio by itself and bills each second of the source video, trimmed to 30 s."
         )
     if not supports_source_audio(model):
         return notes

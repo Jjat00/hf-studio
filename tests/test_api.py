@@ -17,6 +17,8 @@ from hf_studio.db import ApiClient, Job, Upload, hash_token, utcnow
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 T2V = "bytedance/seedance-2.0/text-to-video"
 I2V = "bytedance/seedance-2.0/image-to-video"
+RESTYLE = "higgsfield/genjutsu/restyle/v1.0"
+STYLE = "c2143317-f28d-4c3c-a0b8-39bd547e08a7"
 VIDEO = {"prompt": "A cinematic tracking shot along a sunlit coastal road", "resolution": "720p",
          "generate_audio": True, "duration": 5, "aspect_ratio": "16:9"}  # fmt: skip
 
@@ -27,6 +29,8 @@ class FakeHiggsfield:
         self.remote: dict[str, dict] = {}
         self.submit_mode = "ok"
         self.upload_failures = 0  # cuántas veces responde 500 a generate-upload-url antes de funcionar
+        self.styles = [{"id": STYLE, "name": "Cel-Shaded CG Anime", "preview_url": "https://cdn.test/s.webp"}]
+        self.style_calls = 0
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         url, path = str(request.url), request.url.path
@@ -46,6 +50,11 @@ class FakeHiggsfield:
             return httpx.Response(200, json=self.remote[path.split("/")[2]])
         if path.startswith("/requests/") and path.endswith("/cancel"):
             return httpx.Response(202)
+        if path == "/models/higgsfield/genjutsu/restyle/v1.0/presets":
+            self.style_calls += 1
+            return httpx.Response(
+                200, json={"model": "higgsfield/genjutsu/restyle/v1.0", "items": self.styles}
+            )
         if path.startswith("/estimate/"):
             return httpx.Response(
                 200, json={"type": "estimate", "credits": "1.000", "usd": "0.060", "discount": None}
@@ -487,3 +496,26 @@ async def test_upload_rejects_content_that_is_not_the_declared_type(env):
     mpd = b'<?xml version="1.0"?><MPD><BaseURL>https://127.0.0.1/internal.mp4</BaseURL></MPD>'
     r = await http.post("/v1/uploads", files={"file": ("a.mp4", mpd, "video/mp4")})
     assert r.status_code == 415 and r.json()["error"]["code"] == "content_mismatch"
+
+
+async def test_restyle_styles_are_listed_cached_and_checked_before_quoting(env):
+    _, http, fake = env
+    r = await http.get(f"/v1/model-styles/{RESTYLE}")
+    assert r.status_code == 200 and r.json()["styles"][0]["id"] == STYLE
+    await http.get(f"/v1/model-styles/{RESTYLE}")
+    assert fake.style_calls == 1  # 10 min en memoria
+    assert (await http.get(f"/v1/model-styles/{T2V}")).json()["error"]["code"] == "no_styles"
+    body = {"model": RESTYLE, "input": {"video_url": "https://cdn.test/v.mp4", "preset_id": STYLE},
+            "hints": {"input_video_seconds": 5}}  # fmt: skip
+    assert (await http.post("/v1/estimate", json=body)).status_code == 200
+    gone = {**body, "input": {**body["input"], "preset_id": "00000000-0000-0000-0000-000000000000"}}
+    r = await http.post("/v1/estimate", json=gone)
+    assert r.status_code == 422 and r.json()["error"]["code"] == "unknown_style"
+    assert r.json()["error"]["details"][0]["path"] == "preset_id"  # la UI lo marca en el selector
+    assert fake.style_calls == 2  # un id desconocido fuerza una recarga antes de rechazarlo
+
+
+async def test_renamed_genjutsu_id_resolves_to_the_new_one(env):
+    _, http, _ = env
+    r = await http.get("/v1/models/higgsfiled/genjutsu/motion-transfer/v1.0")
+    assert r.status_code == 200 and r.json()["id"] == "higgsfield/genjutsu/motion-transfer/v1.0"

@@ -198,6 +198,9 @@ const es = {
       shot_type: "Tipo de plano",
       style_id: "ID de estilo",
       style_strength: "Fuerza del estilo",
+      niche: "Nicho",
+      target_audience: "Público objetivo",
+      language: "Idioma del texto",
     } as Record<string, string>,
   },
   cost: {
@@ -494,6 +497,13 @@ const es = {
     pickTitle: "Elige una de tus creaciones",
     none: "Aún no tienes creaciones de este tipo.",
     close: "Cerrar",
+  },
+  styles: {
+    title: "Estilo",
+    hint: "El aspecto que tendrá el video; el movimiento, el encuadre y el audio son los del original.",
+    error: "No se pudieron cargar los estilos de Higgsfield.",
+    retry: "Reintentar",
+    required: "Elige un estilo",
   },
   elements: {
     title: "Elementos",
@@ -809,6 +819,8 @@ const es = {
       extendVideo: "Extender video",
       motion: "Copiar movimiento",
       objectSwap: "Cambiar un objeto",
+      restyle: "Cambiar el estilo",
+      ads: "Anuncios",
     } as Record<string, string>,
     actionHints: {
       editImage: "Cambia lo que pidas de una imagen",
@@ -817,6 +829,8 @@ const es = {
       extendVideo: "Continúa un video donde termina",
       motion: "Anima una imagen con el movimiento de un video",
       objectSwap: "Reemplaza un objeto en un video",
+      restyle: "Otro estilo para un video, mismo movimiento y audio",
+      ads: "Varios anuncios en imagen desde un brief",
     } as Record<string, string>,
     pin: "Fijar arriba",
     unpin: "Quitar de fijados",
@@ -1025,6 +1039,9 @@ const en: Dict = {
       batch_size: "Images",
       style: "Style",
       enhance_prompt: "Enhance prompt",
+      niche: "Niche",
+      target_audience: "Target audience",
+      language: "Copy language",
     },
   },
   cost: {
@@ -1317,6 +1334,13 @@ const en: Dict = {
     pickTitle: "Pick one of your creations",
     none: "You have no creations of this kind yet.",
     close: "Close",
+  },
+  styles: {
+    title: "Style",
+    hint: "How the video will look; the motion, framing and audio come from the original.",
+    error: "Could not load the styles from Higgsfield.",
+    retry: "Retry",
+    required: "Pick a style",
   },
   elements: {
     title: "Elements",
@@ -1631,6 +1655,8 @@ const en: Dict = {
       extendVideo: "Extend video",
       motion: "Copy motion",
       objectSwap: "Swap an object",
+      restyle: "Restyle",
+      ads: "Ads",
     } as Record<string, string>,
     actionHints: {
       editImage: "Change whatever you ask in an image",
@@ -1639,6 +1665,8 @@ const en: Dict = {
       extendVideo: "Continue a video where it ends",
       motion: "Animate an image with a video's motion",
       objectSwap: "Replace an object in a video",
+      restyle: "A new style for a video, same motion and audio",
+      ads: "Several image ads from one brief",
     } as Record<string, string>,
     pin: "Pin to top",
     unpin: "Unpin",

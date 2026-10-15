@@ -13,6 +13,8 @@ const WORKFLOW_ES: [RegExp, string][] = [
   [/image reference/gi, "referencia de imagen"],
   [/motion transfer/gi, "transferir movimiento"],
   [/object swap/gi, "cambiar objetos"],
+  [/^restyle$/gi, "cambiar estilo"],
+  [/generate ads/gi, "generar anuncios"],
   [/edit images/gi, "editar imágenes"],
   [/create character/gi, "crear personaje"],
   [/generate and edit/gi, "generar y editar"],

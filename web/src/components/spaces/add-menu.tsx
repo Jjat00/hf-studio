@@ -8,6 +8,8 @@ import {
   FolderOpen,
   ImageIcon,
   ListChecks,
+  Megaphone,
+  Palette,
   Pin,
   Search,
   Shuffle,
@@ -23,7 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { matchesModel, workflowLabel } from "@/lib/i18n/workflow";
 import { isAssistant, isAudioNode, isTool, KIND_COLOR, type PortKind } from "@/lib/spaces";
-import { modelLabel } from "@/lib/studio";
+import { modelLabel, modelMap } from "@/lib/studio";
 import type { ModelSummary } from "@/lib/types";
 
 /** `preset`: valores y variantes con los que nace un nodo de acción (atajo a un modelo del catálogo). */
@@ -55,6 +57,8 @@ const ACTIONS: { key: string; models: string[]; tab: "image" | "video"; icon: ty
   { key: "extendVideo", models: ["bytedance/seedance-2.5/video-extend"], tab: "video", icon: ArrowRight },
   { key: "motion", models: ["kling-video/v3/motion-control/std", "kling-video/motion-control/std"], tab: "video", icon: Video },
   { key: "objectSwap", models: ["higgsfield/genjutsu/object-swap/v1.0"], tab: "video", icon: Shuffle },
+  { key: "restyle", models: ["higgsfield/genjutsu/restyle/v1.0"], tab: "video", icon: Palette },
+  { key: "ads", models: ["higgsfield/ads-studio/v1.0"], tab: "image", icon: Megaphone },
 ];
 
 const PINNED_KEY = "hfs.spaces.pinned";
@@ -106,7 +110,7 @@ export function AddMenu({
     // Sin tildes ni mayúsculas, como matchesModel: «imagenes» encuentra «Mis imágenes».
     const fold = (x: string) => x.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
     const query = fold(q.trim());
-    const byId = new Map(models.map((m) => [m.id, m]));
+    const byId = modelMap(models);
     const fits = (m: ModelSummary | undefined) => !!m && (!from || (m.inputs ?? []).includes(from));
     const textMatch = (i: Pick<Item, "title" | "hint">) => !query || fold(`${i.title} ${i.hint}`).includes(query);
 

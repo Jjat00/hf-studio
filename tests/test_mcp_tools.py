@@ -13,6 +13,7 @@ SPEND = (False, False, False, True)
 TOOLS = {
     "find_models": READ,
     "get_model": READ,
+    "list_styles": READ_EXT,  # lee el catálogo de estilos de Higgsfield
     "recommend_models": READ_EXT,  # cotiza con Higgsfield
     "upload_media": (False, False, False, True),
     "estimate_cost": (True, False, False, True),  # cotiza con Higgsfield; cada llamada da otro quote_id
@@ -108,6 +109,7 @@ READS = [
     (lambda: mcp_server.find_models("text-to-video", "video", "seedance"), "GET", "/v1/models",
      {"capability": "text-to-video", "output": "video", "q": "seedance"}),
     (lambda: mcp_server.get_model("a/b"), "GET", "/v1/models/a/b", None),
+    (lambda: mcp_server.list_styles(), "GET", "/v1/model-styles/higgsfield/genjutsu/restyle/v1.0", None),
     (lambda: mcp_server.recommend_models("video barato", "video", 3), "GET", "/v1/recommend",
      {"task": "video barato", "limit": 3, "output": "video"}),
     (lambda: mcp_server.get_generation("g1", 999), "GET", "/v1/generations/g1", {"wait": 120}),

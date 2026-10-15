@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { isAssistant, isAudioNode, isTool, RUN_ACTIVE, splitStep, type FlowSummary, type RunEstimate, type Space, type SpaceRun } from "@/lib/spaces";
-import { fieldErrors, modelLabel, studio } from "@/lib/studio";
+import { fieldErrors, modelLabel, studio, modelMap } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 import { Preview } from "./nodes";
 import { RunBanner, RunDialog } from "./run-panel";
@@ -37,7 +37,7 @@ export function FlowRunner({ spaceId }: { spaceId: string }) {
       (e) => setError(errorText(e)),
     );
     studio.space(spaceId).then(setSpace, () => undefined);
-    studio.models().then((r) => setModels(new Map(r.models.map((m) => [m.id, m]))), () => undefined);
+    studio.models().then((r) => setModels(modelMap(r.models)), () => undefined);
   }, [spaceId]);
 
   const name = useCallback(

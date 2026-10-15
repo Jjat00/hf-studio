@@ -5,7 +5,7 @@ import { ExternalLink, Info, Loader2, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import { formatUsd, studio } from "@/lib/studio";
+import { formatUsd, studio, modelMap } from "@/lib/studio";
 import type { ModelSummary, ProviderInfo, Usage, UsageGroup, VoiceStatus } from "@/lib/types";
 
 const PERIODS = ["month", "d7", "d30", "d90", "all"] as const;
@@ -32,7 +32,7 @@ export default function UsagePage() {
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
 
   useEffect(() => {
-    studio.models().then((r) => setModels(new Map(r.models.map((m) => [m.id, m])))).catch(() => undefined);
+    studio.models().then((r) => setModels(modelMap(r.models))).catch(() => undefined);
   }, []);
 
   useEffect(() => {

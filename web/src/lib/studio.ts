@@ -1,5 +1,5 @@
 import type { Flow, FlowSummary, RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
-import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, Usage, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, ModelStyle, Usage, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -16,6 +16,23 @@ const AUDIO_MODEL_SET = new Set<string>(Object.values(AUDIO_SERVICES));
 
 export function isAudioModel(model: string) {
   return AUDIO_MODEL_SET.has(model);
+}
+
+/** Ids que Higgsfield renombró (2026-10, errata «higgsfiled»): el historial, los presets y los Spaces viejos los
+ *  guardan así. La API los resuelve al nuevo; aquí los mapas de modelos los aceptan también. */
+const LEGACY_MODELS: Record<string, string> = {
+  "higgsfiled/genjutsu/motion-transfer/v1.0": "higgsfield/genjutsu/motion-transfer/v1.0",
+  "higgsfiled/genjutsu/object-swap/v1.0": "higgsfield/genjutsu/object-swap/v1.0",
+};
+
+/** Modelos por id, incluidos los ids viejos de `LEGACY_MODELS`. */
+export function modelMap(list: ModelSummary[]): Map<string, ModelSummary> {
+  const map = new Map(list.map((m) => [m.id, m]));
+  for (const [old, current] of Object.entries(LEGACY_MODELS)) {
+    const m = map.get(current);
+    if (m) map.set(old, m);
+  }
+  return map;
 }
 
 /** Tipo de salida de una generación: del catálogo de Higgsfield, video (cambio de voz) o audio (ElevenLabs). */
@@ -200,6 +217,7 @@ export const studio = {
   remove: (id: string) => call<void>(`/v1/generations/${id}`, { method: "DELETE" }),
   cancel: (id: string) => call<Generation>(`/v1/generations/${id}/cancel`, { method: "POST" }),
   elements: () => call<{ elements: StudioElement[] }>("/v1/elements"),
+  styles: (model: string) => call<{ model: string; styles: ModelStyle[] }>(`/v1/model-styles/${model}`),
   /** URL vigente de una salida propia para usarla como entrada de otra generación (gratis). */
   useOutput: (id: string, index = 0, as?: "last_frame" | "audio") =>
     call<{ url: string; kind: string; content_type: string }>(`/v1/generations/${id}/outputs/${index}/use${as ? `?as=${as}` : ""}`, {

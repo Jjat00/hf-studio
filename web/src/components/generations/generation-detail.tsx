@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
 import { AudioPlayer, IconButton, StatusPill, generationCost, modelName, providerModel, providerTitle, sourceLabel } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
-import { outputSrc, reuseHref, studio } from "@/lib/studio";
+import { outputSrc, reuseHref, studio, modelMap } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 // Mismo criterio que la API (pricing._media_kind): claves que llevan archivos de entrada.
@@ -29,7 +29,7 @@ export function GenerationDetail({ id }: { id: string }) {
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
 
   useEffect(() => {
-    studio.models().then((r) => setModels(new Map(r.models.map((m) => [m.id, m])))).catch(() => undefined);
+    studio.models().then((r) => setModels(modelMap(r.models))).catch(() => undefined);
   }, []);
 
   // Carga y, mientras no termine, sigue el progreso con long-poll.

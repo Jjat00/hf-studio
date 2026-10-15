@@ -45,6 +45,7 @@ export const MEGA_MENUS: MegaMenu[] = [
     features: [
       { title: l("Crear imagen", "Create Image"), description: l("Genera imágenes con IA", "Generate AI images"), href: "/image", icon: ImagePlus },
       { title: l("Editar imagen", "Edit Image"), description: l("Cambia partes de una foto con texto", "Change parts of a photo with text"), href: "/image?tab=create&mode=edit", icon: Brush },
+      { title: l("Ads Studio", "Ads Studio"), description: l("Varios anuncios a partir de un brief y tu producto", "Several ads from one brief and your product"), href: "/image?tab=create&mode=ads", icon: Megaphone, badge: "NEW" },
       { title: l("Spaces", "Spaces"), description: l("Lienzo de nodos con flujos repetibles", "Node canvas with repeatable workflows"), href: "/spaces", icon: Workflow, badge: "NEW" },
       { title: l("AI Influencer", "AI Influencer"), description: l("Crea y anima tu propio personaje", "Create and animate your own character"), href: "/influencer", icon: UserRound, badge: "NEW" },
       { title: l("Reiluminar", "Relight"), description: l("Cambia la posición, el color y la intensidad de la luz", "Adjust lighting position, color and brightness"), href: "/presets/relight", icon: SunMedium },
@@ -73,6 +74,7 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Cinema Studio", "Cinema Studio"), description: l("Video cinematográfico con referencias", "Cinematic video from your references"), href: vid("higgsfield/cinema-studio/4.0"), icon: Clapperboard },
       { title: l("Spaces", "Spaces"), description: l("Lienzo de nodos con flujos repetibles", "Node canvas with repeatable workflows"), href: "/spaces", icon: Workflow, badge: "NEW" },
       { title: l("Editar video", "Edit Video"), description: l("Edita escenas, planos y elementos", "Edit scenes, shots and elements"), href: "/video?tab=edit&mode=edit", icon: Wand2 },
+      { title: l("Cambiar estilo", "Restyle"), description: l("Anime, stop motion o 3D con el mismo movimiento", "Anime, stop motion or 3D with the same motion"), href: "/video?tab=genjutsu&mode=restyle", icon: Palette, badge: "NEW" },
       { title: l("Extender video", "Extend Video"), description: l("Continúa el plano donde terminó", "Continue the shot where it ended"), href: "/video?tab=edit&mode=extend", icon: Clock },
       { title: l("Control de movimiento", "Motion Control"), description: l("Tu personaje hace cualquier movimiento", "Your character performs any motion"), href: "/video?tab=motion", icon: Move },
       { title: l("Elementos", "Elements"), description: l("Personajes y productos reutilizables", "Reusable characters and products"), href: "/elements", icon: Boxes },
@@ -83,7 +85,7 @@ export const MEGA_MENUS: MegaMenu[] = [
     ],
     models: [
       { title: l("Seedance 2.5", "Seedance 2.5"), description: l("Videos cinematográficos de hasta 30 segundos", "Cinematic videos up to 30 seconds"), href: vid("bytedance/seedance-2.5/text-to-video"), icon: AudioLines, badge: "TOP" },
-      { title: l("Higgsfield Genjutsu", "Higgsfield Genjutsu"), description: l("Transfiere movimiento o cambia objetos de un video", "Transfer motion or swap objects from a reference video"), href: "/video?tab=genjutsu", icon: Sparkles, badge: "NEW" },
+      { title: l("Higgsfield Genjutsu", "Higgsfield Genjutsu"), description: l("Transfiere movimiento, cambia objetos o el estilo de un video", "Transfer motion, swap objects or restyle a reference video"), href: "/video?tab=genjutsu", icon: Sparkles, badge: "NEW" },
       { title: l("Kling 3.0", "Kling 3.0"), description: l("Videos cinematográficos con audio", "Cinematic videos with audio"), href: vid("kling-video/v3.0/pro/text-to-video"), icon: Film },
       { title: l("Kling Motion Control", "Kling Motion Control"), description: l("Transfiere el movimiento de un video a una imagen", "Transfer motion from video to image"), href: "/video?tab=motion", icon: Move },
       { title: l("Kling O3 Edit", "Kling O3 Edit"), description: l("Edita videos con texto", "Edit videos with text prompts"), href: vid("kling-video/o3/video-edit"), icon: Wand2 },

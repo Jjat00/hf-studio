@@ -7,7 +7,7 @@ import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { Masonry } from "@/components/masonry";
 import { useI18n } from "@/components/i18n-provider";
-import { outputOf, reuseHref, studio } from "@/lib/studio";
+import { outputOf, reuseHref, studio, modelMap } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
 const FILTERS = ["all", "video", "image", "audio", "active", "failed"] as const;
@@ -19,7 +19,7 @@ export default function HistoryPage() {
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
   useEffect(() => {
-    studio.models().then((r) => setModels(new Map(r.models.map((m) => [m.id, m])))).catch(() => undefined);
+    studio.models().then((r) => setModels(modelMap(r.models))).catch(() => undefined);
   }, []);
 
   const shown = useMemo(

@@ -37,7 +37,7 @@ Atajos: recommend_models("lo que quiere el usuario") sugiere modelos con su cost
 run_preset ejecutan recetas listas (primero con dry_run=True para mostrar costo y entrada final);
 generate_batch hace variantes (primero dry_run=True) y wait_generations espera varias.
 Flujo manual: 1) find_models por capacidad (text-to-video, image-to-video, first-last-frame, video-input,
-reference-to-video, image-references, video-edit, video-extend, motion-transfer, text-to-image);
+reference-to-video, image-references, video-edit, video-extend, motion-transfer, restyle, text-to-image);
 2) get_model para leer input_schema y notes; 3) upload_media si la entrada es un archivo local;
 4) estimate_cost; 5) generate con su quote_id; 6) get_generation con wait_seconds hasta terminal=true;
 7) download_outputs. La generación es asíncrona y cobra créditos: ANTES de generar, cotiza (estimate_cost,
@@ -62,6 +62,9 @@ elements de un modelo Kling 3.0 y cítalos en el prompt con @nombre (p. ej. "@zo
 Solo salen por APIMart y KIE (KIE además exige image_url); nunca por Higgsfield.
 Para partir de una creación anterior (animar una imagen, usarla de referencia, editar o extender un video),
 use_output(generation_id) da su URL vigente; no reutilices URLs viejas de outputs, pueden haber caducado.
+Genjutsu Restyle (higgsfield/genjutsu/restyle/v1.0) cambia el estilo de un video y conserva su movimiento y su
+audio: elige el estilo con list_styles y pasa su id en preset_id. Ads Studio (higgsfield/ads-studio/v1.0) hace
+de 1 a 8 anuncios en imagen a partir de un brief y fotos del producto (batch_size = número de imágenes).
 Spaces (lienzos de nodos): list_spaces, get_space, create_space y update_space leen y arman un lienzo; cada
 nodo es texto, medio, nota, lista o generador (cualquier modelo del catálogo, incluidas las herramientas
 gratis hf-studio/frame, hf-studio/combine y hf-studio/mix, el audio elevenlabs/tts, elevenlabs/sfx y
@@ -117,7 +120,7 @@ def _call(method: str, path: str, **kwargs: Any) -> Any:
 def find_models(capability: str | None = None, output: str | None = None, query: str | None = None) -> dict:
     """Busca modelos. capability: text-to-video, image-to-video, first-last-frame, video-input,
     reference-to-video, image-references, audio-input, video-edit, video-extend, motion-transfer,
-    object-swap, text-to-image, edit. output: video | image. query: texto en id/título (p. ej. seedance)."""
+    object-swap, restyle, text-to-image, edit. output: video | image. query: texto en id/título (p. ej. seedance)."""
     params = {k: v for k, v in {"capability": capability, "output": output, "q": query}.items() if v}
     return _call("GET", "/v1/models", params=params)
 
@@ -133,6 +136,18 @@ def get_model(model_id: str) -> dict:
     bytedance/seedance-2.0/image-to-video. Léelo antes de generar, incluidas las studio_notes
     (avisos de HF Studio, p. ej. cómo conservar el audio del video de origen)."""
     return _call("GET", f"/v1/models/{model_id}")
+
+
+@mcp.tool(
+    title="List model styles",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
+def list_styles(model_id: str = "higgsfield/genjutsu/restyle/v1.0") -> dict:
+    """Estilos vigentes de un modelo que elige uno por preset_id (hoy Genjutsu Restyle): id, nombre y
+    preview_url. Pon el id en preset_id; cambian sin aviso, no reutilices uno viejo sin mirar la lista. Gratis."""
+    return _call("GET", f"/v1/model-styles/{model_id}")
 
 
 def _local_path(path: str) -> Path:
