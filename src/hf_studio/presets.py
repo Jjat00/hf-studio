@@ -517,6 +517,7 @@ BUILTIN: list[dict[str, Any]] = [
                 "options": [
                     "slim",
                     "athletic",
+                    "fit hourglass",
                     "average",
                     "curvy",
                     "plus-size",

@@ -71,6 +71,7 @@ export const GROUPS: Group[] = [
   g("body_type", "Complexión", "Build", 1, "build", [
     ["body_slim", "Slim", "Delgada", "a"],
     ["body_athletic", "Athletic", "Atlética", "a"],
+    ["body_hourglass", "Hourglass", "Curvilínea", "a"],
     ["body_muscular", "Muscular", "Musculosa", "a"],
     ["body_curvy", "Curvy", "Con curvas", "a"],
     ["body_heavy", "Heavy", "Robusta", "a"],
@@ -423,6 +424,11 @@ const SHORT_SHEET = "Two-panel character sheet: close-up portrait left, full bod
  * Prompt en inglés: el brief de un ejemplo (o la base del tipo), los rasgos, la descripción extra del usuario y la
  * hoja de dos paneles. Con `maxLength` (Z-Image admite 800) se acorta la hoja y luego el brief, nunca los rasgos.
  */
+/** Texto para el prompt cuando la etiqueta en inglés no basta para describir la opción. */
+const OPTION_PROMPT: Record<string, string> = {
+  body_hourglass: "fit hourglass figure with a slim toned waist, full bust and round hips, not overweight",
+};
+
 export function buildPrompt(
   tier: Tier,
   sel: Selection,
@@ -434,7 +440,7 @@ export function buildPrompt(
   const traits = GROUPS.flatMap((grp) => {
     const labels = (sel[grp.id] ?? [])
       .filter((id) => !["acc_none", "fh_none", "neck_normal", "head_oval"].includes(id))
-      .map((id) => grp.options.find((o) => o.id === id)?.en.toLowerCase())
+      .map((id) => OPTION_PROMPT[id] ?? grp.options.find((o) => o.id === id)?.en.toLowerCase())
       .filter(Boolean);
     return labels.length ? [`${grp.prompt}: ${labels.join(", ")}`] : [];
   });

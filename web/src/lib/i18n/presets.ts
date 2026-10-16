@@ -169,6 +169,7 @@ const OPTIONS_ES: Record<string, string> = {
   "non-binary person": "no binario",
   slim: "delgada",
   athletic: "atlética",
+  "fit hourglass": "curvilínea",
   average: "media",
   curvy: "con curvas",
   "plus-size": "talla grande",
