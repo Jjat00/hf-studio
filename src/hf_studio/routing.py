@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from .catalog import Catalog
+from .catalog import ALIASES, Catalog
 from .elements import element_ids, is_element_id
 from .pricing import fill_placeholders, quote
 from .providers.base import Provider, ProviderError
@@ -218,7 +218,8 @@ class Router:
         """Una opción por canal del proveedor que puede hacer el pedido (los que no, van a `excluded`)."""
         info = {"provider": provider.name, "title": provider.title}
         if provider.name == DEFAULT_PROVIDER:
-            if route is not None and route != model["id"]:
+            # Un plan guardado puede traer el id viejo de un modelo renombrado: es el mismo canal.
+            if route is not None and ALIASES.get(route, route) != model["id"]:
                 return []
             if any(is_element_id(v) for v in arguments.get("elements") or []):
                 excluded.append({**info, "model": model["id"],

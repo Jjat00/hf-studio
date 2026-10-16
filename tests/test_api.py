@@ -519,3 +519,47 @@ async def test_renamed_genjutsu_id_resolves_to_the_new_one(env):
     _, http, _ = env
     r = await http.get("/v1/models/higgsfiled/genjutsu/motion-transfer/v1.0")
     assert r.status_code == 200 and r.json()["id"] == "higgsfield/genjutsu/motion-transfer/v1.0"
+
+
+OLD_SWAP, NEW_SWAP = "higgsfiled/genjutsu/object-swap/v1.0", "higgsfield/genjutsu/object-swap/v1.0"
+SWAP_INPUT = {"video_url": "https://cdn.test/v.mp4", "image_urls": ["https://cdn.test/i.png"]}
+
+
+async def test_retrying_with_a_renamed_id_keeps_idempotency(env):
+    """Revisión 83 de Codex: el reintento con el id viejo y la misma clave daba 409 (lotes y trabajos guardados
+    antes del renombre, cuya huella usa el id viejo)."""
+    app, http, _ = env
+    body = {"items": [{"model": OLD_SWAP, "input": SWAP_INPUT}]}
+    first = await http.post("/v1/generations/batch", json=body, headers={"Idempotency-Key": "legacy-batch"})
+    again = await http.post("/v1/generations/batch", json=body, headers={"Idempotency-Key": "legacy-batch"})
+    assert first.status_code == 202 and again.status_code == 200
+    assert again.json()["generations"][0]["id"] == first.json()["generations"][0]["id"]
+
+    from hf_studio.service import _digest
+
+    one = {"model": NEW_SWAP, "input": SWAP_INPUT, "allow_duplicate": True}
+    job = (await http.post("/v1/generations", json=one, headers={"Idempotency-Key": "legacy-one"})).json()
+    async with app.state.sessions() as s:  # como lo guardó una versión anterior: huella con el id viejo
+        await s.execute(update(Job).where(Job.id == job["id"]).values(
+            input_hash=_digest(OLD_SWAP, SWAP_INPUT, False, None)))  # fmt: skip
+        await s.commit()
+    for model in (OLD_SWAP, NEW_SWAP):
+        r = await http.post(
+            "/v1/generations", json={**one, "model": model}, headers={"Idempotency-Key": "legacy-one"}
+        )
+        assert r.status_code == 200 and r.json()["id"] == job["id"]
+
+
+async def test_a_stored_plan_with_a_renamed_id_can_be_requoted(env):
+    from hf_studio.routing import requote
+
+    app, _, _ = env
+    model = app.state.router.catalog.get(NEW_SWAP)
+    option = {
+        "provider": "higgsfield",
+        "model": OLD_SWAP,
+        "input": SWAP_INPUT,
+        "hints": {"input_video_seconds": 5},
+    }
+    fresh = await requote(app.state.router, model, SWAP_INPUT, option)
+    assert fresh is not None and fresh["model"] == NEW_SWAP

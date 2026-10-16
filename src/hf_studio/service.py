@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .audio import supports_source_audio
-from .catalog import Catalog
+from .catalog import ALIASES, Catalog
 from .config import Settings
 from .db import ACTIVE, ApiClient, Job, Upload, utcnow
 from .elements import check_available
@@ -73,10 +73,7 @@ async def trusted_media(
     return any(o.get("url") == url for outputs in await session.scalars(jobs) for o in outputs or [])
 
 
-def request_digest(
-    model_id: str, arguments: dict, keep_source_audio: bool = False, provider: str | None = None
-) -> str:
-    """Huella de una petición de generación (deduplicado e idempotencia)."""
+def _digest(model_id: str, arguments: dict, keep_source_audio: bool, provider: str | None) -> str:
     # La opción cambia el resultado, así que forma parte de la huella.
     marked = {**arguments, "__keep_source_audio": True} if keep_source_audio else dict(arguments)
     if provider:
@@ -85,16 +82,39 @@ def request_digest(
     return input_hash(model_id, marked)
 
 
+def request_digest(
+    model_id: str, arguments: dict, keep_source_audio: bool = False, provider: str | None = None
+) -> str:
+    """Huella de una petición de generación (deduplicado e idempotencia), siempre con el id canónico: el
+    mismo pedido con un id renombrado (`catalog.ALIASES`) es la misma petición."""
+    return _digest(ALIASES.get(model_id, model_id), arguments, keep_source_audio, provider)
+
+
+def request_digests(
+    model_id: str, arguments: dict, keep_source_audio: bool = False, provider: str | None = None
+) -> set[str]:
+    """La huella canónica y las de los ids viejos del mismo modelo: los trabajos guardados antes del renombre
+    tienen la huella del id viejo y deben seguir reconociéndose al reintentar con su clave."""
+    canonical = ALIASES.get(model_id, model_id)
+    ids = {canonical} | {old for old, new in ALIASES.items() if new == canonical}
+    return {_digest(i, arguments, keep_source_audio, provider) for i in ids}
+
+
 async def job_for_key(
-    session: AsyncSession, owner: ApiClient, idempotency_key: str | None, digest: str
+    session: AsyncSession,
+    owner: ApiClient,
+    idempotency_key: str | None,
+    digest: str,
+    equivalent: set[str] | None = None,
 ) -> Job | None:
-    """El trabajo ya creado con esta Idempotency-Key (o None). La misma clave con otra petición es 409."""
+    """El trabajo ya creado con esta Idempotency-Key (o None). La misma clave con otra petición es 409.
+    `equivalent`: otras huellas de la misma petición (ids renombrados, ver `request_digests`)."""
     if not idempotency_key:
         return None
     existing = await session.scalar(
         select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
     )
-    if existing and existing.input_hash != digest:
+    if existing and existing.input_hash != digest and existing.input_hash not in (equivalent or ()):
         raise ServiceError(
             409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"
         )
@@ -136,7 +156,8 @@ async def create_generation(
             "keep_source_audio needs a video_url from /v1/uploads (upload_media) or from one of your generations",
         )
     digest = request_digest(model["id"], arguments, keep_source_audio, provider)
-    existing = await job_for_key(session, owner, idempotency_key, digest)
+    digests = request_digests(model["id"], arguments, keep_source_audio, provider)
+    existing = await job_for_key(session, owner, idempotency_key, digest, digests)
     if existing:
         return existing, False
     if not allow_duplicate:
@@ -145,7 +166,7 @@ async def create_generation(
             select(Job)
             .where(
                 Job.owner_id == owner.id,
-                Job.input_hash == digest,
+                Job.input_hash.in_(digests),
                 Job.status.in_(ACTIVE),
                 Job.created_at >= since,
             )
@@ -196,7 +217,7 @@ async def create_generation(
         existing = await session.scalar(
             select(Job).where(Job.owner_id == owner.id, Job.idempotency_key == idempotency_key)
         )
-        if existing and existing.input_hash == digest:
+        if existing and existing.input_hash in digests:
             return existing, False
         raise ServiceError(
             409, "idempotency_conflict", "This Idempotency-Key was already used for a different request"

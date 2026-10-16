@@ -13,7 +13,7 @@ import type { Dict } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
 import { humanize, type Field } from "@/lib/schema";
 import { DERIVED_OUTPUTS, inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, MAX_LIST_ITEMS, MAX_VARIANTS, newId, settingFields, validValues, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
-import { costShort, modelLabel, outputSrc, studio } from "@/lib/studio";
+import { costShort, modelLabel, outputSrc, studio, uniqueModels } from "@/lib/studio";
 import type { ModelDetail, Output } from "@/lib/types";
 import { selectedRun, useSpace } from "./context";
 
@@ -377,7 +377,7 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
   const switchable = !isTool(data.model) && !isAudioNode(data.model) && !isAssistant(data.model);
   const count = data.count ?? 1;
   const n = times[id] ?? 1;
-  const sameOutput = switchable ? [...models.values()].filter((m) => m.output === summary?.output && !isTool(m.id)) : [];
+  const sameOutput = switchable ? uniqueModels(models).filter((m) => m.output === summary?.output && !isTool(m.id)) : [];
 
   return (
     <div className="w-[320px]">

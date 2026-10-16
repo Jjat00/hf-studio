@@ -35,6 +35,11 @@ export function modelMap(list: ModelSummary[]): Map<string, ModelSummary> {
   return map;
 }
 
+/** Los modelos de un `modelMap` sin repetir los que también están bajo un id viejo (para listarlos). */
+export function uniqueModels(map: Map<string, ModelSummary>): ModelSummary[] {
+  return [...new Map([...map.values()].map((m) => [m.id, m])).values()];
+}
+
 /** Tipo de salida de una generación: del catálogo de Higgsfield, video (cambio de voz) o audio (ElevenLabs). */
 export function outputOf(model: string, models: Map<string, ModelSummary>): string | undefined {
   if (model === VOICE_MODEL) return "video";

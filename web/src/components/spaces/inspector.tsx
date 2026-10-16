@@ -11,7 +11,7 @@ import { StylePicker } from "@/components/studio/style-picker";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { ModelPicker, ModelRow } from "@/components/studio/model-picker";
 import { isAssistant, isAudioNode, isTool, mediaFields, settingFields, validValues, type GeneratorNode } from "@/lib/spaces";
-import { costShort } from "@/lib/studio";
+import { costShort, uniqueModels } from "@/lib/studio";
 import { selectedRun, useSpace } from "./context";
 import { portLabel } from "./nodes";
 import { VoiceSelect } from "./voice-select";
@@ -52,7 +52,7 @@ export function Inspector({ node }: { node: GeneratorNode | null }) {
   const confirming = !!state.confirm && state.confirm === ctx.signatures[id];
   const jobId = selectedRun(data);
   const short = costShort(fresh?.value ?? null);
-  const sameOutput = [...ctx.models.values()].filter((m) => m.output === summary?.output);
+  const sameOutput = uniqueModels(ctx.models).filter((m) => m.output === summary?.output);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

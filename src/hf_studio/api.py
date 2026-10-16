@@ -92,6 +92,7 @@ from .service import (
     input_hash,
     job_for_key,
     request_digest,
+    request_digests,
     trusted_media,
 )
 from .sounds import LABELS as SOUND_LABELS
@@ -865,7 +866,8 @@ def create_app(
         # Un reintento con la misma Idempotency-Key devuelve el trabajo ya creado antes de volver a cotizar o
         # resolver medios: un elemento borrado o un precio nuevo no lo convierten en otra petición (revisión 43).
         digest = request_digest(model["id"], body.input, body.keep_source_audio, body.provider)
-        if existing := await job_for_key(session, owner, idempotency_key, digest):
+        same = request_digests(model["id"], body.input, body.keep_source_audio, body.provider)
+        if existing := await job_for_key(session, owner, idempotency_key, digest, same):
             return JSONResponse(job_out(existing, deduplicated=True), status_code=200)
         plan = await make_plan(request, session, owner, model, body.input, body.hints, body.provider)
         best = plan.best
@@ -968,7 +970,7 @@ def create_app(
             for idx, key in positions:
                 prior = found.get(key)
                 item = body.items[idx]
-                if prior is not None and prior.input_hash != request_digest(item.model, item.input):
+                if prior is not None and prior.input_hash not in request_digests(item.model, item.input):
                     raise ServiceError(
                         409,
                         "idempotency_conflict",
