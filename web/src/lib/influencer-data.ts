@@ -121,7 +121,7 @@ export const GROUPS: Group[] = [
     ["hc_blue", "Blue", "Azul", "a"],
     ["hc_green", "Green", "Verde", "a"],
   ]),
-  g("aesthetic", "Estilo", "Style", 1, "style", [
+  g("aesthetic", "Estilo", "Style", 2, "style", [
     ["retro", "Retro", "Retro", "a"],
     ["sporty", "Sporty", "Deportivo", "a"],
     ["y2k", "Y2K", "Y2K", "a"],
@@ -130,6 +130,14 @@ export const GROUPS: Group[] = [
     ["suits", "Suits", "Trajes", "a"],
     ["streetstyle", "Streetstyle", "Urbano", "a"],
     ["casual", "Casual", "Casual", "a"],
+    ["st_elegant", "Elegant", "Elegante", "a"],
+    ["st_athlete", "Athlete", "Deportista", "a"],
+    ["st_shorts", "Shorts", "Pantaloneta", "a"],
+    ["st_tank", "Tank top", "Camisa esqueleto", "a"],
+    ["st_long_skirt", "Long skirt", "Falda larga", "a"],
+    ["st_mini_skirt", "Mini skirt", "Falda corta", "a"],
+    ["st_bodycon", "Bodycon dress", "Vestido ajustado", "a"],
+    ["st_flowy_dress", "Flowy dress", "Vestido suelto", "a"],
   ]),
   g("ethnicity_origin_base", "Origen", "Ethnicity", 1, "ethnicity", [
     ["african", "African", "Africano", "h"],
@@ -427,6 +435,14 @@ const SHORT_SHEET = "Two-panel character sheet: close-up portrait left, full bod
 /** Texto para el prompt cuando la etiqueta en inglés no basta para describir la opción. */
 const OPTION_PROMPT: Record<string, string> = {
   body_hourglass: "fit hourglass figure with a slim toned waist, full bust and round hips, not overweight",
+  st_elegant: "elegant formal evening wear",
+  st_athlete: "professional athlete in performance sportswear and sneakers",
+  st_shorts: "casual above-the-knee shorts",
+  st_tank: "sleeveless tank top",
+  st_long_skirt: "flowing ankle-length maxi skirt",
+  st_mini_skirt: "short mini skirt",
+  st_bodycon: "tight fitted bodycon dress",
+  st_flowy_dress: "loose flowy dress",
 };
 
 export function buildPrompt(
