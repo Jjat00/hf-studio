@@ -364,6 +364,10 @@ const es = {
     delete: "Borrar",
     cancel: "Cancelar",
     noPrompt: "Sin prompt",
+    expand: "Ver en grande",
+    close: "Cerrar",
+    previous: "Anterior",
+    next: "Siguiente",
   },
   history: {
     title: "Biblioteca",
@@ -1201,6 +1205,10 @@ const en: Dict = {
     delete: "Delete",
     cancel: "Cancel",
     noPrompt: "No prompt",
+    expand: "View large",
+    close: "Close",
+    previous: "Previous",
+    next: "Next",
   },
   history: {
     title: "Library",

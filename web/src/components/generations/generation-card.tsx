@@ -1,9 +1,10 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, Play, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { MediaViewer } from "@/components/generations/media-viewer";
 import { ReuseMenu } from "@/components/generations/reuse-menu";
 import { useI18n } from "@/components/i18n-provider";
 import type { Locale } from "@/lib/i18n";
@@ -119,6 +120,7 @@ export function GenerationCard({
   const elapsed = useElapsed(g);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  const [viewing, setViewing] = useState(false);
 
   async function saveAsPreset() {
     const title = window.prompt(t.generation.presetName, prompt.slice(0, 40) || t.generation.myPreset);
@@ -145,11 +147,36 @@ export function GenerationCard({
       {g.status === "completed" && main ? (
         main.kind === "audio" ? (
           <AudioPlayer src={outputSrc(main)} />
-        ) : main.kind === "video" ? (
-          <video src={outputSrc(main)} className="block w-full" controls loop playsInline preload="metadata" />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={outputSrc(main)} alt={prompt} className="block w-full" loading="lazy" />
+          // Clic: visor a pantalla completa. El video se previsualiza en silencio al pasar el cursor.
+          <button
+            type="button"
+            title={t.generation.expand}
+            aria-label={t.generation.expand}
+            onClick={() => setViewing(true)}
+            className="group/media relative block w-full cursor-zoom-in"
+          >
+            {main.kind === "video" ? (
+              <>
+                <video
+                  src={outputSrc(main)}
+                  className="block w-full"
+                  muted
+                  loop
+                  playsInline
+                  preload="metadata"
+                  onMouseEnter={(e) => void e.currentTarget.play().catch(() => undefined)}
+                  onMouseLeave={(e) => e.currentTarget.pause()}
+                />
+                <span className="pointer-events-none absolute bottom-3 left-3 flex size-8 items-center justify-center rounded-full bg-black/60 transition-opacity group-hover/media:opacity-0">
+                  <Play className="size-4 fill-current" />
+                </span>
+              </>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={outputSrc(main)} alt={prompt} className="block w-full" loading="lazy" />
+            )}
+          </button>
         )
       ) : g.status === "awaiting_approval" ? (
         <ApprovalPanel g={g} />
@@ -179,6 +206,14 @@ export function GenerationCard({
         <span className="absolute top-3 left-3 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-semibold">
           +{g.outputs.length - 1}
         </span>
+      )}
+      {viewing && (
+        <MediaViewer
+          outputs={g.outputs}
+          title={modelName(g.model, locale, models)}
+          caption={prompt || undefined}
+          onClose={() => setViewing(false)}
+        />
       )}
     </div>
   );
@@ -289,7 +324,10 @@ export function GenerationCard({
         </Link>
         <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
       </div>
-      {providerChip && <div className="flex min-w-0 px-1 text-xs text-fg-3">{providerChip}</div>}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-1 text-xs text-fg-3">
+        <span className="max-w-full truncate rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, locale, models)}</span>
+        {providerChip}
+      </div>
     </article>
   );
 }
