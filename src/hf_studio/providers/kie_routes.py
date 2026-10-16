@@ -384,5 +384,94 @@ def others() -> dict[str, Route]:
     return routes
 
 
+# --- Kling 2.6, Motion Control 2.6, Kling 2.5 Turbo Pro y Z-Image (2026-10-16) -----------------------
+# Fuente: docs.kie.ai/market (kling/text-to-video, image-to-video, motion-control, v25-turbo-*-pro,
+# z-image/z-image) y la tabla pública. Precios por video salvo Motion Control (por segundo de salida).
+
+
+def _tenth(value: Any) -> Any:
+    """`cfg_scale` en pasos de 0,1 (KIE); otro valor no se puede reproducir."""
+    if round(float(value) * 10, 6) != round(float(value) * 10):
+        raise unsupported(P, "KIE takes cfg_scale in steps of 0.1")
+    return value
+
+
+def _max_chars(field_name: str, limit: int):
+    def check(value):
+        if len(str(value)) > limit:
+            raise unsupported(P, f"KIE allows {limit} characters in {field_name}")
+        return value or None
+
+    return check
+
+
+def recent() -> dict[str, Route]:
+    routes = {}
+    sound = {"sound": lambda v: v == "on", "duration": _str, "cfg_scale": only_default("cfg_scale", 0.5)}
+    for kind in ("text-to-video", "image-to-video"):
+        model = f"kling-2.6/{kind}"
+        image = kind == "image-to-video"
+        routes[f"kling-video/v2.6/pro/{kind}"] = Route(
+            P, model,
+            Spec(P, model, keep=("prompt",) if image else ("prompt", "aspect_ratio"),
+                 rename={"image_url": "image_urls"},
+                 convert={**sound, "image_url": lambda v: [v],
+                          # i2v de KIE no tiene formato: uno elegido no se puede reproducir.
+                          **({"aspect_ratio": _no_list("aspect_ratio")} if image else {})}),
+            lambda i, h, p, k=kind: per_unit(
+                p, f"kling 2.6, {k}, {'with' if i.get('sound', 'on') == 'on' else 'without'} audio-{i.get('duration', 5)}.0s"),
+            notes=("KIE sells this model as Kling 2.6 Pro; it has no mode switch",),
+        )  # fmt: skip
+    for tier, mode, row in (
+        ("std", "720p", "video-to-video, 720p"),
+        ("pro", "1080p", "video to video, 1080p"),
+    ):
+        routes[f"kling-video/motion-control/{tier}"] = Route(
+            P, "kling-2.6/motion-control",
+            Spec(P, "kling-2.6/motion-control", keep=("prompt", "character_orientation"),
+                 rename={"image_url": "input_urls", "video_url": "video_urls"},
+                 convert={"image_url": lambda v: [v], "video_url": lambda v: [v], "prompt": lambda v: v or None,
+                          "keep_original_sound": only_default("keep_original_sound", "yes")},
+                 fixed={"mode": mode}),
+            lambda i, h, p, r=row: per_second(p, f"kling 2.6 motion control, {r}", video_seconds(h)),
+            notes=("Billed by the length of the motion video",
+                   "KIE says the result may keep the motion video's sound; it has no switch for it"),
+            check=_motion_length,
+        )  # fmt: skip
+    for kind, model in (("text-to-video", "kling/v2-5-turbo-text-to-video-pro"),
+                        ("image-to-video", "kling/v2-5-turbo-image-to-video-pro")):  # fmt: skip
+        limit = 2496 if kind == "image-to-video" else 2500
+        routes[f"kling-video/v2.5-turbo/pro/{kind}"] = Route(
+            P, model,
+            Spec(P, model, keep=("prompt", "image_url"),
+                 convert={"duration": _str, "cfg_scale": _tenth,
+                          "negative_prompt": _max_chars("negative_prompt", limit)}),
+            lambda i, h, p, k=kind: per_unit(p, f"kling 2.5 turbo, {k}, turbo pro-{i.get('duration', 5)}.0s"),
+        )  # fmt: skip
+    routes["z-image/turbo"] = Route(
+        P, "z-image",
+        Spec(P, "z-image", keep=("prompt", "aspect_ratio"),
+             convert={"seed": _fixed_seed,
+                      "resolution": only_default("resolution", "1k"),
+                      "prompt_extend": only_default("prompt_extend", False)},
+             allowed={"aspect_ratio": {"1:1", "4:3", "3:4", "16:9", "9:16"}}),
+        lambda i, h, p: per_unit(p, "qwen z-image, text-to-image, 1.0s"),
+        notes=("KIE does not publish Z-Image's output size; only 1K is offered",),
+    )  # fmt: skip
+    return routes
+
+
+def _motion_length(source: dict, hints: dict) -> None:
+    """Con la orientación de la imagen, el video de movimiento admite hasta 10 s (la lógica, hasta 30 s)."""
+    seconds = video_seconds(hints)
+    if source.get("character_orientation", "video") == "image" and seconds is not None and seconds > 10:
+        raise unsupported(P, "KIE takes motion videos of up to 10 s with character_orientation=image")
+
+
+def _fixed_seed(value):
+    """Z-Image no tiene semilla en KIE y la lógica no usa -1: cualquier semilla es fija (0 también)."""
+    raise unsupported(P, "a fixed seed cannot be reproduced on KIE for this model")
+
+
 def kie_routes() -> dict[str, Route]:
-    return {**seedance(), **kling(), **wan(), **others()}
+    return {**seedance(), **kling(), **wan(), **others(), **recent()}

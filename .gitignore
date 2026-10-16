@@ -13,3 +13,4 @@ data/
 
 # Informes de revisión de Codex: solo en local, fuera del repo
 .revisiones/
+.vercel

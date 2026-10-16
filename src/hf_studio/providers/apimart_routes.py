@@ -1,6 +1,7 @@
 """Modelos del catálogo que APIMart ofrece, con su traducción y su precio.
 
-Fuente: docs.apimart.ai (páginas `.md`) y la tabla pública de precios, revisadas el 2026-10-03. Las claves
+Fuente: docs.apimart.ai (páginas `.md`) y la tabla pública de precios, revisadas el 2026-10-03 (Kling 2.6,
+Omni, O3, Motion Control 2.6, Z-Image y Grok Image 2.0: 2026-10-16). Las claves
 de precio son `modelo|clave` (`apimart.parse_prices`), en USD por segundo salvo que se diga otra cosa.
 APIMart apaga por defecto el audio de Kling y PixVerse y usa 1080P por defecto en Wan y HappyHorse: por eso
 la entrada llega completa (`routes.with_defaults`) y se envía todo explícito.
@@ -491,5 +492,270 @@ def others() -> Routes:
     return routes
 
 
+# --- Kling 2.6, Omni (O1) y O3 (2026-10-16) ---------------------------------------------------------
+# Fuente: docs.apimart.ai («Kling 2.6», «Kling Video O1», «Kling 3.0 Omni», «Kling Motion Control») y la tabla
+# pública de precios. `elements` de O1/O3 son ids de Higgsfield: no tienen imágenes que enviar.
+
+
+def _fixed_seed(value):
+    """Sin campo de semilla: una semilla fija no se puede reproducir (0 también es fija)."""
+    if value is not None:
+        raise unsupported(P, "a fixed seed cannot be reproduced on APIMart for this model")
+
+
+def _no_higgsfield_elements(value):
+    if value:
+        raise unsupported(P, "Higgsfield element ids cannot be sent to APIMart")
+
+
+def _roles(source: dict, out: dict, *, refs: bool = True) -> dict:
+    """Fotogramas y referencias como `image_with_roles` (O1 y O3)."""
+    roles = []
+    if source.get("first_frame_url"):
+        roles.append({"url": source["first_frame_url"], "role": "first_frame"})
+    if source.get("last_frame_url"):
+        if not source.get("first_frame_url"):
+            raise unsupported(P, "APIMart needs a first frame to use a last frame")
+        roles.append({"url": source["last_frame_url"], "role": "last_frame"})
+    images = source.get("image_urls") or []
+    if images and not refs:
+        raise unsupported(P, "APIMart treats images with a video as a first frame, not as references")
+    if images and len(roles) and len(roles) + len(images) > 2:
+        raise unsupported(P, "APIMart does not mix start/end frames with more than two images")
+    roles += [{"url": u, "role": "reference"} for u in images]
+    for key in ("first_frame_url", "last_frame_url", "image_urls"):
+        out.pop(key, None)
+    if roles:
+        out["image_with_roles"] = roles
+    return out
+
+
+def _video_list(refer_type: str):
+    def build(source: dict, out: dict) -> dict:
+        out = _roles(source, out, refs=False)
+        out["video_list"] = [{"video_url": source["video_urls"][0], "refer_type": refer_type}]
+        out.pop("video_urls", None)
+        if refer_type == "base":
+            out.pop("duration", None)  # la salida dura lo que el video de origen
+        return out
+
+    return build
+
+
+def _shots(source: dict, out: dict) -> dict:
+    """Multiplano de O3: `index` desde 1 y `duration` total = suma de los planos (como en Higgsfield)."""
+    out.pop("multi_shots", None)
+    out.pop("shot_type", None)
+    out.pop("multi_prompt", None)
+    if not source.get("multi_shots"):
+        out["multi_shot"] = False
+        if not source.get("prompt"):
+            raise unsupported(P, "APIMart requires a prompt")
+        return out
+    out["multi_shot"] = True
+    shots = source.get("multi_prompt") or []
+    if source.get("shot_type", "customize") == "intelligent":
+        # El modo «intelligence» de APIMart reparte los planos solo: unos planos pedidos se perderían.
+        if shots:
+            raise unsupported(P, "APIMart's automatic multi-shot mode does not take the requested shots")
+        out["shot_type"] = "intelligence"
+        return out
+    if not shots:
+        raise unsupported(P, "APIMart needs the shots for a custom multi-shot video")
+    out["shot_type"] = "customize"
+    out["multi_prompt"] = [{"index": n, "prompt": s.get("prompt", ""), "duration": s.get("duration")}
+                           for n, s in enumerate(shots, 1)]  # fmt: skip
+    total = sum(int(s.get("duration") or 0) for s in shots)
+    if not 3 <= total <= 15:
+        raise unsupported(P, "APIMart needs the shots to add up to 3-15 seconds")
+    out["duration"] = total
+    return out
+
+
+def _omni_price(model: str, video: bool, sound: bool = False):
+    def price(i: dict, hints: dict, prices: dict) -> float | None:
+        mode = i.get("mode", "std")
+        if video:
+            if mode == "4k":
+                return None  # APIMart no publica tarifa de 4K con video
+            key = "video" if mode == "std" else "pro-video"
+            seconds = i.get("duration") if "duration" in i else video_seconds(hints)
+        else:
+            audio = sound and i.get("sound", "off") == "on"
+            key = {"std": "sound" if audio else "default", "pro": "pro-sound" if audio else "pro",
+                   "4k": "4k-sound" if audio else "4k"}[mode]  # fmt: skip
+            seconds = i.get("duration")
+            if (
+                i.get("multi_shots")
+                and i.get("multi_prompt")
+                and i.get("shot_type", "customize") == "customize"
+            ):
+                seconds = sum(int(s.get("duration") or 0) for s in i["multi_prompt"])
+        return per_second(prices, f"{model}|{key}", seconds)
+
+    return price
+
+
+def _short_source(source: dict, hints: dict) -> None:
+    """Edición (refer_type=base): APIMart admite videos de origen de 3 a 10 s; la lógica, hasta 15,5 s."""
+    seconds = video_seconds(hints)
+    if seconds is not None and seconds > 10:
+        raise unsupported(P, "APIMart edits source videos of up to 10 s")
+
+
+def _motion_length(source: dict, hints: dict) -> None:
+    """Con la orientación de la imagen, el video de movimiento admite hasta 10 s (la lógica, hasta 30 s)."""
+    seconds = video_seconds(hints)
+    if source.get("character_orientation", "video") == "image" and seconds is not None and seconds > 10:
+        raise unsupported(P, "APIMart takes motion videos of up to 10 s with character_orientation=image")
+
+
+OMNI_NOTES = (
+    "APIMart prepends <<<image_1>>> to the prompt when it cites no image, as Kling's own API does",
+    "APIMart keeps the source video's sound off unless asked; Higgsfield does not document it",
+)
+
+
+def omni() -> Routes:
+    routes = {}
+    o1 = "kling-video-o1"
+    o1_common = {"convert": {"elements": _no_higgsfield_elements}, "allowed": {"duration": {5, 10}}}
+    routes["kling-video/omni/first-last-frame"] = Route(
+        P, o1, Spec(P, o1, keep=("prompt", "duration", "aspect_ratio", "mode", "first_frame_url", "last_frame_url"),
+                    build=lambda s, o: _roles(s, o), **o1_common),
+        _omni_price(o1, video=False), notes=OMNI_NOTES[:1],
+    )  # fmt: skip
+    routes["kling-video/omni/image-reference"] = Route(
+        P, o1, Spec(P, o1, keep=("prompt", "duration", "aspect_ratio", "mode", "image_urls"),
+                    build=lambda s, o: _roles(s, o), **o1_common),
+        _omni_price(o1, video=False), notes=OMNI_NOTES[:1],
+    )  # fmt: skip
+    routes["kling-video/omni/video-reference"] = Route(
+        P, o1, Spec(P, o1, keep=("prompt", "duration", "aspect_ratio", "mode", "image_urls", "video_urls"),
+                    build=_video_list("feature"), **o1_common),
+        _omni_price(o1, video=True), notes=OMNI_NOTES,
+    )  # fmt: skip
+    routes["kling-video/omni/video-edit"] = Route(
+        P, o1, Spec(P, o1, keep=("prompt", "mode", "image_urls", "video_urls"),
+                    convert={"elements": _no_higgsfield_elements}, build=_video_list("base")),
+        _omni_price(o1, video=True), notes=(*OMNI_NOTES, "The source video must be 3-10 s on APIMart"),
+        check=_short_source,
+    )  # fmt: skip
+
+    o3 = "kling-v3-omni"
+    sound = {"sound": lambda v: v == "on"}
+
+    def framed(source: dict, out: dict) -> dict:
+        return _shots(source, _roles(source, out))
+
+    def explicit_ratio(source: dict) -> None:
+        # Sin formato explícito APIMart usa 16:9 y no se sabe qué hace Higgsfield con las referencias.
+        if not source.get("aspect_ratio") and not source.get("first_frame_url"):
+            raise unsupported(P, "APIMart needs an explicit aspect ratio for references")
+
+    def refs(source: dict, out: dict) -> dict:
+        explicit_ratio(source)
+        return framed(source, out)
+
+    def video_refs(source: dict, out: dict) -> dict:
+        explicit_ratio(source)
+        return _video_list("feature")(source, out)
+
+    shots_keep = ("prompt", "duration", "aspect_ratio", "mode", "multi_shots", "shot_type", "multi_prompt")
+    routes["kling-video/o3/first-last-frame"] = Route(
+        P, o3, Spec(P, o3, keep=(*shots_keep, "first_frame_url", "last_frame_url"), rename={"sound": "audio"},
+                    convert=sound, build=framed),
+        _omni_price(o3, video=False, sound=True), notes=OMNI_NOTES[:1],
+    )  # fmt: skip
+    routes["kling-video/o3/image-reference"] = Route(
+        P, o3, Spec(P, o3, keep=(*shots_keep, "first_frame_url", "last_frame_url", "image_urls"),
+                    rename={"sound": "audio"}, convert={**sound, "elements": _no_higgsfield_elements}, build=refs),
+        _omni_price(o3, video=False, sound=True), notes=OMNI_NOTES[:1],
+    )  # fmt: skip
+    routes["kling-video/o3/video-reference"] = Route(
+        P, o3, Spec(P, o3, keep=("prompt", "duration", "aspect_ratio", "mode", "image_urls", "video_urls"),
+                    convert={"elements": _no_higgsfield_elements}, build=video_refs),
+        _omni_price(o3, video=True), notes=OMNI_NOTES,
+    )  # fmt: skip
+    routes["kling-video/o3/video-edit"] = Route(
+        P, o3, Spec(P, o3, keep=("prompt", "mode", "image_urls", "video_urls"),
+                    convert={"elements": _no_higgsfield_elements}, allowed={"mode": {"std", "pro"}},
+                    build=_video_list("base")),
+        _omni_price(o3, video=True), notes=(*OMNI_NOTES, "The source video must be 3-10 s on APIMart"),
+        check=_short_source,
+    )  # fmt: skip
+
+    k26 = "kling-v2-6"
+    k26_spec = {"rename": {"sound": "audio"},
+                "convert": {**sound, "cfg_scale": only_default("cfg_scale", 0.5)}, "fixed": {"mode": "pro"}}  # fmt: skip
+    k26_price = lambda i, h, p: per_second(
+        p, f"{k26}|{'pro-sound' if i.get('sound', 'on') == 'on' else 'pro'}", i.get("duration")
+    )
+    routes["kling-video/v2.6/pro/text-to-video"] = Route(
+        P, k26, Spec(P, k26, keep=("prompt", "duration", "aspect_ratio"), **k26_spec), k26_price
+    )
+    routes["kling-video/v2.6/pro/image-to-video"] = Route(
+        P, k26,
+        Spec(P, k26, keep=("prompt", "duration", "aspect_ratio"), rename={**k26_spec["rename"], "image_url": "image_urls"},
+             convert={**k26_spec["convert"], "image_url": lambda v: [v]}, fixed=k26_spec["fixed"]),
+        k26_price,
+    )  # fmt: skip
+    mc = "kling-v2-6-motion-control"
+    for tier, key in (("std", "default"), ("pro", "pro")):
+        routes[f"kling-video/motion-control/{tier}"] = Route(
+            P, mc,
+            Spec(P, mc, keep=("prompt", "image_url", "video_url", "keep_original_sound", "character_orientation"),
+                 fixed={"mode": tier, "watermark_info": {"enabled": False}}),
+            lambda i, h, p, k=key: per_second(p, f"{mc}|{k}", video_seconds(h)),
+            notes=("Billed by the length of the motion video",), check=_motion_length,
+        )  # fmt: skip
+    return routes
+
+
+# --- Imágenes (endpoint /v1/images/generations) -------------------------------------------------------
+
+IMAGE_MODELS = frozenset({"z-image-turbo", "grok-imagine-image-2.0"})
+
+
+def images() -> Routes:
+    routes = {}
+    zit = "z-image-turbo"
+    routes["z-image/turbo"] = Route(
+        P, zit,
+        Spec(P, zit, keep=("prompt", "prompt_extend"), rename={"aspect_ratio": "size"},
+             convert={"resolution": _upper, "seed": _fixed_seed},
+             allowed={"aspect_ratio": {"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"},
+                      # 2K: APIMart da 2048 px y Higgsfield no publica su tamaño; solo 1K es seguro.
+                      "resolution": {"1k"}}),
+        lambda i, h, p: per_unit(p, f"{zit}|{'prompt_extend' if i.get('prompt_extend') else 'default'}"),
+    )  # fmt: skip
+    grok = "grok-imagine-image-2.0"
+
+    def grok_edit(source: dict, out: dict) -> dict:
+        images = source.get("image_urls") or []
+        if images:
+            if len(images) > 3:
+                raise unsupported(P, "APIMart takes at most 3 images to edit")
+            if source.get("quality", "medium") != "medium":
+                raise unsupported(P, "APIMart edits only at its default quality")
+            out.pop("quality", None)  # «no enviar quality con imágenes» (docs de APIMart)
+        else:
+            out.pop("image_urls", None)
+        return out
+
+    def grok_price(i: dict, h: dict, p: dict) -> float | None:
+        res = str(i.get("resolution", "1k")).upper()
+        base = per_unit(p, f"{grok}|{res}@{i.get('quality', 'medium')}")
+        refs = len(i.get("image_urls") or [])
+        extra = per_unit(p, f"{grok}|input:image", refs) if refs else 0.0
+        return None if base is None or extra is None else round(base + extra, 4)
+
+    routes["xai/grok-imagine-image-2.0"] = Route(
+        P, grok, Spec(P, grok, keep=("prompt", "aspect_ratio", "resolution", "quality", "image_urls"), build=grok_edit),
+        grok_price,
+    )  # fmt: skip
+    return routes
+
+
 def apimart_routes() -> Routes:
-    return {**seedance(), **kling(), **wan(), **others()}
+    return {**seedance(), **kling(), **wan(), **others(), **omni(), **images()}

@@ -22,6 +22,9 @@ EXPECTED_UNSUPPORTED = {
     ("kie", "xai/grok-imagine-video/v1.5/reference-to-video"),  # KIE exige al menos una imagen
     # canal -ext: sin imágenes pide una relación explícita, y la duración por defecto (5 s) es menor que su mínimo
     ("apimart", "xai/grok-imagine-video/v1.5/reference-to-video", "grok-imagine-1.5-video-ext"),
+    # O3 con referencias y sin formato explícito: APIMart usaría 16:9 y Higgsfield no dice qué hace
+    ("apimart", "kling-video/o3/image-reference"),
+    ("apimart", "kling-video/o3/video-reference"),
 }
 ROUTED = [
     (name, mid, route.model)
@@ -159,3 +162,106 @@ def test_grok_ext_channel_keeps_the_request_exact():
         with pytest.raises(ProviderError) as info:
             route.translate(bad, chosen(mid, *bad))
         assert info.value.kind == "unsupported"
+
+
+def _prices(provider: str) -> dict:
+    return json.loads((FIXTURES / f"prices_{provider}.json").read_text())
+
+
+def _unsupported(route, logical: dict) -> None:
+    with pytest.raises(ProviderError) as info:
+        route.translate(logical, frozenset(logical))
+    assert info.value.kind == "unsupported"
+
+
+def test_o3_multi_shot_adds_up_the_shots_and_keeps_the_roles():
+    route = route_of("apimart", "kling-video/o3/first-last-frame")
+    shots = [{"prompt": "a", "duration": 4}, {"prompt": "b", "duration": 6}]
+    logical = {**sample("kling-video/o3/first-last-frame"), "first_frame_url": "https://x/f.png",
+               "multi_shots": True, "multi_prompt": shots, "sound": "on"}  # fmt: skip
+    out = route.translate(logical, frozenset(logical))
+    assert out["duration"] == 10 and out["multi_shot"] is True and out["shot_type"] == "customize"
+    assert [s["index"] for s in out["multi_prompt"]] == [1, 2] and out["audio"] is True
+    assert out["image_with_roles"] == [{"url": "https://x/f.png", "role": "first_frame"}]
+    # 10 s con audio en pro, no los 5 s de `duration`
+    assert route.price(logical, {}, _prices("apimart")) == round(0.112 * 10, 4)
+    intelligent = {**logical, "multi_prompt": None, "shot_type": "intelligent"}
+    assert route.translate(intelligent, frozenset(intelligent))["shot_type"] == "intelligence"
+
+
+def test_omni_routes_refuse_what_apimart_cannot_reproduce():
+    ref = route_of("apimart", "kling-video/omni/image-reference")
+    base = {**sample("kling-video/omni/image-reference"), "image_urls": ["https://x/a.png"]}
+    assert ref.translate(base, frozenset(base))["image_with_roles"][0]["role"] == "reference"
+    _unsupported(ref, {**base, "duration": 7})  # O1 solo 5 o 10 s
+    _unsupported(ref, {**base, "elements": ["hf-element-id"]})  # ids de Higgsfield
+    o3 = route_of("apimart", "kling-video/o3/image-reference")
+    framed = {**sample("kling-video/o3/image-reference"), "aspect_ratio": "9:16", "first_frame_url": "https://x/f.png",
+              "image_urls": ["https://x/a.png", "https://x/b.png"]}  # fmt: skip
+    _unsupported(o3, framed)  # fotogramas con más de dos imágenes
+    edit = route_of("apimart", "kling-video/o3/video-edit")
+    video = {**sample("kling-video/o3/video-edit"), "video_urls": ["https://x/v.mp4"]}
+    _unsupported(edit, {**video, "mode": "4k"})  # sin tarifa de 4K con video
+    _unsupported(edit, {**video, "image_urls": ["https://x/a.png"]})  # serían fotograma, no referencia
+    out = edit.translate(video, frozenset(video))
+    assert (
+        out["video_list"] == [{"video_url": "https://x/v.mp4", "refer_type": "base"}]
+        and "duration" not in out
+    )
+    assert edit.price(video, {"input_video_seconds": 8}, _prices("apimart")) == round(0.1344 * 8, 4)
+    edit.check(video, {"input_video_seconds": 10})
+    with pytest.raises(ProviderError) as info:
+        edit.check(video, {"input_video_seconds": 12})  # APIMart edita fuentes de 3-10 s
+    assert info.value.kind == "unsupported"
+
+
+def test_kling_26_and_25_turbo_keep_audio_and_cfg_exact():
+    for provider in ("apimart", "kie"):
+        route = route_of(provider, "kling-video/v2.6/pro/text-to-video")
+        logical = sample("kling-video/v2.6/pro/text-to-video")
+        out = route.translate(logical, frozenset(logical))
+        assert out.get("audio", out.get("sound")) is True  # Higgsfield lo enciende por defecto
+        _unsupported(route, {**logical, "cfg_scale": 0.7})
+    turbo = route_of("kie", "kling-video/v2.5-turbo/pro/text-to-video")
+    logical = sample("kling-video/v2.5-turbo/pro/text-to-video")
+    assert turbo.translate({**logical, "cfg_scale": 0.7}, frozenset(logical))["cfg_scale"] == 0.7
+    _unsupported(turbo, {**logical, "cfg_scale": 0.55})  # KIE va en pasos de 0,1
+    assert turbo.price(logical, {}, _prices("kie")) == 0.21
+    i2v = route_of("kie", "kling-video/v2.6/pro/image-to-video")
+    _unsupported(i2v, {**sample("kling-video/v2.6/pro/image-to-video"), "aspect_ratio": "9:16"})
+
+
+def test_motion_control_26_prices_by_the_motion_video():
+    for provider, tier, rate in (("apimart", "std", 0.05712), ("kie", "pro", 0.09)):
+        route = route_of(provider, f"kling-video/motion-control/{tier}")
+        logical = sample(f"kling-video/motion-control/{tier}")
+        assert route.translate(logical, frozenset(logical))
+        assert route.price(logical, {"input_video_seconds": 10}, _prices(provider)) == round(rate * 10, 4)
+        assert route.price(logical, {}, _prices(provider)) is None
+
+
+def test_image_routes_refuse_seeds_sizes_and_edits_they_cannot_match():
+    for provider in ("apimart", "kie"):
+        route = route_of(provider, "z-image/turbo")
+        logical = sample("z-image/turbo")
+        assert route.translate(logical, frozenset(logical))
+        _unsupported(route, {**logical, "seed": 0})
+        _unsupported(route, {**logical, "resolution": "2k"})
+        _unsupported(route, {**logical, "aspect_ratio": "21:9"})
+    grok = route_of("apimart", "xai/grok-imagine-image-2.0")
+    logical = sample("xai/grok-imagine-image-2.0")
+    edit = {**logical, "image_urls": ["https://x/a.png", "https://x/b.png"]}
+    out = grok.translate(edit, frozenset(edit))
+    assert "quality" not in out and out["aspect_ratio"] == "auto"
+    assert grok.price(edit, {}, _prices("apimart")) == round(0.048 + 2 * 0.008, 4)
+    _unsupported(grok, {**edit, "quality": "low"})
+    _unsupported(grok, {**edit, "image_urls": ["https://x/a.png"] * 4})
+
+
+def test_o3_automatic_multi_shot_refuses_requested_shots():
+    route = route_of("apimart", "kling-video/o3/image-reference")
+    logical = {**sample("kling-video/o3/image-reference"), "aspect_ratio": "16:9", "multi_shots": True,
+               "shot_type": "intelligent", "multi_prompt": [{"prompt": "a", "duration": 4}, {"prompt": "b", "duration": 6}]}  # fmt: skip
+    _unsupported(route, logical)  # «intelligence» repartiría los planos solo y se perderían
+    automatic = {**logical, "multi_prompt": None}
+    assert route.translate(automatic, frozenset(automatic))["shot_type"] == "intelligence"

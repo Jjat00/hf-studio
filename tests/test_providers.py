@@ -374,3 +374,43 @@ async def test_kie_code_500_is_only_safe_when_it_names_a_parameter(message, kind
             "m", {}
         )
     assert info.value.kind == kind and info.value.fallback_safe == (kind == "validation")
+
+
+async def test_apimart_sends_image_models_to_the_image_endpoint():
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        if request.method == "POST":
+            return httpx.Response(202, json={"code": 202, "data": {"id": "task_img", "status": "pending"}})
+        return httpx.Response(200, json={"code": 200, "data": {
+            "id": "task_img", "status": "completed",
+            "result": {"images": [{"url": ["https://cdn.apimart.test/a.png"]}]}}})  # fmt: skip
+
+    provider = APIMartProvider(settings(**KEYS), mock(handler))
+    assert (await provider.submit_job("z-image-turbo", {"prompt": "x"})).request_id == "task_img"
+    await provider.submit_job("kling-v2-6", {"prompt": "x"})
+    assert paths == ["/v1/images/generations", "/v1/videos/generations"]
+    polled = await provider.poll_job("task_img")
+    assert polled.outputs == [
+        {"kind": "image", "url": "https://cdn.apimart.test/a.png", "content_type": None}
+    ]
+
+
+async def test_a_price_table_saved_by_an_older_parser_is_downloaded_again(tmp_path):
+    from hf_studio.providers.prices import PriceBook
+
+    class Fake:
+        has_price_table, price_format, calls = True, 2, 0
+
+        async def fetch_prices(self):
+            Fake.calls += 1
+            return {"z-image-turbo|default": 0.01}
+
+    book = PriceBook(tmp_path)
+    book.store("apimart", {"kling-v3|default": 0.1})  # formato 1: sin modelos de imagen
+    assert book.stale("apimart", 2) and not book.stale("apimart", 1)
+    await book.refresh({"apimart": Fake()})
+    assert Fake.calls == 1 and "z-image-turbo|default" in book.prices("apimart")
+    await book.refresh({"apimart": Fake()})  # ya con el formato nuevo y reciente: no se descarga
+    assert Fake.calls == 1

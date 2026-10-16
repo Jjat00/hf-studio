@@ -63,6 +63,11 @@
 "gemini-omni-flash-preview|720P": 0.088,
 "grok-imagine-1.5-video-apimart|480P": 0.0102,
 "grok-imagine-1.5-video-apimart|720P": 0.01912,
+"grok-imagine-image-2.0|1K@low": 0.032,
+"grok-imagine-image-2.0|1K@medium": 0.048,
+"grok-imagine-image-2.0|2K@low": 0.048,
+"grok-imagine-image-2.0|2K@medium": 0.064,
+"grok-imagine-image-2.0|input:image": 0.008,
 "grok-imagine-video-1.5|1080P": 0.2,
 "grok-imagine-video-1.5|480P": 0.064,
 "grok-imagine-video-1.5|720P": 0.112,
@@ -239,5 +244,7 @@
 "wan3.0-video|1080P": 0.131504,
 "wan3.0-video|480P": 0.03288,
 "wan3.0-video|720P": 0.065752,
-"wan3.0-video|default": 0.131504
+"wan3.0-video|default": 0.131504,
+"z-image-turbo|default": 0.01,
+"z-image-turbo|prompt_extend": 0.02
 }

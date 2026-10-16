@@ -37,6 +37,9 @@ class Route:
     # El cobro final se liquida después (p. ej. por tokens): el precio es aproximado, no exacto.
     settles_later: bool = False
     notes: tuple[str, ...] = field(default_factory=tuple)
+    # Lo que la entrada sola no dice pero el proveedor limita (p. ej. la duración del video de entrada, que
+    # llega en `hints`): lanza `unsupported` y el proveedor queda fuera, en vez de un precio desconocido.
+    check: Callable[[dict[str, Any], dict[str, Any]], None] | None = None
 
 
 Routes = dict[str, Route | tuple[Route, ...]]

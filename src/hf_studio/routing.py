@@ -263,7 +263,10 @@ class Router:
             # envía en línea. Un id de Higgsfield queda como texto.
             filled = {**filled, "elements": [elements.get(v, v) for v in filled["elements"]]}
         try:
-            translated = route.translate(with_defaults(model["input_schema"], filled), frozenset(arguments))
+            complete = with_defaults(model["input_schema"], filled)
+            translated = route.translate(complete, frozenset(arguments))
+            if route.check:
+                route.check(complete, hints)
         except ProviderError as exc:
             excluded.append({**info, "model": route.model, "reason": exc.message})
             return None

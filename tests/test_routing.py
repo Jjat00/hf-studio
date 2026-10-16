@@ -805,3 +805,25 @@ def test_renamed_genjutsu_ids_still_resolve():
     assert catalog.get(old)["id"] == new
     assert catalog.validate(old, {}) == catalog.validate(new, {})
     assert all(not m["id"].startswith("higgsfiled/") for m in catalog.search())
+
+
+async def test_reseller_limits_on_input_video_length_exclude_the_provider(env):
+    """Revisión 85 de Codex: un video de entrada más largo de lo que admite el revendedor lo deja fuera del plan
+    (antes salía con precio, o con precio desconocido, y podía enviarse)."""
+    _, http, _ = env
+    motion = {"image_url": "https://cdn.test/i.png", "video_url": "https://cdn.test/v.mp4",
+              "character_orientation": "image"}  # fmt: skip
+    for seconds, out in ((10, set()), (20, {"apimart", "kie"})):
+        body = (await http.post("/v1/estimate", json={"model": "kling-video/motion-control/pro", "input": motion,
+                                                       "hints": {"input_video_seconds": seconds}})).json()  # fmt: skip
+        assert {e["provider"] for e in body["excluded"]} >= out
+        assert not out & {o["provider"] for o in body["options"]}
+    body = (await http.post("/v1/estimate", json={"model": "kling-video/motion-control/pro",
+                                                   "input": {**motion, "character_orientation": "video"},
+                                                   "hints": {"input_video_seconds": 20}})).json()  # fmt: skip
+    assert {"apimart", "kie"} <= {o["provider"] for o in body["options"]}
+    edit = {"prompt": "make it night", "video_urls": ["https://cdn.test/v.mp4"]}
+    body = (await http.post("/v1/estimate", json={"model": "kling-video/o3/video-edit", "input": edit,
+                                                   "hints": {"input_video_seconds": 12}})).json()  # fmt: skip
+    assert "apimart" not in {o["provider"] for o in body["options"]}
+    assert any(e["provider"] == "apimart" and "10 s" in e["reason"] for e in body["excluded"])

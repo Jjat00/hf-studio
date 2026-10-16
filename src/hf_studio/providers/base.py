@@ -117,6 +117,9 @@ class Provider(ABC):
     blurb: ClassVar[str] = ""
     # True si el proveedor publica una tabla de precios que `fetch_prices` sabe leer (ver prices.py).
     has_price_table: ClassVar[bool] = False
+    # Versión del formato de `fetch_prices`: subirla cuando cambie lo que se lee de la tabla, para que una
+    # tabla guardada con el formato anterior se descargue de nuevo en vez de esperar a que caduque.
+    price_format: ClassVar[int] = 1
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         self.settings = settings

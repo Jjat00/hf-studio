@@ -22,7 +22,7 @@ so it always has a price to show you before it generates.
 
 ## Why
 
-- **The cheapest provider for each video:** the same model through Higgsfield, APIMart or KIE, quoted on all of
+- **The cheapest provider for each video (and some images):** the same model through Higgsfield, APIMart or KIE, quoted on all of
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - **One place for 84 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
   (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand.
@@ -41,8 +41,8 @@ the cheapest provider that offers **the exact same model and settings**:
 | Provider | Key | What it adds |
 | --- | --- | --- |
 | [Higgsfield](https://higgsfield.ai) | `HF_API_KEY`, required | Every catalog model, and it stores your input files (uploading is free) |
-| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance and Wan |
-| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo and MiniMax |
+| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance, Wan and Kling Omni/O3; also Grok Image 2.0 |
+| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo, MiniMax, Kling 2.5/2.6, Kling Motion Control 2.6 and Z-Image |
 
 - **Quote every provider, run the cheapest.** `/v1/estimate`, the UI and `estimate_cost` show every option, the
   savings against Higgsfield and why a provider was left out (no key, no balance, or no exact equivalent for your

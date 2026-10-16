@@ -51,13 +51,18 @@ class PriceBook:
         table = self.load(provider)
         return table["synced_at"] if table else None
 
-    def stale(self, provider: str) -> bool:
+    def stale(self, provider: str, price_format: int = 1) -> bool:
         synced = self.synced_at(provider)
-        return synced is None or time.time() - synced > MAX_AGE_SECONDS
+        table = self.load(provider) or {}
+        return (
+            synced is None
+            or time.time() - synced > MAX_AGE_SECONDS
+            or table.get("format", 1) != price_format  # guardada con otro parser
+        )
 
-    def store(self, provider: str, prices: dict[str, float]) -> None:
+    def store(self, provider: str, prices: dict[str, float], price_format: int = 1) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        table = {"synced_at": time.time(), "prices": prices}
+        table = {"synced_at": time.time(), "prices": prices, "format": price_format}
         tmp = self.path(provider).with_suffix(".tmp")
         tmp.write_text(json.dumps(table, indent=0, sort_keys=True))
         tmp.replace(self.path(provider))
@@ -67,7 +72,7 @@ class PriceBook:
         """Descarga las tablas viejas. Un fallo deja la tabla anterior (precio algo viejo > sin precio)."""
         results = {}
         for name, provider in providers.items():
-            if not provider.has_price_table or (not force and not self.stale(name)):
+            if not provider.has_price_table or (not force and not self.stale(name, provider.price_format)):
                 continue
             try:
                 prices = await provider.fetch_prices()
@@ -77,6 +82,6 @@ class PriceBook:
                 results[name] = f"error: {exc}"
                 continue
             if prices:
-                self.store(name, prices)
+                self.store(name, prices, provider.price_format)
                 results[name] = f"{len(prices)} prices"
         return results

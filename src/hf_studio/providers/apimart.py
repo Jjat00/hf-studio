@@ -1,7 +1,7 @@
 """Proveedor APIMart (https://docs.apimart.ai).
 
-Un solo endpoint de envío para todos los modelos (`POST /v1/videos/generations` con `model`) y uno de
-estado (`GET /v1/tasks/{id}`). Las tareas que fallan se reembolsan. Con saldo por debajo de 0,05 USD la
+Envío por `POST /v1/videos/generations` (o `/v1/images/generations` para los modelos de imagen) con
+`model`, y un solo endpoint de estado para ambos (`GET /v1/tasks/{id}`). Las tareas que fallan se reembolsan. Con saldo por debajo de 0,05 USD la
 API rechaza toda petición, incluida la de saldo, con 402 y el saldo en el texto.
 """
 
@@ -45,6 +45,7 @@ class APIMartProvider(Provider):
     docs_url = "https://docs.apimart.ai/en"
     blurb = "Optional: usually the cheapest for Seedance and Wan. Failed tasks are refunded."
     has_price_table = True
+    price_format = 2  # 2026-10-16: también los modelos de imagen
     pricing_url = "https://apimart.ai/api/pricing/models/all"
 
     def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
@@ -107,7 +108,7 @@ class APIMartProvider(Provider):
         if webhook_url:
             body["webhook"] = webhook_url
         try:
-            response = await self._api.post("/v1/videos/generations", json=body)
+            response = await self._api.post(self._submit_path(model), json=body)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise ProviderError(
                 "network", f"Could not connect to APIMart: {exc}", provider=self.name
@@ -135,6 +136,12 @@ class APIMartProvider(Provider):
                 provider=self.name,
             )  # fmt: skip
         return Submitted(str(task_id), STATUS.get(str(task.get("status")), "queued"), raw={"data": data})
+
+    @staticmethod
+    def _submit_path(model: str) -> str:
+        from .apimart_routes import IMAGE_MODELS
+
+        return "/v1/images/generations" if model in IMAGE_MODELS else "/v1/videos/generations"
 
     @classmethod
     def routes(cls):
@@ -198,7 +205,8 @@ def parse_prices(body: dict) -> dict[str, float]:
         if isinstance(value, int | float):
             prices[key] = float(value)
 
-    for model in (body.get("data") or {}).get("models", {}).get("video", []):
+    models = (body.get("data") or {}).get("models", {})
+    for model in [*models.get("video", []), *models.get("image", [])]:
         mid = model["id"]
         for item in (model.get("fixed_prices") or {}).get("items") or []:
             put(f"{mid}|{item['key']}", item)
