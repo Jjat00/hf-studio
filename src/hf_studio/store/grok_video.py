@@ -209,7 +209,7 @@ def kie() -> dict[str, Route]:
     )  # fmt: skip
     routes[_id("v1.5", "image-to-video")] = Route(
         p, preview, Spec(p, preview, keep=keep, build=_kie_images(KIE_15_RATIOS)),
-        lambda i, h, pr: per_second(pr, f"{preview}, image-to-video, {i.get('resolution', '480p')}", i.get("duration")),
+        lambda i, h, pr: per_second(pr, f"{preview}, {i.get('resolution', '480p')}", i.get("duration")),
         official=False, notes=("KIE preview channel",),
     )  # fmt: skip
     return routes

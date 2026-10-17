@@ -223,7 +223,10 @@ def _v15_kie() -> dict[str, Route]:
 
     def price(i: dict, h: dict, p: dict) -> float | None:
         audio = "with" if i.get("generate_audio", True) else "without"
-        return per_second(p, f"{name}, {audio} audio-{i.get('resolution', '720p')}", i.get("duration"))
+        key = f"{name}, {audio} audio-{i.get('resolution', '720p')}"
+        # KIE anuncia el cierre en la propia fila (a 2026-10-17): «… (service ends 2026-11-11)».
+        key = next((k for k in (key, f"{key} (service ends 2026-11-11)") if k in p), key)
+        return per_second(p, key, i.get("duration"))
 
     keep = ("prompt", "duration", "resolution", "aspect_ratio", "generate_audio")
     rename = {"camera_fixed": "fixed_lens"}

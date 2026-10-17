@@ -108,11 +108,18 @@ def test_seedream_5_pro_prices_by_tier_and_extra_references():
     assert body == {"prompt": "a fox", "aspect_ratio": "1:1", "quality": "high", "output_format": "jpeg",
                     "image_urls": IMG}  # fmt: skip
     assert usd == round(0.07 + 0.0025, 4)  # la segunda referencia tiene recargo
-    assert run("apimart", mid, image_urls=IMG, resolution="1.5k")[1:] == (
-        {"prompt": "a fox", "size": "1:1", "resolution": "1.5K", "output_format": "jpeg", "image_urls": IMG},
+    assert run("apimart", mid, image_urls=IMG[:1], resolution="1.5k")[1:] == (
+        {
+            "prompt": "a fox",
+            "size": "1:1",
+            "resolution": "1.5K",
+            "output_format": "jpeg",
+            "image_urls": IMG[:1],
+        },
         0.0293,  # 1.5K cuesta como 1K
     )
-    assert run("apimart", mid, image_urls=IMG, resolution="2k")[2] == 0.0585
+    assert run("apimart", mid, image_urls=IMG[:1], resolution="2k")[2] == 0.0585
+    assert run("apimart", mid, image_urls=IMG)[2] is None  # recargo por referencia sin importe publicado
     unsupported("kie", mid, image_urls=IMG, resolution="1.5k")
 
 
@@ -124,8 +131,29 @@ def test_seedream_5_flash_sends_kie_size():
         {"prompt": "a fox", "aspect_ratio": "21:9", "size": "1.5K", "output_format": "jpeg"},
         0.0162,
     )
-    assert run("apimart", "bytedance/seedream-5.0-flash/edit", image_urls=IMG, aspect_ratio="auto")[1:] == (
-        {"prompt": "a fox", "size": "auto", "resolution": "1K", "output_format": "jpeg", "image_urls": IMG},
+    assert run("apimart", "bytedance/seedream-5.0-flash/edit", image_urls=IMG[:1], aspect_ratio="auto")[
+        1:
+    ] == (
+        {
+            "prompt": "a fox",
+            "size": "auto",
+            "resolution": "1K",
+            "output_format": "jpeg",
+            "image_urls": IMG[:1],
+        },
         0.0137,
     )
     unsupported("apimart", "bytedance/seedream-5.0-flash/text-to-image", aspect_ratio="auto")
+
+
+def test_apimart_reference_surcharge_leaves_the_price_unknown():
+    from hf_studio.store.seedream import apimart
+    from tests.test_routes import _prices
+
+    prices = _prices("apimart")
+    for mid in ("bytedance/seedream-5.0-pro/edit", "bytedance/seedream-5.0-flash/edit"):
+        route = apimart()[mid]
+        one = {"prompt": "p", "image_urls": ["https://cdn.test/a.png"]}
+        two = {**one, "image_urls": ["https://cdn.test/a.png", "https://cdn.test/b.png"]}
+        assert route.price(one, {}, prices) is not None
+        assert route.price(two, {}, prices) is None

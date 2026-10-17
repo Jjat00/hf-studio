@@ -51,27 +51,17 @@ def test_image_models_go_to_the_apimart_image_endpoint_and_video_does_not():
     }
 
 
-def test_flux_2_pro_on_both_stores():
+def test_flux_2_runs_on_apimart_only():
     mid = f"{BFL}/flux-2-pro/edit"
     assert run("apimart", mid, image_urls=IMG, resolution="4mp", seed=9) == (
         "flux-2-pro",
         {"prompt": "a fox", "size": "auto", "resolution": "4MP", "image_urls": IMG, "seed": 9},
         0.06,
     )
-    assert run("kie", mid, image_urls=IMG, resolution="2mp", aspect_ratio="3:4") == (
-        "flux-2/pro-image-to-image",
-        {"prompt": "a fox", "aspect_ratio": "3:4", "resolution": "2K", "input_urls": IMG},
-        0.035,
-    )
-    assert run("kie", f"{BFL}/flux-2-pro/text-to-image")[1:] == (
-        {"prompt": "a fox", "aspect_ratio": "1:1", "resolution": "1K"},
-        0.025,
-    )
-    assert run("kie", f"{BFL}/flux-2-flex/text-to-image", resolution="2mp")[2] == 0.12
-    # KIE: sin semilla, sin 3 y 4 MP, sin 21:9.
-    unsupported("kie", f"{BFL}/flux-2-pro/text-to-image", seed=1)
-    unsupported("kie", f"{BFL}/flux-2-pro/text-to-image", resolution="4mp")
-    unsupported("kie", f"{BFL}/flux-2-flex/edit", image_urls=IMG, aspect_ratio="21:9")
+    # KIE no publica cuántos megapíxeles son sus 1K/2K: FLUX.2 no se ruta allí (revisión 87).
+    for tier in ("pro", "flex"):
+        for mode in ("text-to-image", "edit"):
+            assert not routes_for(PROVIDERS["kie"].routes(), f"{BFL}/flux-2-{tier}/{mode}")
 
 
 def test_flux_2_max_runs_on_apimart_only():

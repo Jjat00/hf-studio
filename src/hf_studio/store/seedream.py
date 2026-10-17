@@ -187,11 +187,20 @@ def _limits(provider: str, max_prompt: int | None, max_images: int) -> Callable[
     return check
 
 
+# APIMart cobra en 5.0 Pro y Flash un recargo fijo por cada referencia después de la primera, sin publicar su
+# importe (docs y tabla a 2026-10-17): con dos o más referencias el precio queda desconocido, nunca por debajo.
+SURCHARGED = {"5.0-pro", "5.0-flash"}
+
+
 def _apimart_price(v: Version) -> Callable[..., float | None]:
-    if v.key == "5.0-pro":
-        # 1.5K cuesta lo mismo que 1K. APIMart cobra un recargo por referencia extra que su tabla no publica.
-        return lambda i, h, p: per_unit(p, f"{v.apimart}|{'2K' if i.get('resolution') == '2k' else '1K'}")
-    return lambda i, h, p: per_unit(p, f"{v.apimart}|default")
+    def price(i: dict[str, Any], h: dict[str, Any], p: dict[str, float]) -> float | None:
+        if v.key in SURCHARGED and len(i.get("image_urls") or []) > 1:
+            return None
+        if v.key == "5.0-pro":  # 1.5K cuesta lo mismo que 1K
+            return per_unit(p, f"{v.apimart}|{'2K' if i.get('resolution') == '2k' else '1K'}")
+        return per_unit(p, f"{v.apimart}|default")
+
+    return price
 
 
 def apimart() -> dict[str, Route]:

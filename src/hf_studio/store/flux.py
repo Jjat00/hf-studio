@@ -4,12 +4,8 @@ Fuentes (revisadas el 2026-10-17):
 - APIMart FLUX.2 (`flux-2-flex`, `flux-2-pro`, `flux-2-max`):
   https://docs.apimart.ai/en/api-reference/images/flux-2/generation.md. `resolution` 1MP–4MP, `size` relación
   o `auto`, hasta 8 `image_urls`, `seed`, una imagen por tarea. Precio `flux-2-pro|1MP`…
-- KIE FLUX.2 (API unificada): https://docs.kie.ai/market/flux2/pro-text-to-image.md, .../pro-image-to-image.md,
-  .../flex-text-to-image.md, .../flex-image-to-image.md. `resolution` 1K/2K obligatoria, 7 relaciones (`auto`
-  solo con imágenes), 1–8 `input_urls`, sin semilla. No vende Max. Precio
-  `black forest labs flux-2 pro, text-to-image, 1.0s-1k`, `... flux 2 flex, image to image, 1.0s-2k`…
-  KIE no dice cuántos píxeles da «1K» y «2K»; por su precio frente a la tabla por megapíxel de APIMart (y la
-  de Black Forest Labs) se toman como ~1 MP y ~2 MP.
+- KIE vende FLUX.2 Pro y Flex (https://docs.kie.ai/market/flux2/pro-text-to-image.md) con `resolution` 1K/2K, pero
+  no publica cuántos megapíxeles son: no se ruta allí porque el esquema promete megapíxeles exactos.
 - APIMart FLUX 3 imagen (`flux-3-image`): https://docs.apimart.ai/en/api-reference/images/flux-3-image/generation.md
   (`resolution` 768sq/1k/1.5k/2k/4k, hasta 10 referencias sin recargo, sin semilla). Precio `flux-3-image|1K`…
 - APIMart FLUX 3 video (`flux-3-video`): https://docs.apimart.ai/en/api-reference/videos/flux-3-video/generation.md
@@ -63,9 +59,6 @@ def _capabilities(mode: str) -> list[str]:
 # --- FLUX.2 -----------------------------------------------------------------------------------
 
 FLUX2 = {"flex": "FLUX.2 Flex", "pro": "FLUX.2 Pro", "max": "FLUX.2 Max"}
-FLUX2_KIE = {"flex": "flux 2 flex", "pro": "flux-2 pro"}  # nombre en la tabla de precios de KIE
-FLUX2_KIE_RATIOS = {"1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"}
-FLUX2_KIE_RES = {"1mp": "1K", "2mp": "2K"}
 
 
 def _flux2_models() -> list[dict[str, Any]]:
@@ -81,11 +74,7 @@ def _flux2_models() -> list[dict[str, Any]]:
             required = ["prompt"]
             if mode == "edit":
                 _refs(8, required, properties)
-            notes = ["Black Forest Labs' FLUX.2. Higgsfield does not sell it."]
-            if tier == "max":
-                notes.append("Runs on APIMart only.")
-            else:
-                notes.append("Runs on APIMart or KIE; 3mp, 4mp, 21:9, 9:21 and a fixed seed only on APIMart.")
+            notes = ["Black Forest Labs' FLUX.2. Higgsfield does not sell it.", "Runs on APIMart only."]
             found.append(
                 model(
                     _id(f"flux-2-{tier}", mode), name=name, workflow=workflow, family=f"flux-2-{tier}",
@@ -281,12 +270,6 @@ def _flux3_video() -> dict[str, Route]:
     return routes
 
 
-def _kie_flux2_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
-    if source.get("aspect_ratio") == "auto" and not source.get("image_urls"):
-        raise unsupported("kie", "KIE only takes aspect_ratio auto with input images")
-    return out
-
-
 def _kontext_kie_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
     images = source.get("image_urls") or []
     if len(images) > 1:
@@ -299,27 +282,8 @@ def _kontext_kie_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str,
 def kie() -> dict[str, Route]:
     provider = "kie"
     routes: dict[str, Route] = {}
-    for tier, price_name in FLUX2_KIE.items():
-        for mode, _ in MODES:
-            kie_mode = "text-to-image" if mode == "text-to-image" else "image-to-image"
-            name = f"flux-2/{tier}-{kie_mode}"
-            ratios = FLUX2_KIE_RATIOS | ({"auto"} if mode == "edit" else set())
-            spec = Spec(
-                provider, name,
-                keep=("prompt", "aspect_ratio"),
-                rename={"image_urls": "input_urls"},
-                convert={"resolution": FLUX2_KIE_RES.__getitem__},
-                allowed={"aspect_ratio": ratios, "resolution": FLUX2_KIE_RES},
-                build=_kie_flux2_build,
-            )  # fmt: skip
-            # Las filas de precio escriben el modo distinto según el modelo («text to image» o «text-to-image»).
-            price_mode = kie_mode if tier == "pro" and mode == "text-to-image" else kie_mode.replace("-", " ")
-            routes[_id(f"flux-2-{tier}", mode)] = Route(
-                provider, name, spec,
-                lambda i, h, p, pn=price_name, pm=price_mode: per_unit(
-                    p, f"black forest labs {pn}, {pm}, 1.0s-{FLUX2_KIE_RES.get(i.get('resolution', '1mp'), '').lower()}"
-                ),
-            )  # fmt: skip
+    # FLUX.2 no va a KIE: KIE pide 1K/2K y no publica cuántos megapíxeles son, así que no se puede garantizar
+    # la resolución en megapíxeles que pide el esquema (revisión 87).
     for tier in KONTEXT:
         for mode, _ in MODES:
             ratios = KONTEXT_KIE_RATIOS | ({"auto"} if mode == "edit" else set())
