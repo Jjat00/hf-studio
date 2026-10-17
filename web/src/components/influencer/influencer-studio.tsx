@@ -26,6 +26,16 @@ const CREATE_MODELS = [
   { id: "z-image/turbo", photo: null, name: "Z-Image" },
   { id: "recraft/v4.1/pro/text-to-image", photo: null, name: "Recraft V4.1 Pro" },
   { id: "ideogram/v4.0", photo: null, name: "Ideogram 4.0" },
+  // Modelos de tienda (solo APIMart o KIE): necesitan una de esas claves.
+  { id: "google/nano-banana-2/text-to-image", photo: "google/nano-banana-2/edit", name: "Nano Banana 2" },
+  { id: "google/nano-banana-pro/text-to-image", photo: "google/nano-banana-pro/edit", name: "Nano Banana Pro" },
+  { id: "openai/gpt-image-2/text-to-image", photo: "openai/gpt-image-2/edit", name: "GPT Image 2" },
+  { id: "bytedance/seedream-5.0-pro/text-to-image", photo: "bytedance/seedream-5.0-pro/edit", name: "Seedream 5.0 Pro" },
+  { id: "bytedance/seedream-4.5/text-to-image", photo: "bytedance/seedream-4.5/edit", name: "Seedream 4.5" },
+  { id: "black-forest-labs/flux-kontext-pro/text-to-image", photo: "black-forest-labs/flux-kontext-pro/edit", name: "FLUX Kontext Pro" },
+  { id: "wan/v2.7-image/text-to-image", photo: "wan/v2.7-image/edit", name: "Wan 2.7 Image" },
+  { id: "google/imagen-4/ultra/text-to-image", photo: null, name: "Imagen 4 Ultra" },
+  { id: "midjourney/imagine/text-to-image", photo: null, name: "Midjourney" },
 ];
 /** Modelos para el movimiento: los de referencias usan la hoja del personaje como referencia, el resto la anima. */
 const MOTION_MODELS = [
@@ -36,6 +46,15 @@ const MOTION_MODELS = [
   { id: "kling-video/v3.0/pro/image-to-video", name: "Kling 3.0 Pro" },
   { id: "minimax/hailuo-2.3/standard/image-to-video", name: "Hailuo 2.3" },
   { id: "alibaba/happy-horse/v1.1/image-to-video", name: "HappyHorse 1.1" },
+  // Modelos de tienda (solo APIMart o KIE).
+  { id: "google/veo-3.1/fast/reference-to-video", name: "Veo 3.1 Fast · Ref" },
+  { id: "bytedance/seedance-2.0-fast/reference-to-video", name: "Seedance 2.0 Fast · Ref" },
+  { id: "vidu/q4/reference-to-video", name: "Vidu Q4 · Ref" },
+  { id: "google/gemini-omni-1.1-flash/reference-to-video", name: "Gemini Omni · Ref" },
+  { id: "google/veo-3.1/fast/image-to-video", name: "Veo 3.1 Fast" },
+  { id: "xai/grok-imagine-video/v1.5/image-to-video", name: "Grok Imagine 1.5" },
+  { id: "kling-video/v2.1/pro/image-to-video", name: "Kling 2.1 Pro" },
+  { id: "minimax/hailuo-02/pro/image-to-video", name: "Hailuo 02 Pro" },
 ];
 const MOTIONS = [
   l("Camina hacia la cámara", "Walks confidently toward the camera"),
