@@ -22,7 +22,7 @@ so it always has a price to show you before it generates.
 
 ## Why
 
-- **The cheapest provider for each video (and some images):** the same model through Higgsfield, APIMart or KIE, quoted on all of
+- **The cheapest provider for each video and image:** the same model through Higgsfield, APIMart or KIE, quoted on all of
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - **One place for 84 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
   (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand, **plus 158 models that only
@@ -42,8 +42,8 @@ the cheapest provider that offers **the exact same model and settings**:
 | Provider | Key | What it adds |
 | --- | --- | --- |
 | [Higgsfield](https://higgsfield.ai) | `HF_API_KEY`, required | Every catalog model, and it stores your input files (uploading is free) |
-| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance, Wan and Kling Omni/O3; also Grok Image 2.0 |
-| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo, MiniMax, Kling 2.5/2.6, Kling Motion Control 2.6 and Z-Image |
+| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance, Wan and Kling Omni/O3; also Grok Image 2.0, and store-only models such as Nano Banana, GPT Image, Midjourney, Veo 3.1, Vidu and SkyReels |
+| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo, MiniMax, Kling 2.5/2.6, Kling Motion Control 2.6 and Z-Image, and store-only models such as Nano Banana, GPT Image, Veo 3.1, Seedream, Ideogram 3, Runway and talking avatars |
 
 - **Models Higgsfield does not have.** With an APIMart or KIE key, the catalog also offers 158 models that only those
   stores sell (77 image, 81 video), marked "APIMart / KIE" in the UI and `store: true` in the API: Nano Banana 1, 2,
