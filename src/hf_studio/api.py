@@ -545,7 +545,12 @@ def create_app(
 
     def model_out(m: dict, full: bool = False) -> dict:
         keys = ("id", "title", "output", "workflow", "family", "capabilities", "docs_url")
-        base = {**{k: m[k] for k in keys}, "inputs": input_kinds(m["input_schema"])}
+        # `store`: solo lo venden APIMart y KIE (paquete `store/`), no Higgsfield.
+        base = {
+            **{k: m[k] for k in keys},
+            "inputs": input_kinds(m["input_schema"]),
+            "store": bool(m.get("store")),
+        }
         return (
             {
                 **base,

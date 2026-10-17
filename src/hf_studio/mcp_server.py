@@ -23,7 +23,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-INSTRUCTIONS = """Genera imágenes y videos con los modelos de Higgsfield a través de HF Studio.
+INSTRUCTIONS = """Genera imágenes y videos con los modelos de Higgsfield, APIMart y KIE a través de HF Studio.
 Proveedores: el mismo modelo puede salir por Higgsfield, APIMart o KIE. estimate_cost cotiza todos los que
 tengan clave y elige el más barato (options trae cada precio, excluded el motivo de los descartados y
 savings_vs_higgsfield el ahorro); generate envía al más barato. Si ese proveedor falla sin cobrar, HF Studio
@@ -33,6 +33,9 @@ OK, approve_fallback (o cancel_generation). reserve_usd en una opción es lo que
 empezar (devuelve la diferencia al terminar): menciónaselo al usuario.
 provider="kie" (u otro) en estimate_cost y generate fuerza uno. providers_status muestra claves, saldos y
 los enlaces para crear cuenta o recargar.
+Modelos de tienda: el catálogo también trae modelos que Higgsfield no tiene y solo venden APIMart y KIE
+(Nano Banana, GPT Image, Veo 3.1, Seedream, Flux, Midjourney, Vidu…); find_models los marca con store=true.
+Necesitan la clave de APIMart o de KIE y se usan igual (estimate_cost, generate).
 Atajos: recommend_models("lo que quiere el usuario") sugiere modelos con su costo; list_presets y
 run_preset ejecutan recetas listas (primero con dry_run=True para mostrar costo y entrada final);
 generate_batch hace variantes (primero dry_run=True) y wait_generations espera varias.

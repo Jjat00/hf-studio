@@ -30,6 +30,8 @@ export type ModelSummary = {
   docs_url: string;
   /** Tipos que aceptan sus puertos (prompt = text, campos *_url = image, video o audio). */
   inputs?: ("text" | "image" | "video" | "audio")[];
+  /** Solo lo venden las tiendas (APIMart, KIE), no Higgsfield. */
+  store?: boolean;
 };
 
 export type ModelDetail = ModelSummary & {
