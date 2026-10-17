@@ -45,7 +45,9 @@ def route_of(provider: str, model_id: str, channel: str | None = None):
 def requested(model_id: str) -> dict:
     """Lo que pone el usuario: prompt, medios obligatorios y, en referencias, un video."""
     schema = get_catalog().get(model_id)["input_schema"]
-    filled, _ = fill_placeholders(schema, {"prompt": "a red fox running through snow"})
+    # Solo con prompt si el modelo lo tiene (las herramientas de las tiendas, p. ej. quitar fondo, no).
+    base = {"prompt": "a red fox running through snow"} if "prompt" in schema["properties"] else {}
+    filled, _ = fill_placeholders(schema, base)
     if "video_urls" in schema["properties"] and "reference" in model_id:
         filled["video_urls"] = ["https://cdn.test/ref.mp4"]
     return filled
