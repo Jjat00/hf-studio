@@ -330,6 +330,8 @@ const es = {
     search: "Buscar modelos…",
     close: "Cerrar",
     noResults: "Sin resultados",
+    storeOnly: "APIMart / KIE",
+    storeOnlyHint: "No está en Higgsfield: se genera en APIMart o KIE",
     caps: {
       "first-last-frame": "Inicio + final",
       "video-input": "Entra video",
@@ -1171,6 +1173,8 @@ const en: Dict = {
     search: "Search models…",
     close: "Close",
     noResults: "No results",
+    storeOnly: "APIMart / KIE",
+    storeOnlyHint: "Not on Higgsfield: it runs on APIMart or KIE",
     caps: {
       "first-last-frame": "Start + end",
       "video-input": "Video in",

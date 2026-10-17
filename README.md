@@ -22,10 +22,11 @@ so it always has a price to show you before it generates.
 
 ## Why
 
-- **The cheapest provider for each video (and some images):** the same model through Higgsfield, APIMart or KIE, quoted on all of
+- **The cheapest provider for each video and image:** the same model through Higgsfield, APIMart or KIE, quoted on all of
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - **One place for 84 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
-  (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand.
+  (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand, **plus 156 models that only
+  APIMart and KIE sell** (Nano Banana, GPT Image, Midjourney, Seedream, FLUX, Veo 3.1, Vidu, Runway…).
 - **Agents that quote before they spend.** Every MCP tool that starts a paid run requires a single-use `quote_id` from a prior quote of
   the same request, and the server tells the agent to show you that cost and wait for your OK.
 - **Persistent jobs.** Async jobs stored in a database, with validation before spending, deduplication,
@@ -41,8 +42,16 @@ the cheapest provider that offers **the exact same model and settings**:
 | Provider | Key | What it adds |
 | --- | --- | --- |
 | [Higgsfield](https://higgsfield.ai) | `HF_API_KEY`, required | Every catalog model, and it stores your input files (uploading is free) |
-| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance, Wan and Kling Omni/O3; also Grok Image 2.0 |
-| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo, MiniMax, Kling 2.5/2.6, Kling Motion Control 2.6 and Z-Image |
+| [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance, Wan and Kling Omni/O3; also Grok Image 2.0, and store-only models such as Nano Banana, GPT Image, Midjourney, Veo 3.1, Vidu and SkyReels |
+| [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo, MiniMax, Kling 2.5/2.6, Kling Motion Control 2.6 and Z-Image, and store-only models such as Nano Banana, GPT Image, Veo 3.1, Seedream, Ideogram 3, Runway and talking avatars |
+
+- **Models Higgsfield does not have.** With an APIMart or KIE key, the catalog also offers 156 models that only those
+  stores sell (75 image, 81 video), marked "APIMart / KIE" in the UI and `store: true` in the API: Nano Banana 1, 2,
+  2.1, 2 Lite and Pro, Imagen 4, GPT Image 1.5, 2 and 2.5, GPT-4o Image, Midjourney, Seedream 3 to 5, FLUX.2, FLUX 3
+  and Kontext, Qwen Image 2, Wan 2.7 Image, Ideogram 3, older Grok Imagine channels, Veo 3.1, Gemini Omni, Seedance
+  1.0 to 2.0 Fast/Mini, Vidu Q3/Q4, Hailuo 02, SkyReels V4, Runway, Wan 2.2/2.5, Kling 2.1, talking avatars (Kling
+  AI Avatar, InfiniteTalk, OmniHuman) and upscalers. Each family is one module in `src/hf_studio/store/`, with the
+  same fidelity rule and quoting as the rest.
 
 - **Quote every provider, run the cheapest.** `/v1/estimate`, the UI and `estimate_cost` show every option, the
   savings against Higgsfield and why a provider was left out (no key, no balance, or no exact equivalent for your
@@ -102,7 +111,7 @@ the cheapest provider that offers **the exact same model and settings**:
 - **One-click Apps:** relight, change color palette, face swap, character swap, reframe, video relight, video color
   grade and ad multiplier, each a built-in preset over a catalog model: upload, adjust and generate.
 - **84 Higgsfield endpoints** (67 video, 16 image, 1 custom references), each with its JSON Schema taken from the
-  official docs (`hf-studio sync-catalog`).
+  official docs (`hf-studio sync-catalog`), and 156 store-only models from APIMart and KIE.
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
   edit and extend, motion transfer, object swap and restyle (Genjutsu: anime, stop motion, 3D…
   keeping the motion and the audio, with Higgsfield's current styles), text-to-image, image editing and ad images (Ads
@@ -287,7 +296,7 @@ Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name
   Audio, Sound library, AI Influencer (`/influencer`), Elements (`/elements`), Use cases, Presets and Apps (with
   published flows at `/flows/<id>`), Spaces (`/spaces`), Library (with detail at `/history/<id>`), Usage (`/usage`:
   spend by day, provider and model, plus each provider's balance), Models (`/models`) and MCP.
-- **Forms** are generated from each model's `input_schema`, so all 84 endpoints work without model-specific code.
+- **Forms** are generated from each model's `input_schema`, so all 240 models work without model-specific code.
 - **Voice** (`/voice`): pick a video, mark the segment on the timeline, search a voice (your account or the ElevenLabs
   public library, with preview), add an effect and choose how much of the original audio stays.
 - **Audio** (`/audio`): text-to-speech (expressive v3, stable v2 or cheap Flash, with language), sound effects, music

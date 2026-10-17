@@ -26,6 +26,7 @@ from .space_tools import ASSISTANT_PROVIDER, AUDIO_PROVIDER, TOOL_PROVIDER, is_t
 BALANCE_TTL = 60.0
 OUTDATED_PRICES = 3 * 24 * 3600  # una tabla sin poder actualizarse en 3 días ya no da precios exactos
 VIDEO_FIELDS = ("video_url", "video_urls")
+AUDIO_FIELDS = ("audio_url", "audio_urls")  # avatares que cobran por segundo de audio (store/avatars.py)
 
 
 @dataclass
@@ -218,6 +219,12 @@ class Router:
         """Una opción por canal del proveedor que puede hacer el pedido (los que no, van a `excluded`)."""
         info = {"provider": provider.name, "title": provider.title}
         if provider.name == DEFAULT_PROVIDER:
+            if model.get("store"):
+                # Modelo que solo venden las tiendas (`store/`): Higgsfield no lo tiene.
+                excluded.append(
+                    {**info, "model": model["id"], "reason": "Higgsfield does not offer this model"}
+                )
+                return []
             # Un plan guardado puede traer el id viejo de un modelo renombrado: es el mismo canal.
             if route is not None and ALIASES.get(route, route) != model["id"]:
                 return []
@@ -273,7 +280,10 @@ class Router:
         prices = self.prices.prices(provider.name)
         usd = route.price(logical, hints, prices) if route.price else None
         reserve = route.reserve(logical, hints, prices) if route.reserve else None
-        missing = [] if usd is not None or not _has_video(logical) else ["input_video_seconds"]
+        missing = []
+        if usd is None:  # sin precio porque falta la duración de un medio de entrada
+            missing = ["input_video_seconds"] if _has_video(logical) else []
+            missing += ["input_audio_seconds"] if _has_audio(logical) else []
         synced = self.prices.synced_at(provider.name)
         basis = f"{provider.title} price list" + (
             f" ({time.strftime('%Y-%m-%d', time.gmtime(synced))})" if synced else ""
@@ -299,9 +309,13 @@ def _has_video(arguments: dict) -> bool:
     return any(arguments.get(k) for k in VIDEO_FIELDS)
 
 
-def video_urls(arguments: dict) -> list[str]:
+def _has_audio(arguments: dict) -> bool:
+    return any(arguments.get(k) for k in AUDIO_FIELDS)
+
+
+def video_urls(arguments: dict, fields: tuple[str, ...] = VIDEO_FIELDS) -> list[str]:
     urls = []
-    for key in VIDEO_FIELDS:
+    for key in fields:
         value = arguments.get(key)
         urls.extend(value if isinstance(value, list) else [value] if value else [])
     return [u for u in urls if isinstance(u, str)]

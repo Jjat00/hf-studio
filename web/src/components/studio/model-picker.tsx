@@ -109,6 +109,11 @@ export function ModelPicker({
                       <span className="block truncate font-mono text-[11px] text-fg-3">{m.id}</span>
                     </span>
                     <span className="hidden gap-1 sm:flex">
+                      {m.store && (
+                        <span title={t.picker.storeOnlyHint} className="rounded-md bg-lime/10 px-1.5 py-0.5 text-[11px] font-medium text-lime">
+                          {t.picker.storeOnly}
+                        </span>
+                      )}
                       {m.capabilities
                         .filter((c) => CAP_LABEL[c])
                         .slice(0, 3)

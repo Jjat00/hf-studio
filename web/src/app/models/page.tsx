@@ -93,6 +93,11 @@ export default function ModelsPage() {
               <p className="text-[15px] text-fg-3">{workflowLabel(workflow, locale)}</p>
               <p className="mt-2 truncate font-mono text-[11px] text-fg-4">{m.id}</p>
               <div className="mt-3 flex flex-wrap gap-1">
+                {m.store && (
+                  <span title={t.picker.storeOnlyHint} className="rounded-md bg-lime/10 px-1.5 py-0.5 text-[11px] font-medium text-lime">
+                    {t.picker.storeOnly}
+                  </span>
+                )}
                 {m.capabilities.slice(0, 5).map((c) => (
                   <span key={c} className="rounded-md bg-glass px-1.5 py-0.5 text-[11px] text-fg-2">
                     {t.capabilities[c] ?? c}

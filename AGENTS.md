@@ -2,7 +2,7 @@
 
 Guide for AI agents (Claude Code, Codex, Cursor…) working with HF Studio. Humans: see [README.md](README.md).
 
-HF Studio is a self-hosted studio on the Higgsfield (video, image) and ElevenLabs (audio) APIs: a FastAPI backend
+HF Studio is a self-hosted studio on the Higgsfield (video, image), APIMart and KIE (more video and image models) and ElevenLabs (audio) APIs: a FastAPI backend
 (`src/hf_studio/`), an MCP server over stdio (`hf-studio mcp`) and a Next.js UI (`web/`). Generating spends the
 owner's credits.
 
@@ -66,7 +66,8 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   `higgsfield.py` (Higgsfield client), `elements.py` (Kling 3.0 elements: local images, refreshed URLs), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
   provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
-  (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `catalog.json` (84 model schemas,
+  (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `store/` (models that only APIMart and KIE sell, `store: true`: one module per family with `MODELS`, its
+  routes and price; the router never offers them to Higgsfield), `catalog.json` (84 model schemas,
   regenerated with `hf-studio sync-catalog`), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
   internal worker-only provider), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models), `space_assistant.py` (Spaces

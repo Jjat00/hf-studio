@@ -1,5 +1,5 @@
 """Mapa de modelos: cada ruta apunta a un modelo del catálogo, traduce una entrada típica sin perder
-campos y tiene precio en la tabla del proveedor (copias en tests/fixtures, 2026-10-03)."""
+campos y tiene precio en la tabla del proveedor (copias en tests/fixtures, 2026-10-03 y 2026-10-17)."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ EXPECTED_UNSUPPORTED = {
     # O3 con referencias y sin formato explícito: APIMart usaría 16:9 y Higgsfield no dice qué hace
     ("apimart", "kling-video/o3/image-reference"),
     ("apimart", "kling-video/o3/video-reference"),
+    # GPT Image 2: APIMart convierte el formato «auto» en 1:1; sin formato elegido, la edición va a KIE
+    ("apimart", "openai/gpt-image-2/edit"),
 }
 ROUTED = [
     (name, mid, route.model)
@@ -43,7 +45,9 @@ def route_of(provider: str, model_id: str, channel: str | None = None):
 def requested(model_id: str) -> dict:
     """Lo que pone el usuario: prompt, medios obligatorios y, en referencias, un video."""
     schema = get_catalog().get(model_id)["input_schema"]
-    filled, _ = fill_placeholders(schema, {"prompt": "a red fox running through snow"})
+    # Solo con prompt si el modelo lo tiene (las herramientas de las tiendas, p. ej. quitar fondo, no).
+    base = {"prompt": "a red fox running through snow"} if "prompt" in schema["properties"] else {}
+    filled, _ = fill_placeholders(schema, base)
     if "video_urls" in schema["properties"] and "reference" in model_id:
         filled["video_urls"] = ["https://cdn.test/ref.mp4"]
     return filled
@@ -70,7 +74,7 @@ def test_route_translates_and_prices_a_typical_request(provider, model_id, chann
         return
     out = route.translate(logical, chosen(model_id))
     assert out and None not in out.values()
-    usd = route.price(logical, {"input_video_seconds": 5}, prices)
+    usd = route.price(logical, {"input_video_seconds": 5, "input_audio_seconds": 5}, prices)
     assert usd is not None and 0 < usd < 10, f"{provider} {model_id}: {usd}"
 
 
