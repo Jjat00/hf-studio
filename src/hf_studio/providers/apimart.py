@@ -139,9 +139,11 @@ class APIMartProvider(Provider):
 
     @staticmethod
     def _submit_path(model: str) -> str:
-        from ..store import apimart_image_models
+        from ..store import apimart_image_models, apimart_paths
         from .apimart_routes import IMAGE_MODELS
 
+        if model in apimart_paths():
+            return apimart_paths()[model]
         images = IMAGE_MODELS | apimart_image_models()
         return "/v1/images/generations" if model in images else "/v1/videos/generations"
 

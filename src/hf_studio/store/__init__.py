@@ -7,6 +7,8 @@ Cada módulo de este paquete es una familia y exporta:
   (`google/nano-banana-2/text-to-image`) y no debe chocar con un id de Higgsfield.
 - `apimart()` y/o `kie()`: `Routes` como las de `providers/*_routes.py`, una por id lógico de `MODELS`.
 - `APIMART_IMAGE_MODELS` (opcional): ids de APIMart que se envían a `/v1/images/generations`.
+- `APIMART_PATHS` (opcional): `{id de APIMart: ruta}` para los que tienen su propia ruta de envío (Midjourney).
+  El estado se lee igual, con `GET /v1/tasks/{id}`.
 - `KIE_ENDPOINTS` (opcional): `{id del modelo en KIE: KIEEndpoint}` para los modelos de KIE que no usan la
   API unificada (`jobs/createTask`), como Veo o GPT-4o Image.
 
@@ -56,6 +58,14 @@ def routes(provider: str) -> dict:
 @cache
 def apimart_image_models() -> frozenset[str]:
     return frozenset().union(*(getattr(m, "APIMART_IMAGE_MODELS", frozenset()) for m in modules()))
+
+
+@cache
+def apimart_paths() -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for module in modules():
+        merged.update(getattr(module, "APIMART_PATHS", {}))
+    return merged
 
 
 @cache
