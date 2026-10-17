@@ -218,6 +218,12 @@ class Router:
         """Una opción por canal del proveedor que puede hacer el pedido (los que no, van a `excluded`)."""
         info = {"provider": provider.name, "title": provider.title}
         if provider.name == DEFAULT_PROVIDER:
+            if model.get("store"):
+                # Modelo que solo venden las tiendas (`store/`): Higgsfield no lo tiene.
+                excluded.append(
+                    {**info, "model": model["id"], "reason": "Higgsfield does not offer this model"}
+                )
+                return []
             # Un plan guardado puede traer el id viejo de un modelo renombrado: es el mismo canal.
             if route is not None and ALIASES.get(route, route) != model["id"]:
                 return []

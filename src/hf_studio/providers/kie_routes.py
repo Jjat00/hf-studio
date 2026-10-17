@@ -474,4 +474,6 @@ def _fixed_seed(value):
 
 
 def kie_routes() -> dict[str, Route]:
-    return {**seedance(), **kling(), **wan(), **others(), **recent()}
+    from ..store import routes as store_routes
+
+    return {**seedance(), **kling(), **wan(), **others(), **recent(), **store_routes(P)}

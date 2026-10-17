@@ -1,5 +1,5 @@
 """Mapa de modelos: cada ruta apunta a un modelo del catálogo, traduce una entrada típica sin perder
-campos y tiene precio en la tabla del proveedor (copias en tests/fixtures, 2026-10-03)."""
+campos y tiene precio en la tabla del proveedor (copias en tests/fixtures, 2026-10-03 y 2026-10-17)."""
 
 from __future__ import annotations
 

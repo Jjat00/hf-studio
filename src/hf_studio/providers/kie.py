@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -48,6 +50,37 @@ def _kind(code: int, message: str) -> str:
         433: "concurrency",
         455: "unavailable",
     }.get(code, "bad_request")
+
+
+@dataclass(frozen=True)
+class KIEEndpoint:
+    """API propia de un modelo de KIE fuera de `jobs/createTask` (Veo, GPT-4o Image, Runway…).
+
+    `body(model, arguments, callback_url)` arma el cuerpo del POST a `submit_path`; el estado se lee con
+    `GET poll_path?taskId=` y `parse(data)` convierte su `data` en `Polled`. El envío guarda
+    `status_url = "kie:<name>"` para que el sondeo sepa qué endpoint leer.
+    """
+
+    name: str
+    submit_path: str
+    poll_path: str
+    body: Callable[[str, dict[str, Any], str | None], dict[str, Any]]
+    parse: Callable[[dict[str, Any]], Polled]
+
+
+def _endpoint(model: str) -> KIEEndpoint | None:
+    from ..store import kie_endpoints
+
+    return kie_endpoints().get(model)
+
+
+def _endpoint_by_status_url(status_url: str | None) -> KIEEndpoint | None:
+    if not status_url or not status_url.startswith("kie:"):
+        return None
+    from ..store import kie_endpoints
+
+    name = status_url.removeprefix("kie:")
+    return next((e for e in kie_endpoints().values() if e.name == name), None)
 
 
 class KIEProvider(Provider):
@@ -105,11 +138,17 @@ class KIEProvider(Provider):
     async def submit_job(
         self, model: str, arguments: dict[str, Any], webhook_url: str | None = None
     ) -> Submitted:
-        body: dict[str, Any] = {"model": model, "input": arguments}
-        if webhook_url:
-            body["callBackUrl"] = webhook_url
+        endpoint = _endpoint(model)
+        if endpoint is not None:
+            body = endpoint.body(model, arguments, webhook_url)
+            path = endpoint.submit_path
+        else:
+            body = {"model": model, "input": arguments}
+            if webhook_url:
+                body["callBackUrl"] = webhook_url
+            path = "/api/v1/jobs/createTask"
         try:
-            response = await self._api.post("/api/v1/jobs/createTask", json=body)
+            response = await self._api.post(path, json=body)
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             raise ProviderError("network", f"Could not connect to KIE: {exc}", provider=self.name) from exc
         except httpx.TransportError as exc:
@@ -132,7 +171,8 @@ class KIEProvider(Provider):
         task_id = data.get("taskId") if isinstance(data, dict) else None
         if not task_id:
             raise ProviderError("ambiguous", "KIE accepted the request without a taskId", provider=self.name)
-        return Submitted(task_id, "queued", raw=data)
+        status_url = f"kie:{endpoint.name}" if endpoint is not None else None
+        return Submitted(task_id, "queued", status_url=status_url, raw=data)
 
     @classmethod
     def routes(cls):
@@ -164,8 +204,12 @@ class KIEProvider(Provider):
         return prices
 
     async def poll_job(self, request_id: str, status_url: str | None = None) -> Polled:
+        endpoint = _endpoint_by_status_url(status_url)
+        if status_url and status_url.startswith("kie:") and endpoint is None:
+            raise ProviderError("not_found", f"Unknown KIE endpoint {status_url}", provider=self.name)
+        path = endpoint.poll_path if endpoint is not None else "/api/v1/jobs/recordInfo"
         try:
-            response = await self._api.get("/api/v1/jobs/recordInfo", params={"taskId": request_id})
+            response = await self._api.get(path, params={"taskId": request_id})
         except httpx.TransportError as exc:
             raise ProviderError(
                 "network", f"Network error while checking status: {exc}", provider=self.name
@@ -178,7 +222,8 @@ class KIEProvider(Provider):
                     "not_found", "KIE does not know this task", 422, provider=self.name
                 ) from exc
             raise
-        return polled(body.get("data") or {})
+        data = body.get("data") or {}
+        return endpoint.parse(data) if endpoint is not None else polled(data)
 
 
 def polled(data: dict) -> Polled:

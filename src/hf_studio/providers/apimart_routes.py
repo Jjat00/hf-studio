@@ -758,4 +758,6 @@ def images() -> Routes:
 
 
 def apimart_routes() -> Routes:
-    return {**seedance(), **kling(), **wan(), **others(), **omni(), **images()}
+    from ..store import routes as store_routes
+
+    return {**seedance(), **kling(), **wan(), **others(), **omni(), **images(), **store_routes(P)}

@@ -42,9 +42,13 @@ class Catalog:
         from .space_assistant import ASSISTANT_NODE
         from .space_audio import AUDIO_NODES
         from .space_tools import TOOLS
+        from .store import models as store_models
 
         for tool_id, tool in {**TOOLS, **AUDIO_NODES, ASSISTANT_NODE["id"]: ASSISTANT_NODE}.items():
             self.models.setdefault(tool_id, tool)
+        # Modelos que solo venden APIMart y KIE (`store: True`): si Higgsfield publica el mismo id, gana el suyo.
+        for model_id, model in store_models().items():
+            self.models.setdefault(model_id, model)
         self._validators = {
             mid: Draft202012Validator(m["input_schema"], format_checker=_formats)
             for mid, m in self.models.items()
