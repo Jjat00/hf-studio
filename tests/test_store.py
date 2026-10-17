@@ -110,3 +110,23 @@ async def test_kie_endpoint_models_use_their_own_submit_and_poll_paths(monkeypat
     with pytest.raises(ProviderError) as info:
         await kie.poll_job("t-1", "kie:gone")
     assert info.value.kind == "not_found"
+
+
+async def test_audio_priced_models_ask_for_the_audio_length(env):  # noqa: F811
+    _, http, _ = env
+    avatar = {
+        "image_url": "https://cdn.test/face.png",
+        "audio_url": "https://cdn.test/voice.mp3",
+        "prompt": "talks",
+    }
+    body = (
+        await http.post("/v1/estimate", json={"model": "kling/ai-avatar/standard", "input": avatar})
+    ).json()
+    option = body["options"][0]
+    assert (
+        option["usd"] is None and option["missing"] == ["input_audio_seconds"] and option["kind"] == "formula"
+    )
+    body = (await http.post("/v1/estimate", json={
+        "model": "kling/ai-avatar/standard", "input": avatar, "hints": {"input_audio_seconds": 10},
+    })).json()  # fmt: skip
+    assert body["options"][0]["usd"] == 0.4 and body["options"][0]["kind"] == "exact"

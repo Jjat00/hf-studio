@@ -100,15 +100,19 @@ def matches_type(data: bytes, content_type: str) -> bool:
 
 
 async def local_duration(
-    url: str, client: httpx.AsyncClient, max_bytes: int, ffprobe: str = "ffprobe"
+    url: str, client: httpx.AsyncClient, max_bytes: int, ffprobe: str = "ffprobe", audio: bool = False
 ) -> float | None:
-    """Descarga `url` (HTTPS, sin seguir redirecciones, con tope de tamaño) y mide su duración en local."""
+    """Descarga `url` (HTTPS, sin seguir redirecciones, con tope de tamaño) y mide su duración en local.
+    `audio`: también contenedores de solo audio (MP3, WAV, M4A, Ogg, FLAC)."""
     with tempfile.TemporaryDirectory(prefix="hfs-probe-") as tmp:
         path = Path(tmp) / "media"
         if not await download(url, client, max_bytes, path):
             return None
         head = _head(path)
-        if not matches_type(head, "video/mp4") and head[:4] != b"\x1a\x45\xdf\xa3":
+        if audio:
+            if not is_media_container(head):
+                return None
+        elif not matches_type(head, "video/mp4") and head[:4] != b"\x1a\x45\xdf\xa3":
             return None  # ni MP4/MOV ni Matroska/WebM
         code, out = await _run(
             ffprobe, "-v", "error", *PROBE_GUARD, "-show_entries", "format=duration", "-of", "csv=p=0", str(path),

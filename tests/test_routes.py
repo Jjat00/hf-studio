@@ -74,7 +74,7 @@ def test_route_translates_and_prices_a_typical_request(provider, model_id, chann
         return
     out = route.translate(logical, chosen(model_id))
     assert out and None not in out.values()
-    usd = route.price(logical, {"input_video_seconds": 5}, prices)
+    usd = route.price(logical, {"input_video_seconds": 5, "input_audio_seconds": 5}, prices)
     assert usd is not None and 0 < usd < 10, f"{provider} {model_id}: {usd}"
 
 

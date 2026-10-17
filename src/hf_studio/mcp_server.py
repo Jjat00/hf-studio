@@ -187,13 +187,19 @@ def upload_media(path: str) -> dict:
     ),
 )
 def estimate_cost(
-    model_id: str, input: dict, input_video_seconds: float | None = None, provider: str | None = None
+    model_id: str,
+    input: dict,
+    input_video_seconds: float | None = None,
+    provider: str | None = None,
+    input_audio_seconds: float | None = None,
 ) -> dict:
     """Costo de una generación sin ejecutarla, en cada proveedor (el más barato primero: `provider`, `usd`;
     todas en `options`). Funciona aunque falten los medios. Si el modelo cobra por segundos de video de
-    entrada, pasa input_video_seconds (o sube el video antes: HF Studio lo mide). `provider` cotiza solo
+    entrada, pasa input_video_seconds (o sube el video antes: HF Studio lo mide); los avatares que cobran por
+    segundo de audio, input_audio_seconds. `provider` cotiza solo
     ese. Devuelve quote_id: muéstrale el costo al usuario y pásalo a generate con los mismos parámetros."""
-    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds), "provider": provider}
+    hints = _hints(input_video_seconds, input_audio_seconds)
+    payload = {"model": model_id, "input": input, "hints": hints, "provider": provider}
     estimate = _call("POST", "/v1/estimate", json=payload)
     return {**estimate, "quote_id": _issue_quote(payload, estimate)}
 
@@ -214,15 +220,17 @@ def generate(
     confirm_unknown_cost: bool = False,
     keep_source_audio: bool = False,
     provider: str | None = None,
+    input_audio_seconds: float | None = None,
 ) -> dict:
     """Encola una generación en el proveedor más barato de la cotización (o en `provider`, el mismo que
     se pasó a estimate_cost) y devuelve el trabajo (id, status, provider). No espera: usa get_generation.
-    Requiere el quote_id de estimate_cost con los mismos model_id, input e input_video_seconds (el
+    Requiere el quote_id de estimate_cost con los mismos model_id, input e input_*_seconds (el
     usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key.
     Al editar un video (entrada video_url), generate_audio=false da un video MUDO, no conserva el sonido
     original; para conservarlo pasa keep_source_audio=true (gratis: HF Studio le pone el audio del
     video de origen al resultado). Lee studio_notes en get_model."""
-    payload = {"model": model_id, "input": input, "hints": _hints(input_video_seconds), "provider": provider}
+    hints = _hints(input_video_seconds, input_audio_seconds)
+    payload = {"model": model_id, "input": input, "hints": hints, "provider": provider}
     key, approved = _authorize(payload, quote_id, idempotency_key, confirm_unknown_cost)
     headers = {"Idempotency-Key": key}
     body = {
@@ -230,7 +238,7 @@ def generate(
         "input": input,
         "allow_duplicate": allow_duplicate,
         "keep_source_audio": keep_source_audio,
-        "hints": _hints(input_video_seconds),
+        "hints": hints,
         "provider": provider,
         # El precio que vio el usuario: si subió, la API responde 409 y hay que volver a cotizar.
         "max_usd": approved["usd"],
@@ -698,8 +706,9 @@ def recommend_models(task: str, output: str | None = None, limit: int = 5) -> di
     return _call("GET", "/v1/recommend", params=params)
 
 
-def _hints(input_video_seconds: float | None) -> dict:
-    return {"input_video_seconds": input_video_seconds} if input_video_seconds is not None else {}
+def _hints(input_video_seconds: float | None, input_audio_seconds: float | None = None) -> dict:
+    found = {"input_video_seconds": input_video_seconds, "input_audio_seconds": input_audio_seconds}
+    return {k: v for k, v in found.items() if v is not None}
 
 
 def _complete(estimate: dict) -> bool:
@@ -759,8 +768,8 @@ def _authorize(
         if not _complete(q["estimate"]) and not confirm_unknown_cost:
             missing = ", ".join(q["estimate"].get("missing") or []) or "price not available"
             raise ToolError(
-                f"No complete price for this request ({missing}). Pass input_video_seconds with the real length "
-                "of the input video, or tell the user the cost is unknown and, only if they explicitly accept, "
+                f"No complete price for this request ({missing}). Pass input_video_seconds (or input_audio_seconds) "
+                "with the real length of the input media, or tell the user the cost is unknown and, only if they explicitly accept, "
                 "retry with confirm_unknown_cost=True."
             )
         key = idempotency_key or q["key"] or f"quote-{quote_id}"

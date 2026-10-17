@@ -82,7 +82,7 @@ from .providers import ProviderError
 from .providers import registry as provider_registry
 from .providers.prices import PriceBook
 from .recommend import recommend
-from .routing import Plan, Router, requote, video_urls
+from .routing import AUDIO_FIELDS, Plan, Router, requote, video_urls
 from .service import (
     UNSET,
     ServiceError,
@@ -668,21 +668,27 @@ def create_app(
     async def complete_hints(
         request: Request, session: AsyncSession, owner: ApiClient, arguments: dict, hints: dict
     ) -> dict:
-        """Mide la duración de los videos de entrada (si no viene en `hints`): varios proveedores cobran
-        por ella. Solo medios propios, descargados y medidos en local sin red (SSRF, revisión 28)."""
+        """Mide la duración de los videos y audios de entrada (si no viene en `hints`): varios proveedores
+        cobran por ella. Solo medios propios, descargados y medidos en local sin red (SSRF, revisión 28)."""
         hints = dict(hints or {})
-        urls = video_urls(arguments)
-        if "input_video_seconds" in hints or not urls:
-            return hints
-        seconds = 0.0
-        for url in urls:
-            if not await trusted_media(session, owner, url):
-                return hints
-            measured = await local_duration(url, request.app.state.hf.plain, settings.max_upload_bytes)
-            if not measured:
-                return hints
-            seconds += measured
-        hints["input_video_seconds"] = round(seconds, 2)
+        for key, urls, audio in (
+            ("input_video_seconds", video_urls(arguments), False),
+            ("input_audio_seconds", video_urls(arguments, AUDIO_FIELDS), True),
+        ):
+            if key in hints or not urls:
+                continue
+            seconds = 0.0
+            for url in urls:
+                if not await trusted_media(session, owner, url):
+                    break
+                measured = await local_duration(
+                    url, request.app.state.hf.plain, settings.max_upload_bytes, audio=audio
+                )
+                if not measured:
+                    break
+                seconds += measured
+            else:
+                hints[key] = round(seconds, 2)
         return hints
 
     async def make_plan(
