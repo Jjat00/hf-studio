@@ -46,6 +46,9 @@ owner's credits.
 - Kling 3.0 elements: `list_elements` / `create_element` (2–4 JPG/PNG images). Put their `el_…` ids in the model's
   `elements` field and cite each as `@name` in the prompt; they run on APIMart and KIE only (KIE also needs
   `image_url`).
+- Genjutsu Restyle (`higgsfield/genjutsu/restyle/v1.0`) restyles a video and keeps its motion and audio: pick the
+  style with `list_styles` and pass its id in `preset_id` (styles change without notice). Ads Studio
+  (`higgsfield/ads-studio/v1.0`) makes 1 to 8 ad images from a brief and product photos (`batch_size` = number of images).
 - Spaces (node canvases): `create_space` / `update_space` build one; `estimate_space_run` quotes every step and the
   total (with a `quote_id`), and after the user's OK `run_space` runs it on the server under that budget. A run that
   pauses (`awaiting_approval`) needs the user's OK on `pause.needed_total_usd` before `approve_space_run`.

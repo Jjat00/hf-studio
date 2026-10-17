@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-40%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+[![MCP](https://img.shields.io/badge/MCP-41%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
 **Español** · [English](README.md) · [Web y ejemplos](https://hf-studio.jato.run)
 
@@ -105,8 +105,10 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
 - **82 endpoints de Higgsfield** (66 de video, 15 de imagen y 1 de referencias personalizadas), cada uno con su JSON
   Schema sacado de la documentación oficial (`hf-studio sync-catalog`).
 - **Todas las capacidades de video e imagen:** texto a video, imagen a video, fotograma inicial y final, videos de
-  referencia, edición y extensión de video, transferencia de movimiento, cambio de objetos (Genjutsu), texto a imagen
-  y edición de imagen. Se busca por capacidad, no por marca.
+  referencia, edición y extensión de video, transferencia de movimiento, cambio de objetos y de estilo (Genjutsu: anime,
+  stop motion, 3D… con el mismo movimiento y audio, y los estilos vigentes de Higgsfield), texto a imagen, edición de
+  imagen y anuncios en imagen (Ads Studio: de 1 a 8 anuncios a partir de un brief y fotos del producto). Se busca
+  por capacidad, no por marca.
 - **Audio con ElevenLabs (opcional):** cambio de voz en un tramo de un video, con efectos de terror (grave, monstruo,
   fantasma), texto a voz, efectos de sonido, música y aislamiento de voz.
 - **Conservar el audio original** en las ediciones de video: HF Studio le pone al resultado el sonido del video de
@@ -124,7 +126,7 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   gratis) ordenados por lo que son (voces, gritos, risas, criaturas, ambientes, golpes, objetos y pasos, transiciones,
   música) con título y etiquetas editables, para reutilizarlos sin volver a pagar.
 - **Presets** (recetas con variables), **lotes** con cotización total, **recomendador** de modelos en lenguaje
-  natural (es/en) y **22 casos de uso** con tutorial paso a paso para la UI y para los agentes.
+  natural (es/en) y **24 casos de uso** con tutorial paso a paso para la UI y para los agentes.
 - **Interfaz bilingüe:** español por defecto e inglés con un clic.
 
 | AI Influencer y Apps | Menús de Funciones y Modelos |
@@ -238,12 +240,12 @@ se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se det
 mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
 `HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-Herramientas (40). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Herramientas (41). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
 | --- | --- |
-| Modelos | `find_models`, `get_model`, `recommend_models` |
+| Modelos | `find_models`, `get_model`, `recommend_models`, `list_styles` |
 | Generar | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
 | Seguimiento | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
 | Proveedores | `providers_status` |
@@ -289,8 +291,9 @@ Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nom
   **Más**.
 - **Portada** (`/`): modelos destacados, una promo con accesos, el banner de AI Influencer, las Apps de un clic, una
   barra de prompt, lo que pueden hacer tus agentes y tus últimas creaciones.
-- **Páginas:** Imagen, Video (Crear: texto, fotograma inicial y final, referencias · Genjutsu · Editar video ·
-  Movimiento), Voz, Audio, Sonoteca, AI Influencer (`/influencer`), Elementos (`/elements`), Casos de uso, Presets y
+- **Páginas:** Imagen (Crear, con anuncios de Ads Studio · Editar), Video (Crear: texto, fotograma inicial y final,
+  referencias · Genjutsu: movimiento, cambio de objetos y cambio de estilo con selector · Editar video · Movimiento), Voz,
+  Audio, Sonoteca, AI Influencer (`/influencer`), Elementos (`/elements`), Casos de uso, Presets y
   Apps (con los flujos publicados en `/flows/<id>`), Spaces (`/spaces`), Biblioteca (con detalle en
   `/history/<id>`), Uso (`/usage`: gasto por día, proveedor y modelo, y el saldo de cada proveedor), Modelos
   (`/models`) y MCP.
@@ -317,6 +320,7 @@ Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
 | --- | --- | --- |
 | GET | `/v1/models?capability=&output=&q=` | Catálogo filtrable (lista de capacidades incluida) |
 | GET | `/v1/models/{id}` | `input_schema`, notas de uso, `studio_notes`, enlace a docs |
+| GET | `/v1/model-styles/{id}` | Estilos vigentes de un modelo que recibe `preset_id` (Genjutsu Restyle) |
 | POST | `/v1/uploads` (multipart `file`) | Sube jpg/png/webp/gif/mp4/wav → URL pública |
 | POST | `/v1/estimate` `{model, input, hints}` | Costo antes de generar: exacto, aproximado por fórmula o pendiente de medios |
 | POST | `/v1/generations` `{model, input, keep_source_audio}` | Encola; 202 nuevo, 200 si se deduplicó. Header `Idempotency-Key` |

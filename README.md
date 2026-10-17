@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-40%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
+[![MCP](https://img.shields.io/badge/MCP-41%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
 [Español](README.es.md) · **English** · [Website and examples](https://hf-studio.jato.run)
 
@@ -104,7 +104,9 @@ the cheapest provider that offers **the exact same model and settings**:
 - **84 Higgsfield endpoints** (67 video, 16 image, 1 custom references), each with its JSON Schema taken from the
   official docs (`hf-studio sync-catalog`).
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
-  edit and extend, motion transfer, object swap (Genjutsu), text-to-image and image editing.
+  edit and extend, motion transfer, object swap and restyle (Genjutsu: anime, stop motion, 3D…
+  keeping the motion and the audio, with Higgsfield's current styles), text-to-image, image editing and ad images (Ads
+  Studio: 1 to 8 ads from a brief and your product photos).
 - **ElevenLabs audio (optional):** change the voice on a segment of a video (with deep, monster and ghost effects),
   text-to-speech, sound effects, music and voice isolation.
 - **Keep the original audio** when editing a video: HF Studio muxes the source audio back onto the result (free, with
@@ -118,7 +120,7 @@ the cheapest provider that offers **the exact same model and settings**:
   kind (voices, screams, laughs, creatures, ambience, impacts, foley, transitions, music) with editable titles and tags,
   so you can reuse them instead of paying again.
 - **Presets** (recipes with variables), **batches** with a total quote, a natural-language **model recommender**
-  (English and Spanish) and **22 use cases** with step-by-step tutorials for the UI and for agents.
+  (English and Spanish) and **24 use cases** with step-by-step tutorials for the UI and for agents.
 - **Bilingual UI:** Spanish by default, English one click away.
 
 | AI Influencer and Apps | Features and Models menus |
@@ -231,12 +233,12 @@ touched. If the agent already has `hf-studio`, `connect` stops: remove it first 
 server is `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with `HF_STUDIO_URL=http://127.0.0.1:8787`
 and `HF_STUDIO_TOKEN=hfs_…` in its environment.
 
-Tools (40). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Tools (41). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`), and the ones that spend credits say so in their title, so clients can warn you before calling them.
 
 | Group | Tools |
 | --- | --- |
-| Models | `find_models`, `get_model`, `recommend_models` |
+| Models | `find_models`, `get_model`, `recommend_models`, `list_styles` |
 | Generate | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
 | Tracking | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
 | Providers | `providers_status` |
@@ -280,7 +282,8 @@ Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name
   **More**.
 - **Home** (`/`): featured models, a promo with shortcuts, the AI Influencer banner, one-click Apps, a prompt bar,
   what your agents can do and your latest creations.
-- **Pages:** Image, Video (Create: text, first and last frame, references · Genjutsu · Edit video · Motion), Voice,
+- **Pages:** Image (Create, with Ads Studio ads · Edit), Video (Create: text, first and last frame, references ·
+  Genjutsu: motion, object swap and restyle with a style picker · Edit video · Motion), Voice,
   Audio, Sound library, AI Influencer (`/influencer`), Elements (`/elements`), Use cases, Presets and Apps (with
   published flows at `/flows/<id>`), Spaces (`/spaces`), Library (with detail at `/history/<id>`), Usage (`/usage`:
   spend by day, provider and model, plus each provider's balance), Models (`/models`) and MCP.
@@ -301,6 +304,7 @@ Every `/v1` route requires `Authorization: Bearer hfs_…`. Interactive docs at 
 | --- | --- | --- |
 | GET | `/v1/models?capability=&output=&q=` | Filterable catalog (capability list included) |
 | GET | `/v1/models/{id}` | `input_schema`, usage notes, `studio_notes`, docs link |
+| GET | `/v1/model-styles/{id}` | Current styles of a model that takes a `preset_id` (Genjutsu Restyle) |
 | POST | `/v1/uploads` (multipart `file`) | Uploads jpg/png/webp/gif/mp4/wav → public URL |
 | POST | `/v1/estimate` `{model, input, hints}` | Cost before generating: exact, approximate by formula or pending media |
 | POST | `/v1/generations` `{model, input, keep_source_audio}` | Enqueues; 202 new, 200 if deduplicated. `Idempotency-Key` header |
