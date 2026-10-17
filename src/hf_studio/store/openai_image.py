@@ -49,7 +49,11 @@ def _gpt2_models() -> list[dict[str, Any]]:
     for mode, workflow in MODES:
         properties: dict[str, Any] = {
             "prompt": prompt(20000, "What to generate or, with images, what to change and what to keep."),
-            "aspect_ratio": choice(GPT2_RATIOS, "auto", "Output aspect ratio; auto lets the model choose."),
+            # APIMart convierte «auto» en 1:1: en texto a imagen el valor por defecto es 1:1 y «auto» solo va a KIE.
+            "aspect_ratio": choice(
+                GPT2_RATIOS, "1:1" if mode == "text-to-image" else "auto",
+                "Output aspect ratio; auto lets the model choose (KIE only).",
+            ),
             "resolution": choice(["1k", "2k", "4k"], "1k", "Output resolution tier."),
             "background": choice(
                 ["auto", "opaque", "transparent"], "auto",
@@ -201,7 +205,8 @@ def apimart() -> dict[str, Route]:
             keep=("prompt", "resolution", "image_urls"),
             rename={"aspect_ratio": "size"},
             convert={"background": only_default("background", "auto")},
-            allowed={"aspect_ratio": GPT2_RATIOS},
+            # «auto» en APIMart es 1:1, no lo que elija el modelo: no se reproduce.
+            allowed={"aspect_ratio": set(GPT2_RATIOS) - {"auto"}},
             fixed={"n": 1},
             build=_apimart_gpt2_images,
         )  # fmt: skip

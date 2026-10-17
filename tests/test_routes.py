@@ -25,6 +25,8 @@ EXPECTED_UNSUPPORTED = {
     # O3 con referencias y sin formato explícito: APIMart usaría 16:9 y Higgsfield no dice qué hace
     ("apimart", "kling-video/o3/image-reference"),
     ("apimart", "kling-video/o3/video-reference"),
+    # GPT Image 2: APIMart convierte el formato «auto» en 1:1; sin formato elegido, la edición va a KIE
+    ("apimart", "openai/gpt-image-2/edit"),
 }
 ROUTED = [
     (name, mid, route.model)

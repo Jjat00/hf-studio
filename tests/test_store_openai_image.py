@@ -46,8 +46,9 @@ def unsupported(provider: str, model_id: str, **values) -> None:
 
 def test_gpt_image_2_on_apimart():
     assert translate("apimart", "openai/gpt-image-2/text-to-image") == {
-        "prompt": "a fox", "size": "auto", "resolution": "1k", "n": 1,
+        "prompt": "a fox", "size": "1:1", "resolution": "1k", "n": 1,
     }  # fmt: skip
+    unsupported("apimart", "openai/gpt-image-2/text-to-image", aspect_ratio="auto")  # APIMart lo vuelve 1:1
     assert translate("apimart", "openai/gpt-image-2/edit", image_urls=[IMG], aspect_ratio="9:21",
                      resolution="4k") == {
         "prompt": "a fox", "size": "9:21", "resolution": "4k", "image_urls": [IMG], "n": 1,
@@ -66,7 +67,7 @@ def test_gpt_image_2_apimart_limits():
 
 def test_gpt_image_2_on_kie():
     assert translate("kie", "openai/gpt-image-2/text-to-image") == {
-        "prompt": "a fox", "aspect_ratio": "auto", "resolution": "1K",
+        "prompt": "a fox", "aspect_ratio": "1:1", "resolution": "1K",
     }  # fmt: skip
     assert translate("kie", "openai/gpt-image-2/edit", image_urls=[IMG] * 16, background="transparent") == {
         "prompt": "a fox", "aspect_ratio": "auto", "resolution": "1K", "background": "transparent",
