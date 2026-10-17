@@ -28,26 +28,10 @@ def test_qwen_2_0_on_apimart_sends_the_image_endpoint_body():
     _unsupported(route, {**logical, "seed": 7})  # APIMart no tiene semilla
 
 
-def test_qwen_2_0_on_kie_keeps_only_what_it_can_reproduce():
-    mid = "alibaba/qwen-image-2.0/text-to-image"
-    route = route_of("kie", mid)
-    logical = {**sample(mid), "seed": 5}
-    out = route.translate(logical, chosen(mid, "seed"))
-    assert out == {"prompt": "a red fox running through snow", "image_size": "1:1", "seed": 5,
-                   "output_format": "png"}  # fmt: skip
-    assert route.price(logical, {}, _prices("kie")) == 0.028
-    _unsupported(
-        route, {**logical, "resolution": "2k"}, chosen(mid, "resolution")
-    )  # tamaño desconocido en KIE
-    _unsupported(route, logical, chosen(mid, "resolution"))  # 1k elegido a mano tampoco se garantiza
-    _unsupported(route, {**logical, "num_images": 2})
-    _unsupported(route, {**logical, "aspect_ratio": "3:2"})
-    _unsupported(route, {**logical, "negative_prompt": "text"})
-    edit = route_of("kie", "alibaba/qwen-image-2.0/edit")
-    out = edit.translate(sample("alibaba/qwen-image-2.0/edit"), chosen("alibaba/qwen-image-2.0/edit"))
-    assert (
-        out["image_url"] == ["https://example.com/hf-studio-placeholder.png"] and out["image_size"] == "1:1"
-    )
+def test_qwen_2_0_does_not_run_on_kie():
+    # KIE no tiene resolución ni publica su tamaño de salida: no garantiza el 1k del esquema (revisión 88).
+    for mode in ("text-to-image", "edit"):
+        assert f"alibaba/qwen-image-2.0/{mode}" not in store.routes("kie")
 
 
 def test_qwen_2_0_pro_runs_only_on_apimart():
@@ -58,18 +42,16 @@ def test_qwen_2_0_pro_runs_only_on_apimart():
     assert route.translate(sample("alibaba/qwen-image-2.0-pro/text-to-image"))["resolution"] == "1K"
 
 
-def test_qwen_image_1_and_edit_send_kie_diffusion_parameters():
-    route = route_of("kie", "alibaba/qwen-image/text-to-image")
-    out = route.translate(sample("alibaba/qwen-image/text-to-image"))
-    assert out == {"prompt": "a red fox running through snow", "image_size": "square_hd", "num_inference_steps": 30,
-                   "guidance_scale": 2.5, "acceleration": "none", "output_format": "png"}  # fmt: skip
-    edit = route_of("kie", "alibaba/qwen-image-edit/edit")
-    logical = {**sample("alibaba/qwen-image-edit/edit"), "num_images": 2}
-    out = edit.translate(logical)
-    assert out["num_images"] == "2" and out["image_url"].endswith(".png") and out["num_inference_steps"] == 25
-    assert edit.price(logical, {}, _prices("kie")) == 0.05
-    _unsupported(route_of("kie", "alibaba/qwen-image/image-to-image"),
-                 {**sample("alibaba/qwen-image/image-to-image"), "image_urls": ["https://x/a.png"]})  # fmt: skip
+def test_qwen_image_1_image_to_image_on_kie_and_no_per_megapixel_models():
+    mid = "alibaba/qwen-image/image-to-image"
+    route = route_of("kie", mid)
+    out = route.translate(sample(mid))
+    assert out["image_url"] and out["strength"] == 0.8 and out["num_inference_steps"] == 30
+    assert route.price(sample(mid), {}, _prices("kie")) == 0.02
+    _unsupported(route, {**sample(mid), "image_urls": ["https://x/a.png"]})
+    # KIE cobra Qwen Image texto a imagen y Qwen Image Edit por megapíxel sin publicar el tamaño de cada preset.
+    assert "alibaba/qwen-image/text-to-image" not in store.models()
+    assert "alibaba/qwen-image-edit/edit" not in store.models()
 
 
 def test_qwen_2_1_checks_masks_and_transparency():

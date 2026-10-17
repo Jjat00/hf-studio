@@ -19,7 +19,7 @@ const es = {
     generate: "Generar",
   },
   stats: [
-    { value: "242", label: "modelos de video e imagen" },
+    { value: "240", label: "modelos de video e imagen" },
     { value: "3", label: "proveedores, el más barato primero" },
     { value: "41", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
@@ -45,7 +45,7 @@ const es = {
   },
   caps: {
     title: "Cada forma de crear video e imagen",
-    body: "242 modelos: los 84 de Higgsfield y 158 que solo venden APIMart y KIE (Nano Banana, GPT Image, Midjourney, Veo 3.1, Seedream, FLUX…), con su esquema completo y buscables por lo que hacen y no por la marca. El formulario sale del esquema de cada modelo.",
+    body: "240 modelos: los 84 de Higgsfield y 156 que solo venden APIMart y KIE (Nano Banana, GPT Image, Midjourney, Veo 3.1, Seedream, FLUX…), con su esquema completo y buscables por lo que hacen y no por la marca. El formulario sale del esquema de cada modelo.",
     items: [
       { art: "text-to-video", title: "Texto a video", desc: "Veo 3.1, Seedance, Kling, Wan, Hailuo, Vidu, Runway, LTX, Grok Imagine…" },
       { art: "frames", title: "Inicio y final", desc: "Das el primer y el último fotograma; el modelo anima el resto." },
@@ -184,7 +184,7 @@ const en: Dict = {
     generate: "Generate",
   },
   stats: [
-    { value: "242", label: "video and image models" },
+    { value: "240", label: "video and image models" },
     { value: "3", label: "providers, cheapest first" },
     { value: "41", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
@@ -210,7 +210,7 @@ const en: Dict = {
   },
   caps: {
     title: "Every way to make video and images",
-    body: "242 models: Higgsfield's 84 plus 158 that only APIMart and KIE sell (Nano Banana, GPT Image, Midjourney, Veo 3.1, Seedream, FLUX…), with their full schema and searchable by what they do instead of by brand. Each model's form is built from its schema.",
+    body: "240 models: Higgsfield's 84 plus 156 that only APIMart and KIE sell (Nano Banana, GPT Image, Midjourney, Veo 3.1, Seedream, FLUX…), with their full schema and searchable by what they do instead of by brand. Each model's form is built from its schema.",
     items: [
       { art: "text-to-video", title: "Text to video", desc: "Veo 3.1, Seedance, Kling, Wan, Hailuo, Vidu, Runway, LTX, Grok Imagine…" },
       { art: "frames", title: "First & last frame", desc: "Give the first and last frame; the model animates the rest." },
