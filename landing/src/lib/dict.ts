@@ -6,12 +6,12 @@ export const AUTHOR = "https://jaimeaza.tech";
 /** Textos de la landing. Misma forma en los dos idiomas: el tipo sale del español. */
 const es = {
   tagline: "Tu estudio de IA para video, imagen y audio",
-  nav: { examples: "Ejemplos", spaces: "Spaces", providers: "Proveedores", audio: "Audio", agents: "Agentes", start: "Empezar", star: "Estrella en GitHub" },
+  nav: { examples: "Ejemplos", spaces: "Spaces", providers: "Proveedores", audio: "Audio", agents: "Agentes", start: "Cómo usarlo", star: "Estrella en GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS y Linux",
     title1: "Tu propio estudio de IA.",
     title2: "Todos los grandes modelos.",
-    body: "Video, imagen, voz, música y efectos con los grandes modelos, desde una interfaz web o desde tus agentes por MCP. Cada video (y algunas imágenes) sale por el proveedor más barato (Higgsfield, APIMart o KIE). Lo instalas en tu máquina y pagas solo lo que generas.",
+    body: "Video, imagen, voz, música y efectos con los grandes modelos, desde una interfaz web o desde tus agentes por MCP. Cada video (y algunas imágenes) sale por el proveedor más barato (Higgsfield, APIMart o KIE). Lo usas en tu máquina o en tu propia nube, con tus claves, y pagas solo lo que generas.",
     ctaRepo: "Ver en GitHub",
     ctaPromo: "Ver el promo",
     prompt: "Un auto deportivo en una carretera costera al atardecer, toma de dron",
@@ -149,6 +149,33 @@ const es = {
     ],
     shots: ["Estudio de video, con el costo antes de generar", "Catálogo de modelos", "Casos de uso"],
   },
+  ways: {
+    kicker: "Tres formas de usarlo",
+    title: "Siempre con tus claves",
+    body: "Pagas directo a Higgsfield, APIMart, KIE y ElevenLabs con tus propias cuentas. Lo que cambia es dónde corre el estudio.",
+    available: "Disponible",
+    soon: "Próximamente",
+    items: [
+      {
+        title: "En tu máquina",
+        desc: "Clonas el repo y lo arrancas con un comando. Todo se queda en tu computador: claves, base de datos y archivos.",
+        points: ["Windows, macOS y Linux", "También como servidor MCP local", "Gratis y open source"],
+        cta: "Instalar",
+      },
+      {
+        title: "En tu propia nube",
+        desc: "Lo despliegas con Docker en Railway u otro hosting y lo abres desde cualquier lugar. Es tu servidor: tus claves viven solo en sus variables de entorno.",
+        points: ["Una imagen Docker lista", "Protegido con tu contraseña de acceso", "Tus archivos en tu volumen"],
+        cta: "Cómo desplegarlo",
+      },
+      {
+        title: "En línea, sin instalar",
+        desc: "Abres la web, pegas tus claves y generas. Tus claves no se guardan en nuestra base de datos.",
+        points: ["Sin instalar nada", "Tus claves, tus cuentas, tu gasto", "Para quien no quiere servidores"],
+        cta: "Seguir el repo",
+      },
+    ],
+  },
   start: {
     kicker: "Empieza en un minuto",
     title: "Instálalo en tu máquina",
@@ -171,12 +198,12 @@ export type Dict = typeof es;
 
 const en: Dict = {
   tagline: "Your AI studio for video, image and audio",
-  nav: { examples: "Examples", spaces: "Spaces", providers: "Providers", audio: "Audio", agents: "Agents", start: "Get started", star: "Star on GitHub" },
+  nav: { examples: "Examples", spaces: "Spaces", providers: "Providers", audio: "Audio", agents: "Agents", start: "How to use it", star: "Star on GitHub" },
   hero: {
     eyebrow: "Open source · MIT · Windows, macOS and Linux",
     title1: "Your own AI studio.",
     title2: "Every major model.",
-    body: "Video, image, voice, music and sound effects with the major models, from a web UI or from your agents over MCP. Every video (and some images) runs on the cheapest provider (Higgsfield, APIMart or KIE). It runs on your machine and you only pay for what you generate.",
+    body: "Video, image, voice, music and sound effects with the major models, from a web UI or from your agents over MCP. Every video (and some images) runs on the cheapest provider (Higgsfield, APIMart or KIE). Run it on your machine or your own cloud, with your own keys, and only pay for what you generate.",
     ctaRepo: "View on GitHub",
     ctaPromo: "Watch the promo",
     prompt: "A sports car on a coastal road at sunset, drone shot",
@@ -313,6 +340,33 @@ const en: Dict = {
       { icon: "shield", title: "Persistent jobs", desc: "Local queue, idempotency and a local copy of every output (Higgsfield only keeps them 7 days)." },
     ],
     shots: ["Video studio, with the cost before generating", "Model catalog", "Use cases"],
+  },
+  ways: {
+    kicker: "Three ways to use it",
+    title: "Always with your own keys",
+    body: "You pay Higgsfield, APIMart, KIE and ElevenLabs directly with your own accounts. What changes is where the studio runs.",
+    available: "Available",
+    soon: "Coming soon",
+    items: [
+      {
+        title: "On your machine",
+        desc: "Clone the repo and start it with one command. Everything stays on your computer: keys, database and files.",
+        points: ["Windows, macOS and Linux", "Also as a local MCP server", "Free and open source"],
+        cta: "Install",
+      },
+      {
+        title: "On your own cloud",
+        desc: "Deploy it with Docker on Railway or any host and open it from anywhere. It is your server: your keys live only in its environment variables.",
+        points: ["A ready Docker image", "Protected by your access password", "Your files on your volume"],
+        cta: "How to deploy it",
+      },
+      {
+        title: "Online, nothing to install",
+        desc: "Open the site, paste your keys and generate. Your keys are not stored in our database.",
+        points: ["Nothing to install", "Your keys, your accounts, your spend", "For anyone who doesn't want servers"],
+        cta: "Watch the repo",
+      },
+    ],
   },
   start: {
     kicker: "Up and running in a minute",

@@ -77,5 +77,6 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in
   `landing/public/media`, all from approved generations). It is separate from `web/`.
 - The UI is Next.js 16, which differs from older versions: read `web/AGENTS.md` before touching `web/`.
-- Do not make real generation calls in tests or checks. Do not expose the UI beyond `127.0.0.1`: its proxy does not
-  authenticate visitors.
+- Do not make real generation calls in tests or checks. Do not expose the UI beyond `127.0.0.1` without
+  `STUDIO_PASSWORD`: without it the proxy does not authenticate visitors. To put it online use the `Dockerfile`
+  (`hf-studio cloud`, which refuses to start without that password); see "Deploy it to your own cloud" in README.md.

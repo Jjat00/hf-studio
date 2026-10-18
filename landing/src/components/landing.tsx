@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowRight, BookOpen, Check, Coins, Copy, Globe, Layers, Library, Play, Repeat, Shapes, ShieldCheck, Sparkles, Star, Terminal } from "lucide-react";
+import { ArrowRight, BookOpen, Check, Cloud, Coins, Copy, Globe, Layers, Library, Play, Repeat, Shapes, ShieldCheck, Sparkles, Star, Terminal } from "lucide-react";
 import { useState } from "react";
 import { REPO, AUTHOR } from "@/lib/dict";
 import { useI18n } from "./i18n";
@@ -30,7 +30,7 @@ function Nav() {
     ["#proveedores", t.nav.providers],
     ["#audio", t.nav.audio],
     ["#agentes", t.nav.agents],
-    ["#empezar", t.nav.start],
+    ["#formas", t.nav.start],
   ];
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-page/80 backdrop-blur-xl">
@@ -526,6 +526,59 @@ function More() {
   );
 }
 
+/** Dónde corre el estudio: en tu máquina y en tu nube ya se puede; en línea, todavía no. */
+function Ways() {
+  const { t, locale } = useI18n();
+  const deploy = `${REPO}/blob/main/${locale === "es" ? "README.es.md#desplegarlo-en-tu-propia-nube" : "README.md#deploy-it-to-your-own-cloud"}`;
+  const links = ["#empezar", deploy, REPO];
+  const icons = [Terminal, Cloud, Globe];
+  return (
+    <section id="formas" className="mx-auto w-full max-w-[1400px] scroll-mt-20 px-4">
+      <div className="max-w-3xl">
+        <Kicker>{t.ways.kicker}</Kicker>
+        <h2 className="headline mt-2 text-[36px] md:text-[48px]">{t.ways.title}</h2>
+        <p className="mt-3 text-[17px] leading-relaxed text-fg-2">{t.ways.body}</p>
+      </div>
+      <div className="mt-8 grid gap-4 md:grid-cols-3">
+        {t.ways.items.map((w, i) => {
+          const Icon = icons[i];
+          const soon = i === 2;
+          return (
+            <div key={w.title} className={clsx("flex flex-col rounded-[24px] border p-6", soon ? "border-dashed border-line-2 bg-surface-1/60" : "border-line bg-surface-1")}>
+              <div className="flex items-center justify-between">
+                <span className="flex size-11 items-center justify-center rounded-xl bg-lime/10 text-lime">
+                  <Icon className="size-5" />
+                </span>
+                <span className={clsx("rounded-md px-2 py-1 text-[12px] font-bold", soon ? "bg-surface-4 text-fg-2" : "bg-lime/20 text-lime")}>
+                  {soon ? t.ways.soon : t.ways.available}
+                </span>
+              </div>
+              <h3 className="mt-5 text-[22px] font-semibold">{w.title}</h3>
+              <p className="mt-2 text-[15px] leading-relaxed text-fg-2">{w.desc}</p>
+              <ul className="mt-5 grid gap-2">
+                {w.points.map((p) => (
+                  <li key={p} className="flex items-center gap-2 text-[14px] text-fg-2">
+                    <Check className="size-4 shrink-0 text-lime" /> {p}
+                  </li>
+                ))}
+              </ul>
+              <a
+                href={links[i]}
+                className={clsx(
+                  "mt-6 flex items-center gap-2 self-start rounded-xl px-4 py-2.5 text-[14px] font-semibold",
+                  soon ? "border border-line-2 text-fg hover:bg-surface-3" : "bg-lime text-ink hover:bg-lime-400",
+                )}
+              >
+                {w.cta} <ArrowRight className="size-4" />
+              </a>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Start() {
   const { t } = useI18n();
   const cmd = "git clone https://github.com/Jjat00/hf-studio.git\ncd hf-studio\n./dev.sh        # macOS, Linux, WSL\n.\\dev           # Windows";
@@ -624,6 +677,7 @@ export function Landing() {
         <Audio />
         <Agents />
         <More />
+        <Ways />
         <Start />
       </main>
       <Footer />
