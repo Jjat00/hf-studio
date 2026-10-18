@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { LOCALE_COOKIE, toLocale } from "@/lib/i18n";
+import { SESSION_COOKIE, crossSite, gateEnabled, validSession } from "@/lib/session";
 
 /**
  * Proxy hacia la API de HF Studio. La clave `hfs_…` vive solo aquí (HF_STUDIO_TOKEN),
@@ -11,10 +12,12 @@ const FORWARD_REQ = ["content-type", "idempotency-key", "range", "accept"];
 const MESSAGES = {
   es: {
     misconfigured: "Falta HF_STUDIO_TOKEN en web/.env.local",
+    signedOut: "Tu sesión terminó: vuelve a entrar con la contraseña de acceso",
     apiDown: (url: string) => `La API de HF Studio no responde en ${url}. ¿Está corriendo \`hf-studio serve\`?`,
   },
   en: {
     misconfigured: "HF_STUDIO_TOKEN is missing in web/.env.local",
+    signedOut: "Your session ended: sign in again with the access password",
     apiDown: (url: string) => `HF Studio API is not reachable at ${url}. Is \`hf-studio serve\` running?`,
   },
 };
@@ -23,6 +26,12 @@ const FORWARD_RES = ["content-type", "content-length", "content-range", "accept-
 async function proxy(req: NextRequest, ctx: RouteContext<"/api/studio/[...path]">) {
   const { path } = await ctx.params;
   const msg = MESSAGES[toLocale(req.cookies.get(LOCALE_COOKIE)?.value)];
+  // Con STUDIO_PASSWORD, la sesión se comprueba aquí y no en proxy.ts (ver allí por qué). /health queda
+  // abierto para el healthcheck del hosting, pero sin sesión solo dice si la API responde.
+  if (gateEnabled() && (crossSite(req.headers) || !validSession(req.cookies.get(SESSION_COOKIE)?.value))) {
+    if (path.length === 1 && path[0] === "health" && req.method === "GET") return publicHealth();
+    return Response.json({ error: { code: "signed_out", message: msg.signedOut } }, { status: 401 });
+  }
   if (path[0] !== "v1" && path[0] !== "health") {
     return Response.json({ error: { code: "not_found", message: "Route not allowed" } }, { status: 404 });
   }
@@ -62,6 +71,16 @@ async function proxy(req: NextRequest, ctx: RouteContext<"/api/studio/[...path]"
     if (v) out.set(h, v);
   }
   return new Response(upstream.body, { status: upstream.status, headers: out });
+}
+
+/** Salud sin detalles (qué proveedores tienen clave, etc.) para quien no ha entrado. */
+async function publicHealth() {
+  try {
+    const res = await fetch(`${API}/health`, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+    return Response.json({ ok: res.ok }, { status: res.ok ? 200 : 502 });
+  } catch {
+    return Response.json({ ok: false }, { status: 502 });
+  }
 }
 
 export { proxy as GET, proxy as POST, proxy as DELETE, proxy as PATCH, proxy as PUT };

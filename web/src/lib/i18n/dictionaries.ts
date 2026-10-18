@@ -898,6 +898,16 @@ const es = {
     changed: "El lienzo cambió mientras se preparaba: revisa el precio y vuelve a generar",
     tooManyRuns: (n: number) => `Este nodo llegó a ${n} generaciones: duplícalo o crea otro nodo`,
   },
+  login: {
+    title: "Entra a tu estudio",
+    body: "Este HF Studio está en internet y gasta los créditos de su dueño. Escribe la contraseña de acceso (STUDIO_PASSWORD).",
+    password: "Contraseña",
+    submit: "Entrar",
+    wrong: "Contraseña incorrecta",
+    limited: "Demasiados intentos fallidos: espera unos minutos",
+    failed: "No se pudo entrar; inténtalo otra vez",
+    logout: "Cerrar sesión",
+  },
 };
 
 export type Dict = typeof es;
@@ -1739,6 +1749,16 @@ const en: Dict = {
     saveFirst: "The space could not be saved before running; try again",
     changed: "The canvas changed while preparing: check the price and generate again",
     tooManyRuns: (n: number) => `This node reached ${n} generations: duplicate it or add another node`,
+  },
+  login: {
+    title: "Sign in to your studio",
+    body: "This HF Studio is on the internet and spends its owner's credits. Enter the access password (STUDIO_PASSWORD).",
+    password: "Password",
+    submit: "Sign in",
+    wrong: "Wrong password",
+    limited: "Too many failed attempts: wait a few minutes",
+    failed: "Could not sign in; try again",
+    logout: "Sign out",
   },
 };
 

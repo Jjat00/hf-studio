@@ -186,6 +186,7 @@ uv run hf-studio connect claude-code     # o: codex, claude-desktop, json
 | `hf-studio setup [--no-input]` | Primera puesta en marcha: `.env`, validación de la clave y clave de la UI (la ejecuta `start`) |
 | `hf-studio connect CLIENTE [--print]` | Registra el MCP en `claude-code` o `codex`, o imprime la configuración (`claude-desktop`, `json`) |
 | `hf-studio serve` | Arranca la API y el worker |
+| `hf-studio cloud` | Arranque de la imagen Docker: API y UI compilada detrás de `STUDIO_PASSWORD` |
 | `hf-studio mcp` | Servidor MCP por stdio |
 | `hf-studio create-key NOMBRE` · `list-keys` · `revoke-key NOMBRE` | Claves `hfs_…` por cliente (UI, Claude Code, Codex…) |
 | `hf-studio see-all NOMBRE [--off]` | Deja que un cliente vea y gestione las generaciones de todos (pensado para la UI) |
@@ -194,6 +195,30 @@ uv run hf-studio connect claude-code     # o: codex, claude-desktop, json
 | `hf-studio check-credentials` | Valida la clave de Higgsfield sin gastar |
 | `hf-studio sync-catalog` | Regenera `catalog.json` desde docs.higgsfield.ai |
 
+### Desplegarlo en tu propia nube
+
+El `Dockerfile` arma una sola imagen con la API, la UI ya compilada y ffmpeg. Arranca con `hf-studio cloud`, que sirve la
+UI en `$PORT` y deja la API en `127.0.0.1` dentro del contenedor. Tus claves solo viven en las variables de entorno de
+tu servidor.
+
+- **`STUDIO_PASSWORD` es obligatoria** (12 caracteres o más): la UI queda en internet y gasta tus créditos, así que cada
+  página y cada llamada a la API la piden. Sin ella el contenedor no arranca.
+- `HF_API_KEY` es obligatoria; `ELEVENLABS_API_KEY`, `APIMART_API_KEY`, `KIE_API_KEY` y `ANTHROPIC_API_KEY` son
+  opcionales, como en `.env.example`.
+- Monta un volumen en `/data` (base SQLite y tus archivos). Sin él, cada redespliegue empieza vacío.
+
+En **Railway**: crea un proyecto desde este repositorio (lee `railway.json`), añade las variables de arriba y un volumen
+montado en `/data`, y pon `RAILWAY_RUN_UID=0` para que el contenedor pueda escribir en él. Cualquier host con Docker
+sirve igual:
+
+```bash
+docker build -t hf-studio .
+docker run -p 3000:3000 -v hf-studio-data:/data \
+  -e HF_API_KEY=... -e STUDIO_PASSWORD=... hf-studio
+```
+
+En este modo no se usan webhooks (los trabajos se sondean) y los agentes MCP siguen conectándose a un HF Studio local.
+
 ### Claves y acceso
 
 Cada cliente tiene su propia clave `hfs_…` y por defecto solo ve sus generaciones. Las credenciales de Higgsfield y
@@ -201,7 +226,8 @@ ElevenLabs solo las conoce la API.
 
 > **Aviso:** el proxy de la UI no autentica a quien la visita, así que con `see-all` cualquiera que alcance el
 > servidor Next puede ver, borrar y lanzar generaciones. `pnpm dev` y `pnpm start` escuchan solo en `127.0.0.1`; no lo
-> expongas a otras máquinas sin poner autenticación delante.
+> expongas a otras máquinas sin poner autenticación delante. Para ponerlo en línea, usa `hf-studio cloud` con
+> `STUDIO_PASSWORD` ([Desplegarlo en tu propia nube](#desplegarlo-en-tu-propia-nube)).
 
 ## Conectar agentes (MCP)
 

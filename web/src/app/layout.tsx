@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk } from "next/font/google";
 import { I18nProvider } from "@/components/i18n-provider";
 import { Nav } from "@/components/nav";
 import { getDict, getLocale } from "@/lib/i18n/server";
+import { gateEnabled } from "@/lib/session";
 import "./globals.css";
 
 // Inter con eje óptico (opsz 14–32): en tamaños grandes se comporta como Inter Display.
@@ -20,7 +21,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang={locale} className={`${inter.variable} ${grotesk.variable} h-full`}>
       <body className="flex min-h-full flex-col" style={{ fontOpticalSizing: "auto" }}>
         <I18nProvider locale={locale}>
-          <Nav />
+          <Nav gate={gateEnabled()} />
           <main className="flex min-h-0 flex-1 flex-col">{children}</main>
         </I18nProvider>
       </body>

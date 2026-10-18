@@ -203,3 +203,95 @@ def test_warns_when_ffmpeg_has_no_rubberband(monkeypatch, capsys):
     )
     launcher.check_ffmpeg()
     assert "brew install ffmpeg-full" in capsys.readouterr().out
+
+
+def _cloud_env(monkeypatch, tmp_path, password="una-clave-larga-1"):
+    server = tmp_path / "server.js"
+    server.write_text("")
+    monkeypatch.setattr(launcher, "STANDALONE_SERVER", server)
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(launcher, "check_ffmpeg", lambda: None)
+    monkeypatch.setenv("STUDIO_PASSWORD", password)
+    return server
+
+
+@pytest.mark.parametrize("password", ["", "corta"])
+def test_cloud_refuses_to_start_without_a_long_password(monkeypatch, tmp_path, capsys, password):
+    _cloud_env(monkeypatch, tmp_path, password)
+    prepared = []
+    assert launcher.cloud(lambda: prepared.append(1)) == 1
+    assert not prepared  # ni siquiera rota la clave de la UI
+    assert "STUDIO_PASSWORD" in capsys.readouterr().err
+
+
+def test_cloud_stops_when_the_key_check_fails(monkeypatch, tmp_path):
+    _cloud_env(monkeypatch, tmp_path)
+    started = []
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda *a, **k: started.append(a))
+    assert launcher.cloud(lambda: None) == 1
+    assert not started
+
+
+def test_cloud_gives_the_ui_its_key_but_not_the_provider_keys(monkeypatch, tmp_path):
+    server = _cloud_env(monkeypatch, tmp_path)
+    for name in ("HF_API_KEY", "KIE_API_KEY", "ELEVENLABS_API_KEY", "HF_API_KEY_SECRET"):
+        monkeypatch.setenv(name, "secreto")
+    monkeypatch.setenv("PORT", "8080")
+    seen = {}
+
+    class FakeUI:
+        def __init__(self, cmd, cwd, env):
+            seen.update(cmd=cmd, cwd=cwd, env=env)
+
+        def wait(self, timeout=None):
+            return 0  # la UI "sale" enseguida: el vigilante detiene la API
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", FakeUI)
+    raised = []
+    monkeypatch.setattr(launcher.signal, "raise_signal", raised.append)
+    import uvicorn
+
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: time.sleep(0.2))
+    assert launcher.cloud(lambda: "hfs_ui") == 1  # la UI cayó: es un fallo
+    env = seen["env"]
+    assert seen["cmd"][1] == str(server) and env["HF_STUDIO_TOKEN"] == "hfs_ui"
+    assert env["HOSTNAME"] == "0.0.0.0" and env["PORT"] == "8080" and env["STUDIO_PASSWORD"]
+    assert not any(k.endswith("_API_KEY") or k == "HF_API_KEY_SECRET" for k in env)
+    assert raised == [signal.SIGINT]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGTERM de POSIX")
+def test_cloud_closes_the_ui_in_order_on_sigterm(monkeypatch, tmp_path):
+    _cloud_env(monkeypatch, tmp_path)
+    calls = []
+
+    class FakeUI:
+        def __init__(self, *a, **k):
+            self.done = threading.Event()
+
+        def wait(self, timeout=None):
+            self.done.wait(timeout)
+            return 0
+
+        def poll(self):
+            return 0 if self.done.is_set() else None
+
+        def terminate(self):
+            calls.append("terminate")
+            self.done.set()
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", FakeUI)
+    monkeypatch.setattr(
+        launcher.signal, "raise_signal", lambda s: None
+    )  # el vigilante de la UI no interviene
+    import uvicorn
+
+    # Como uvicorn: atiende SIGTERM y al salir lo vuelve a emitir con el manejador anterior.
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: os.kill(os.getpid(), signal.SIGTERM))
+    before = signal.getsignal(signal.SIGTERM)
+    assert launcher.cloud(lambda: "hfs_ui") == 0
+    assert calls == ["terminate"]
+    assert signal.getsignal(signal.SIGTERM) is before

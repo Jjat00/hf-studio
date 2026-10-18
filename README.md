@@ -189,6 +189,7 @@ Setting it up with an AI agent? Point it to [AGENTS.md](AGENTS.md).
 | `hf-studio setup [--no-input]` | First-run setup: `.env`, key check and UI key (`start` runs it) |
 | `hf-studio connect CLIENT [--print]` | Registers the MCP server in `claude-code` or `codex`, or prints the config (`claude-desktop`, `json`) |
 | `hf-studio serve` | Starts the API and the worker |
+| `hf-studio cloud` | Docker image entry point: API and built UI behind `STUDIO_PASSWORD` |
 | `hf-studio mcp` | MCP server over stdio |
 | `hf-studio create-key NAME` · `list-keys` · `revoke-key NAME` | One `hfs_…` key per client (UI, Claude Code, Codex…) |
 | `hf-studio see-all NAME [--off]` | Lets a client see and manage everyone's generations (meant for the UI) |
@@ -197,6 +198,29 @@ Setting it up with an AI agent? Point it to [AGENTS.md](AGENTS.md).
 | `hf-studio check-credentials` | Validates the Higgsfield key without spending |
 | `hf-studio sync-catalog` | Regenerates `catalog.json` from docs.higgsfield.ai |
 
+### Deploy it to your own cloud
+
+The `Dockerfile` builds a single image with the API, the built UI and ffmpeg. It starts with `hf-studio cloud`, which
+serves the UI on `$PORT` and keeps the API on `127.0.0.1` inside the container. Your keys live only in your
+server's environment variables.
+
+- **`STUDIO_PASSWORD` is required** (12+ characters): the UI is on the internet and spends your credits, so every page
+  and API call asks for it. Without it the container does not start.
+- `HF_API_KEY` is required; `ELEVENLABS_API_KEY`, `APIMART_API_KEY`, `KIE_API_KEY` and `ANTHROPIC_API_KEY` are optional,
+  as in `.env.example`.
+- Mount a volume on `/data` (SQLite database and your files). Without it, each redeploy starts empty.
+
+On **Railway**: create a project from this repository (it reads `railway.json`), add the variables above and a volume
+mounted at `/data`, and set `RAILWAY_RUN_UID=0` so the container can write to it. Any Docker host works the same way:
+
+```bash
+docker build -t hf-studio .
+docker run -p 3000:3000 -v hf-studio-data:/data \
+  -e HF_API_KEY=... -e STUDIO_PASSWORD=... hf-studio
+```
+
+Webhooks are not used in this mode (jobs are polled), and MCP agents keep connecting to a local HF Studio.
+
 ### Keys and access
 
 Each client has its own `hfs_…` key and, by default, only sees its own generations. Only the API knows the Higgsfield
@@ -204,7 +228,8 @@ and ElevenLabs credentials.
 
 > **Warning:** the UI proxy does not authenticate visitors, so with `see-all` anyone who can reach the Next server can
 > see, delete and launch generations. `pnpm dev` and `pnpm start` listen on `127.0.0.1` only; do not expose it to
-> other machines without putting authentication in front.
+> other machines without putting authentication in front. To put it online, use `hf-studio cloud` and
+> `STUDIO_PASSWORD` ([Deploy it to your own cloud](#deploy-it-to-your-own-cloud)).
 
 ## Connect your agents (MCP)
 

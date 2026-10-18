@@ -216,6 +216,19 @@ def _setup(interactive: bool) -> int:
     return 0
 
 
+def _cloud_prepare() -> str | None:
+    """Para `hf-studio cloud`: valida la clave de Higgsfield del entorno y rota la clave de la UI."""
+    from . import setup
+
+    get_settings.cache_clear()
+    checked = asyncio.run(_check_credentials())
+    if checked == 1:
+        return None
+    if checked == UNREACHABLE:
+        print("Starting anyway; generating will fail until Higgsfield is reachable.", file=sys.stderr)
+    return asyncio.run(_with_session(lambda s: setup.rotate_key(s, setup.UI_CLIENT, sees_all=True)))
+
+
 async def _connect(client: str, name: str | None, install: bool) -> int:
     """Crea una clave nueva para el agente (nunca rota una en uso) y lo registra o imprime cómo hacerlo."""
     from . import setup
@@ -246,6 +259,10 @@ def main() -> int:
     start = sub.add_parser("start", help="Set up on the first run and start the API and the web UI")
     start.add_argument(
         "--api-only", action="store_true", help="Only the API (enough for MCP agents, no Node.js)"
+    )
+    sub.add_parser(
+        "cloud",
+        help="Run the Docker image: API and built UI behind STUDIO_PASSWORD (for Railway and similar)",
     )
     setup_cmd = sub.add_parser("setup", help="First run: creates .env (asks for missing keys) and the UI key")
     setup_cmd.add_argument(
@@ -293,6 +310,10 @@ def main() -> int:
 
         interactive = sys.stdin.isatty()
         return launch(args.api_only, lambda: _setup(interactive))
+    if args.cmd == "cloud":
+        from .launcher import cloud
+
+        return cloud(_cloud_prepare)
     if args.cmd == "setup":
         return _setup(interactive=not args.no_input and sys.stdin.isatty())
     if args.cmd == "connect":

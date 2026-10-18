@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ChevronDown, Globe, Menu, Sparkles } from "lucide-react";
+import { ChevronDown, Globe, LogOut, Menu, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -286,8 +286,24 @@ function LanguageToggle() {
   );
 }
 
-export function Nav() {
+/** Cierra la sesión de la puerta de acceso (solo se muestra con STUDIO_PASSWORD). */
+function SignOut() {
   const { t } = useI18n();
+  async function signOut() {
+    await fetch("/api/session", { method: "DELETE" }).catch(() => {});
+    window.location.assign("/login");
+  }
+  return (
+    <button type="button" onClick={signOut} aria-label={t.login.logout} title={t.login.logout} className="rounded-lg p-1.5 text-fg-3 hover:text-fg">
+      <LogOut className="size-4" />
+    </button>
+  );
+}
+
+export function Nav({ gate = false }: { gate?: boolean }) {
+  const { t } = useI18n();
+  const pathname = usePathname();
+  if (pathname === "/login") return null;
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 bg-page/95 px-4 backdrop-blur-md">
       <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="HF Studio">
@@ -303,6 +319,7 @@ export function Nav() {
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ApiStatus />
         <LanguageToggle />
+        {gate && <SignOut />}
         <span className="mx-1 hidden h-4 w-px bg-line-2 lg:block" />
         <Link
           href="/history"

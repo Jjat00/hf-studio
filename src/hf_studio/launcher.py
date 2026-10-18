@@ -258,3 +258,84 @@ def start(api_only: bool, setup_ok) -> int:
         if ui:
             ui.stop()
     return 1 if crashed.is_set() else 0
+
+
+# `hf-studio cloud` (la imagen Docker): la UI ya compilada con `output: "standalone"` de Next.
+STANDALONE_SERVER = setup.ROOT / "web" / ".next" / "standalone" / "server.js"
+MIN_PASSWORD = 12
+
+
+def cloud(prepare) -> int:
+    """API en 127.0.0.1 y la UI en 0.0.0.0:$PORT, detrás de la contraseña de STUDIO_PASSWORD.
+
+    `prepare()` valida la clave de Higgsfield y devuelve una clave nueva de la UI (o None si falla). La clave
+    de la UI se rota en cada arranque y solo vive en el entorno del proceso de Node: no se escribe en disco."""
+    password = os.environ.get("STUDIO_PASSWORD", "")
+    if len(password) < MIN_PASSWORD:
+        # Sin contraseña, cualquiera con la URL gastaría los créditos del dueño: no se arranca.
+        print(
+            f"STUDIO_PASSWORD is required (at least {MIN_PASSWORD} characters): the UI is reachable from the"
+            " internet and every visitor would spend your credits.",
+            file=sys.stderr,
+        )
+        return 1
+    node = shutil.which("node")
+    if not node or not STANDALONE_SERVER.is_file():
+        print(
+            f"Missing node or the built UI at {STANDALONE_SERVER} (build the Docker image).", file=sys.stderr
+        )
+        return 1
+    check_ffmpeg()
+    token = prepare()
+    if not token:
+        return 1
+    import uvicorn
+
+    port = os.environ.get("PORT", str(UI_PORT))
+    env = {
+        **os.environ,
+        "HOSTNAME": "0.0.0.0",
+        "PORT": port,
+        "HF_STUDIO_URL": f"http://127.0.0.1:{API_PORT}",
+        "HF_STUDIO_TOKEN": token,
+        "NODE_ENV": "production",
+    }
+    # Las claves de los proveedores no le hacen falta a la UI: solo las ve la API.
+    for name in list(env):
+        if name.endswith("_API_KEY") or name in ("HF_API_KEY_ID", "HF_API_KEY_SECRET"):
+            del env[name]
+    ui = subprocess.Popen([node, str(STANDALONE_SERVER)], cwd=STANDALONE_SERVER.parent, env=env)
+    crashed, stopping = threading.Event(), threading.Event()
+
+    def watch() -> None:
+        ui.wait()
+        if not stopping.is_set():  # la cerramos nosotros: no es una caída
+            crashed.set()
+            signal.raise_signal(signal.SIGINT)
+
+    threading.Thread(target=watch, daemon=True).start()
+    print(f"HF Studio UI on port {port}; API on 127.0.0.1:{API_PORT}.", flush=True)
+
+    def stop(signum, frame) -> None:
+        raise KeyboardInterrupt
+
+    # SIGTERM (docker stop, redeploy): uvicorn lo atiende y, al salir, lo vuelve a emitir con el manejador que
+    # hubiera antes. Con el de por defecto Python moriría sin pasar por el finally y Node no se cerraría en orden.
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        if not crashed.is_set():
+            uvicorn.run("hf_studio.main:app", host="127.0.0.1", port=API_PORT)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stopping.set()
+        # Un segundo SIGTERM durante el cierre no debe cortar la espera ni dejar a Node sin matar.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if ui.poll() is None:
+            ui.terminate()
+            try:
+                ui.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                ui.kill()
+        signal.signal(signal.SIGTERM, previous)
+    return 1 if crashed.is_set() else 0
