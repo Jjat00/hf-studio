@@ -197,6 +197,21 @@ def kling() -> dict[str, Route]:
 
 K4_FRAMES = "kling-4.0/keyframe-to-video"
 K4_REFS = "kling-4.0/reference-to-video"
+K4_PROMPT_MAX = 8000
+
+
+def _k4_prompt(source: dict, out: dict) -> dict:
+    if len(source.get("prompt") or "") > K4_PROMPT_MAX:
+        raise unsupported(P, f"KIE takes prompts of up to {K4_PROMPT_MAX} characters")
+    return _need_prompt(source, out)
+
+
+def _k4_refs_length(source: dict, hints: dict) -> None:
+    """Cada video de referencia dura de 2 a 30 s en KIE (Higgsfield recorta a 30). Solo se conoce la suma: con
+    un clip se comprueba exacto; con varios, se descarta lo que la suma ya hace imposible."""
+    count, seconds = len(source.get("video_urls") or []), video_seconds(hints)
+    if count and seconds is not None and not 2 * count <= seconds <= 30 * count:
+        raise unsupported(P, "KIE takes reference videos of 2 to 30 s each")
 
 
 def _k4_frame_cap(duration: int) -> int:
@@ -209,7 +224,7 @@ def _k4_frames(source: dict, out: dict) -> dict:
     duration = int(source.get("duration", 5))
     if count > _k4_frame_cap(duration):
         raise unsupported(P, f"KIE takes at most {_k4_frame_cap(duration)} frames for {duration} s")
-    return _need_prompt(source, out)
+    return _k4_prompt(source, out)
 
 
 def _k4_price(row: str):
@@ -236,7 +251,7 @@ def kling4() -> dict[str, Route]:
     frames = _k4_price("keyframe-to-video")
     return {
         f"{base}/text-to-video": Route(
-            P, K4_FRAMES, Spec(P, K4_FRAMES, keep=(*common, "aspect_ratio"), build=_need_prompt), frames
+            P, K4_FRAMES, Spec(P, K4_FRAMES, keep=(*common, "aspect_ratio"), build=_k4_prompt), frames
         ),
         f"{base}/image-to-video": Route(
             P, K4_FRAMES,
@@ -247,8 +262,8 @@ def kling4() -> dict[str, Route]:
         f"{base}/reference-to-video": Route(
             P, K4_REFS,
             Spec(P, K4_REFS, keep=(*common, "image_urls", "video_urls"),
-                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v}, build=_need_prompt),
-            _k4_price("reference-to-video"),
+                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v}, build=_k4_prompt),
+            _k4_price("reference-to-video"), check=_k4_refs_length,
         ),
     }  # fmt: skip
 

@@ -301,6 +301,12 @@ def test_kling4_translates_frames_mentions_and_prices_video_input():
     ) == round(0.085 * 20, 4)
     with pytest.raises(ProviderError):
         apimart.check(refs, {"input_video_seconds": 31})
+    kie_refs = route_of("kie", f"{k4}/reference-to-video")
+    kie_refs.check(refs, {"input_video_seconds": 30})
+    for seconds in (1.5, 31):  # KIE: cada referencia dura de 2 a 30 s
+        with pytest.raises(ProviderError):
+            kie_refs.check(refs, {"input_video_seconds": seconds})
+    _unsupported(kie_refs, {**refs, "prompt": "x" * 8001})  # KIE: prompts de hasta 8000 caracteres
 
     edit = {**sample(f"{k4}/video-edit"), "video_url": "https://x/v.mp4"}
     route = route_of("apimart", f"{k4}/video-edit")
