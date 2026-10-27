@@ -11,12 +11,15 @@ import { Chip, SettingCard } from "@/components/studio/controls";
 import { CostPanel, costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { MediaSlot } from "@/components/studio/media-slot";
 import { l } from "@/lib/i18n";
-import { ANIMALS, EXAMPLES, GROUPS, IMAGE_GROUPS, SWATCH, TIERS, buildPrompt, randomSelection, thumb, tierThumb, type Example, type Selection, type Tier } from "@/lib/influencer-data";
+import { ANIMALS, EXAMPLES, IMAGE_GROUPS, SWATCH, TIERS, buildPrompt, liveGroups, randomSelection, staticGroups, thumb, tierThumb, type Example, type Group, type LiveCategory, type Selection, type Tier } from "@/lib/influencer-data";
 import { costShort, fieldErrors, studio, StudioError, type Estimate } from "@/lib/studio";
 import type { ModelDetail } from "@/lib/types";
 
+/** El modelo de Higgsfield: recibe el tipo y los rasgos por clave (no un prompt) y devuelve la hoja del personaje. */
+const NATIVE = "higgsfield/ai-influencer";
 /** Modelos para crear el personaje; `photo` es el que se usa si subes una foto (null = no acepta foto). */
 const CREATE_MODELS = [
+  { id: NATIVE, photo: NATIVE, name: "Higgsfield AI Influencer" },
   { id: "higgsfield-ai/soul/v2/standard", photo: null, name: "Soul 2.0" },
   { id: "higgsfield-ai/soul/cinema", photo: null, name: "Soul Cinema" },
   { id: "marketing-studio/image/sunburst", photo: "marketing-studio/image/sunburst", name: "Sunburst" },
@@ -37,8 +40,14 @@ const CREATE_MODELS = [
   { id: "google/imagen-4/ultra/text-to-image", photo: null, name: "Imagen 4 Ultra" },
   { id: "midjourney/imagine/text-to-image", photo: null, name: "Midjourney" },
 ];
-/** Modelos para el movimiento: los de referencias usan la hoja del personaje como referencia, el resto la anima. */
+/**
+ * Modelos para el movimiento. Genjutsu (lo que usa Higgsfield) copia el movimiento de un video tuyo con el personaje;
+ * los de referencias usan la hoja del personaje como referencia y el resto la anima desde un prompt.
+ */
+const GENJUTSU = new Set(["higgsfield/genjutsu-light/motion-transfer/v1.0", "higgsfield/genjutsu/motion-transfer/v1.0"]);
 const MOTION_MODELS = [
+  { id: "higgsfield/genjutsu-light/motion-transfer/v1.0", name: "Genjutsu Light" },
+  { id: "higgsfield/genjutsu/motion-transfer/v1.0", name: "Genjutsu" },
   { id: "bytedance/seedance-2.0/reference-to-video", name: "Seedance 2.0 · Ref" },
   { id: "bytedance/seedance-2.5/reference-to-video", name: "Seedance 2.5 · Ref" },
   { id: "alibaba/wan-3.0/reference-to-video", name: "Wan 3.0 · Ref" },
@@ -101,6 +110,12 @@ const T = {
   motionLabel: l("Movimiento", "Motion"),
   motionExtra: l("Detalles de la escena", "Scene details"),
   motionExtraHint: l("Lugar, ropa, música…", "Location, outfit, music…"),
+  motionVideo: l("Video del movimiento", "Motion video"),
+  motionVideoHint: l("El baile o la acción a copiar · 4–15 s en Light, hasta 30 s en Genjutsu", "The dance or action to copy · 4–15s on Light, up to 30s on Genjutsu"),
+  noAnimals: l(
+    "Higgsfield aún no crea animales por su API (falla en su lado a 2026-10-26). Elige otro modelo para animales.",
+    "Higgsfield can't create animals through its API yet (it fails on their side as of 2026-10-26). Pick another model for animals.",
+  ),
   emptyHistory: l("Aún no has creado ningún influencer.", "You haven't created any influencer yet."),
 };
 
@@ -200,7 +215,9 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const [character, setCharacter] = useState<string | undefined>();
   const [motion, setMotion] = useState(0);
   const [motionExtra, setMotionExtra] = useState("");
+  const [motionVideo, setMotionVideo] = useState<string | undefined>();
   const [motionModel, setMotionModel] = useState(MOTION_MODELS[0].id);
+  const [live, setLive] = useState<LiveCategory[] | null>(null);
   // Cotización y envío
   const [details, setDetails] = useState<Record<string, ModelDetail>>({});
   const [quote, setQuote] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
@@ -216,6 +233,16 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const createModel = CREATE_MODELS.find((m) => m.id === modelKey)!;
   const modelId = tab === "motion" ? motionModel : photo && createModel.photo ? createModel.photo : createModel.id;
   const detail = details[modelId];
+  const native = modelKey === NATIVE;
+  const genjutsu = GENJUTSU.has(motionModel);
+  const isAnimal = ANIMALS.includes(tier);
+  useEffect(() => {
+    if (!native || live) return;
+    studio.options(NATIVE).then((r) => setLive(r.categories), () => undefined);
+  }, [native, live]);
+  // Con el modelo de Higgsfield, sus rasgos vigentes; con los demás, el catálogo copiado (se traduce a prompt).
+  const groupsFor = (t: Tier): Group[] => (native && live ? liveGroups(live, t) : staticGroups(t));
+  const groups = groupsFor(tier);
   useEffect(() => {
     if (details[modelId]) return;
     studio.model(modelId).then((d) => setDetails((prev) => ({ ...prev, [modelId]: d })), () => undefined);
@@ -225,14 +252,29 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
     if (!detail) return null;
     if (tab === "motion") {
       if (!character) return null;
+      if (genjutsu) {
+        if (!motionVideo) return null;
+        const extra = motionExtra.trim() ? ` ${motionExtra.trim()}` : "";
+        return { video_url: motionVideo, image_urls: [character], prompt: `Swap the video's main character for the character in the reference image, same face and outfit.${extra}`, resolution: "720p" };
+      }
       const prompt = `The character ${MOTIONS[motion].en.toLowerCase()}, ${MOTION_TAG}${motionExtra.trim() ? `, ${motionExtra.trim()}` : ""}, smooth realistic motion, social media video`;
       return buildInput(detail, { prompt, image: character, ratio: "9:16", motion: true });
+    }
+    if (native) {
+      if (isAnimal) return null;
+      // Solo las claves que el catálogo vigente admite para este tipo: las viejas o de otro tipo se rechazan.
+      const selection = Object.fromEntries(
+        groups.map((grp) => [grp.id, (sel[grp.id] ?? []).filter((id) => grp.options.some((o) => o.id === id)).slice(0, grp.max)]).filter(([, ids]) => ids.length),
+      );
+      const text = [exampleBrief.trim(), brief.trim()].filter(Boolean).join(" ").slice(0, 4000);
+      return { tier, selection, ...(text && { brief: text }), ...(seed && { seed }), ...(photo && { image_url: photo }) };
     }
     const usePhoto = !!photo && !!createModel.photo;
     const maxLength = (detail.input_schema.properties?.prompt as { maxLength?: number } | undefined)?.maxLength;
     const prompt = buildPrompt(tier, sel, exampleBrief, brief, usePhoto, maxLength);
     return buildInput(detail, { prompt, image: usePhoto ? photo : undefined, ratio: "16:9", seed, batch });
-  }, [detail, tab, character, motion, motionExtra, photo, createModel.photo, tier, sel, exampleBrief, brief, seed, batch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `groups` sale de `native`, `live` y `tier`
+  }, [detail, tab, character, motion, motionExtra, motionVideo, genjutsu, native, live, isAnimal, photo, createModel.photo, tier, sel, exampleBrief, brief, seed, batch]);
   const quoteKey = input ? `${modelId}|${JSON.stringify(input)}` : null;
   const current = quote && quote.key === quoteKey ? quote : null;
 
@@ -250,21 +292,29 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   function changeTier(next: Tier) {
     setTier(next);
     // Quita lo que el nuevo tipo no admite.
+    const nextGroups = groupsFor(next);
     setSel((prev) =>
       Object.fromEntries(
         Object.entries(prev)
-          .map(([gid, ids]) => [gid, ids.filter((id) => GROUPS.find((x) => x.id === gid)?.options.find((o) => o.id === id)?.tiers.includes(next))])
+          .map(([gid, ids]) => [gid, ids.filter((id) => nextGroups.find((x) => x.id === gid)?.options.some((o) => o.id === id))])
           .filter(([, ids]) => ids.length),
       ),
     );
   }
 
-  function toggle(gid: string, oid: string, max: number) {
+  function toggle(grp: Group, oid: string) {
+    const opt = (id: string) => grp.options.find((o) => o.id === id);
     setSel((prev) => {
-      const cur = prev[gid] ?? [];
-      const next = cur.includes(oid) ? cur.filter((x) => x !== oid) : max === 1 ? [oid] : [...cur, oid].slice(-max);
-      const out = { ...prev, [gid]: next };
-      if (!next.length) delete out[gid];
+      const cur = prev[grp.id] ?? [];
+      // Reglas del catálogo de Higgsfield: una opción exclusiva va sola y cada zona de la cara admite un rasgo.
+      const slot = opt(oid)?.slot;
+      const next = cur.includes(oid)
+        ? cur.filter((x) => x !== oid)
+        : grp.max === 1 || opt(oid)?.exclusive
+          ? [oid]
+          : [...cur.filter((x) => !opt(x)?.exclusive && !(slot && opt(x)?.slot === slot)), oid].slice(-grp.max);
+      const out = { ...prev, [grp.id]: next };
+      if (!next.length) delete out[grp.id];
       return out;
     });
   }
@@ -314,7 +364,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
     }
   }
 
-  const picked = GROUPS.flatMap((grp) => (sel[grp.id] ?? []).map((id) => ({ grp, opt: grp.options.find((o) => o.id === id)! })));
+  const picked = groups.flatMap((grp) => (sel[grp.id] ?? []).flatMap((id) => grp.options.filter((o) => o.id === id).map((opt) => ({ grp, opt }))));
   const history = items.filter((g) => {
     if (mine.includes(g.id)) return true;
     const p = String((g.input as Record<string, unknown>)?.prompt ?? "");
@@ -322,7 +372,6 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   });
   const short = costShort(current?.value ?? null);
   const confirming = confirmKey === quoteKey && !!quoteKey;
-  const isAnimal = ANIMALS.includes(tier);
 
   const section = (id: string, title: string, count: number | null, body: React.ReactNode) => (
     <div className="rounded-2xl border border-line bg-surface-3">
@@ -371,6 +420,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                   ))}
                 </div>
               </SettingCard>
+              {native && isAnimal && <p className="px-1 text-[13px] text-danger">{pick(T.noAnimals)}</p>}
               {section(
                 "type",
                 pick(T.type),
@@ -392,28 +442,27 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                   ))}
                 </div>,
               )}
-              {GROUPS.map((grp) => {
-                const opts = grp.options.filter((o) => o.tiers.includes(tier));
-                if (!opts.length) return null;
+              {groups.map((grp) => {
+                const opts = grp.options;
                 return (
                   <div key={grp.id}>
                     {section(
                       grp.id,
                       pick(grp),
                       opts.length,
-                      IMAGE_GROUPS.has(grp.id) ? (
+                      IMAGE_GROUPS.has(grp.id) || opts.some((o) => o.img) ? (
                         <div className="grid grid-cols-3 gap-2">
                           {opts.map((o) => (
                             <button
                               key={o.id}
                               type="button"
-                              onClick={() => toggle(grp.id, o.id, grp.max)}
+                              onClick={() => toggle(grp, o.id)}
                               className={clsx(
                                 "relative flex aspect-square flex-col items-center justify-end overflow-hidden rounded-xl border-2 bg-white text-ink transition-colors",
                                 (sel[grp.id] ?? []).includes(o.id) ? "border-lime" : "border-transparent hover:border-line-2",
                               )}
                             >
-                              <Thumb src={thumb(o.id)} fill />
+                              <Thumb src={o.img ?? thumb(o.id)} fill />
                               <span className="relative w-full bg-white/85 px-1 py-0.5 text-center text-[11px] leading-tight font-medium">{pick(o)}</span>
                             </button>
                           ))}
@@ -421,10 +470,10 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                       ) : (
                         <div className="flex flex-wrap gap-1.5">
                           {opts.map((o) => (
-                            <Chip key={o.id} active={(sel[grp.id] ?? []).includes(o.id)} onClick={() => toggle(grp.id, o.id, grp.max)}>
+                            <Chip key={o.id} active={(sel[grp.id] ?? []).includes(o.id)} onClick={() => toggle(grp, o.id)}>
                               <span className="flex items-center gap-1.5">
                                 {grp.id === "gender" && <GenderIcon id={o.id} />}
-                                {SWATCH[o.id] && <span className="size-3 rounded-full ring-1 ring-white/30" style={{ background: SWATCH[o.id] }} />}
+                                {(o.color ?? SWATCH[o.id]) && <span className="size-3 rounded-full ring-1 ring-white/30" style={{ background: o.color ?? SWATCH[o.id] }} />}
                                 {pick(o)}
                               </span>
                             </Chip>
@@ -468,7 +517,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     <span className="rounded-md bg-surface-4 px-2 py-1 text-[11px] text-fg-2">{pick(TIERS.find((x) => x.id === tier)!)}</span>
                     {picked.map(({ grp, opt }) => (
-                      <button key={grp.id + opt.id} type="button" onClick={() => toggle(grp.id, opt.id, grp.max)} className="rounded-md bg-surface-4 px-2 py-1 text-[11px] text-fg-2 hover:text-danger">
+                      <button key={grp.id + opt.id} type="button" onClick={() => toggle(grp, opt.id)} className="rounded-md bg-surface-4 px-2 py-1 text-[11px] text-fg-2 hover:text-danger">
                         {pick(opt)} ×
                       </button>
                     ))}
@@ -493,15 +542,19 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
           ) : (
             <>
               <MediaSlot label={pick(T.character)} hint={pick(T.characterHint)} kind="image" multiple={false} max={1} required value={character} onChange={(v) => setCharacter(v as string | undefined)} />
-              <SettingCard label={pick(T.motionLabel)}>
-                <div className="flex flex-wrap gap-1.5">
-                  {MOTIONS.map((m, i) => (
-                    <Chip key={m.en} active={motion === i} onClick={() => setMotion(i)}>
-                      {pick(m)}
-                    </Chip>
-                  ))}
-                </div>
-              </SettingCard>
+              {genjutsu ? (
+                <MediaSlot label={pick(T.motionVideo)} hint={pick(T.motionVideoHint)} kind="video" multiple={false} max={1} required value={motionVideo} onChange={(v) => setMotionVideo(v as string | undefined)} />
+              ) : (
+                <SettingCard label={pick(T.motionLabel)}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {MOTIONS.map((m, i) => (
+                      <Chip key={m.en} active={motion === i} onClick={() => setMotion(i)}>
+                        {pick(m)}
+                      </Chip>
+                    ))}
+                  </div>
+                </SettingCard>
+              )}
               <SettingCard label={pick(T.motionExtra)}>
                 <textarea
                   value={motionExtra}
@@ -532,7 +585,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
               <button
                 type="button"
                 onClick={() => {
-                  setSel(randomSelection(tier));
+                  setSel(randomSelection(tier, groups));
                   setSeed(undefined);
                 }}
                 className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-white text-ink hover:brightness-95"

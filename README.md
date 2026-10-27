@@ -24,7 +24,7 @@ so it always has a price to show you before it generates.
 
 - **The cheapest provider for each video and image:** the same model through Higgsfield, APIMart or KIE, quoted on all of
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
-- **One place for 84 Higgsfield endpoints** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
+- **One place for 91 Higgsfield endpoints** (Seedance, Kling 4.0, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
   (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand, **plus 156 models that only
   APIMart and KIE sell** (Nano Banana, GPT Image, Midjourney, Seedream, FLUX, Veo 3.1, Vidu, Runway…).
 - **Agents that quote before they spend.** Every MCP tool that starts a paid run requires a single-use `quote_id` from a prior quote of
@@ -105,13 +105,16 @@ the cheapest provider that offers **the exact same model and settings**:
   - **Flows:** publish a canvas with labeled inputs and run it from Presets by filling a form.
 - **AI Influencer** (`/influencer`): design your own character from traits, with Higgsfield's catalog (9 character
   types, from normal to animal, and 18 trait groups: face, hair, body, style, accessories…) and its 39 examples,
-  each one ready to recreate. Generate the two-panel character sheet (close-up and full body) with Soul 2.0, Soul
-  Cinema, Sunburst, Flare, Grok Imagine, Qwen Image, Z-Image, Recraft or Ideogram, optionally from your own photo,
-  then animate it with 7 video models and 8 movements. Every step is quoted before it runs.
+  each one ready to recreate. By default the sheet comes from Higgsfield's own AI Influencer model ($0.05, traits
+  sent by key from its live catalog; animal types still fail on Higgsfield's side), or from a prompt with Soul 2.0,
+  Soul Cinema, Sunburst, Flare, Grok Imagine, Qwen Image, Z-Image, Recraft or Ideogram, optionally from your own
+  photo. Then animate it the way Higgsfield does, with Genjutsu or Genjutsu Light copying the motion of a video of
+  yours, or with other video models and 8 movements. Every step is quoted before it runs.
 - **One-click Apps:** relight, change color palette, face swap, character swap, reframe, video relight, video color
   grade and ad multiplier, each a built-in preset over a catalog model: upload, adjust and generate.
-- **84 Higgsfield endpoints** (67 video, 16 image, 1 custom references), each with its JSON Schema taken from the
-  official docs (`hf-studio sync-catalog`), and 156 store-only models from APIMart and KIE.
+- **91 Higgsfield endpoints** (73 video, 17 image, 1 custom references), each with its JSON Schema taken from the
+  official docs (`hf-studio sync-catalog`; Kling 4.0, Genjutsu Light and AI Influencer, only on open.higgsfield.ai,
+  are written by hand and kept by the sync), and 156 store-only models from APIMart and KIE.
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
   edit and extend, motion transfer, object swap and restyle (Genjutsu: anime, stop motion, 3D…
   keeping the motion and the audio, with Higgsfield's current styles), text-to-image, image editing and ad images (Ads

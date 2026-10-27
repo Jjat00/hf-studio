@@ -48,7 +48,8 @@ export const SWATCH: Record<string, string> = {
   eye_ice_blue: "#a8d4ef", eye_amber: "#c2862a", eye_grey: "#8c959c",
 };
 
-export type Option = { id: string; en: string; es: string; tiers: Tier[] };
+/** `img`, `color`, `slot` y `exclusive` solo llegan del catálogo vivo de Higgsfield (ver `liveGroups`). */
+export type Option = { id: string; en: string; es: string; tiers: Tier[]; img?: string | null; color?: string | null; slot?: string | null; exclusive?: boolean };
 export type Group = { id: string; es: string; en: string; max: number; prompt: string; options: Option[] };
 
 const g = (id: string, es: string, en: string, max: number, prompt: string, opts: [string, string, string, Scope][]): Group => ({
@@ -278,6 +279,38 @@ export const GROUPS: Group[] = [
   ]),
 ];
 
+/** Grupos con las opciones que admite un tipo de personaje (catálogo copiado, para los modelos que no son de Higgsfield). */
+export function staticGroups(tier: Tier): Group[] {
+  return GROUPS.map((grp) => ({ ...grp, options: grp.options.filter((o) => o.tiers.includes(tier)) })).filter((grp) => grp.options.length);
+}
+
+/** Catálogo vivo del modelo `higgsfield/ai-influencer` (`GET /v1/model-options/higgsfield/ai-influencer`). */
+export type LiveOption = { key: string; label: string; img: string | null; color: string | null; tiers: Tier[] | null; slot: string | null; exclusive: boolean };
+export type LiveCategory = { key: string; label: string; tiers: Tier[]; max: number; options: LiveOption[] };
+
+/**
+ * Grupos de un tipo de personaje según el catálogo vivo de Higgsfield, con las etiquetas en español del copiado
+ * cuando la clave coincide. Humanos y animales pueden compartir clave con opciones distintas: se toma la del tipo.
+ */
+export function liveGroups(categories: LiveCategory[], tier: Tier): Group[] {
+  return categories
+    .filter((c) => c.tiers.includes(tier))
+    .map((c) => {
+      const known = GROUPS.find((grp) => grp.id === c.key);
+      return {
+        id: c.key,
+        en: c.label,
+        es: known?.es ?? c.label,
+        max: c.max,
+        prompt: known?.prompt ?? c.label.toLowerCase(),
+        options: c.options
+          .filter((o) => (o.tiers ?? c.tiers).includes(tier))
+          .map((o) => ({ id: o.key, en: o.label, es: known?.options.find((x) => x.id === o.key)?.es ?? o.label, tiers: [tier], img: o.img, color: o.color, slot: o.slot, exclusive: o.exclusive })),
+      };
+    })
+    .filter((grp) => grp.options.length);
+}
+
 export type Selection = Record<string, string[]>;
 export type Example = { id: string; thumb: string; w: number; h: number; tier: Tier; sel: Selection; brief: string; seed: number };
 
@@ -485,11 +518,11 @@ export function buildPrompt(
 }
 
 /** Elige al azar una opción permitida por grupo (las de varias, a veces ninguna), como el dado de Higgsfield. */
-export function randomSelection(tier: Tier): Selection {
+export function randomSelection(tier: Tier, groups: Group[] = GROUPS): Selection {
   const pick = <T,>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
   const sel: Selection = {};
-  for (const grp of GROUPS) {
-    const allowed = grp.options.filter((o) => o.tiers.includes(tier) && o.id !== "acc_none");
+  for (const grp of groups) {
+    const allowed = grp.options.filter((o) => o.tiers.includes(tier) && o.id !== "acc_none" && !o.exclusive);
     if (!allowed.length) continue;
     if (grp.max > 1 && Math.random() < 0.5) continue;
     sel[grp.id] = [pick(allowed).id];

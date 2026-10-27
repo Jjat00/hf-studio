@@ -25,6 +25,7 @@ SHORT_SIDE = {"480p": 480, "720p": 720, "1080p": 1080, "2k": 1440, "4k": 2160}
 MONEY = r"\$(\d+(?:\.\d+)?)"  # sin el punto final de la frase
 RESTYLE = "higgsfield/genjutsu/restyle/v1.0"
 RESTYLE_MAX_SECONDS = 30  # Restyle recorta el video de origen a sus primeros 30 s (y cobra solo esos)
+GENJUTSU_LIGHT_MAX_SECONDS = 15  # Genjutsu Light usa solo los primeros 15 s del video de origen
 
 
 def _media_kind(key: str) -> str | None:
@@ -127,6 +128,43 @@ def approximate(
                     basis = f"({seconds:g}s + {float(input_secs):g}s of input video)"
             return {"usd": billable * float(rates[res]), "basis": f"{basis} × ${rates[res]}/s at {res}",
                     "missing": missing}  # fmt: skip
+
+    # A3) Kling 4.0 (reference-to-video y video-edit, a 2026-10): «Without input video: 720p $0.157/s, 1080p $0.235/s,
+    # charged on output duration. With input video: 720p $0.094/s, …, charged on output duration + max(total input
+    # video duration, output duration)».
+    if m := re.search(
+        r"Without input video: (.*?), charged on output duration\. With input video: (.*?), charged", text
+    ):
+        rates = dict(re.findall(r"(\d+p) " + MONEY + r"/s", m.group(2 if has_video_input else 1)))
+        if res in rates:
+            billable, basis = seconds, f"{seconds:g}s"
+            if has_video_input:
+                if input_secs is None:
+                    missing.append("input video duration")
+                    billable = 2 * seconds
+                    basis = f"({seconds:g}s + {seconds:g}s assumed for the input video)"
+                else:
+                    billable = seconds + max(min(float(input_secs), 30), seconds)
+                    basis = f"({seconds:g}s + max({float(input_secs):g}s of input video, {seconds:g}s))"
+            return {"usd": billable * float(rates[res]), "basis": f"{basis} × ${rates[res]}/s at {res}",
+                    "missing": missing}  # fmt: skip
+
+    # A4) Genjutsu Light (a 2026-10): «Priced per total second by resolution: 480p $0.05, …. Billable seconds = output
+    # duration + the sum of input reference video durations … trims the source to 15 seconds; output duration is
+    # rounded up». La salida dura lo que el video de origen recortado a 15 s; la entrada se cuenta entera (por lo alto:
+    # la doc no dice si se cobra antes o después del recorte).
+    if m := re.search(r"Priced per total second by resolution: (.*?)\. ", text):
+        rates = dict(re.findall(r"(\d+p) " + MONEY, m.group(1)))
+        if res not in rates:
+            return {"usd": None, "basis": f"no published rate for {res}", "missing": []}
+        rate = float(rates[res])
+        if input_secs is None:
+            return {"usd": None, "basis": f"${rate}/s of output + input video at {res}",
+                    "missing": ["input video duration"]}  # fmt: skip
+        out_secs = math.ceil(min(float(input_secs), GENJUTSU_LIGHT_MAX_SECONDS))
+        billable = out_secs + float(input_secs)
+        return {"usd": billable * rate, "basis": f"({out_secs}s output + {float(input_secs):g}s of input video) × ${rate}/s at {res}",
+                "missing": []}  # fmt: skip
 
     # B) Tokens de video: segundos × ancho × alto × 24 / 1024.
     if "video tokens" in text.lower():
@@ -330,8 +368,13 @@ async def quote(hf, catalog, model: dict, args: dict, hints: dict) -> dict:
         )
         return {"kind": "unavailable", "credits": None, "usd": None, "discount_pct": None,
                 "basis": reason, "missing": placeholders, "description": None}  # fmt: skip
-    follows = model.get("output") == "video" and "duration" not in model["input_schema"].get("properties", {})
-    return normalize(raw, filled, hints, placeholders, model["id"], follows)
+    props = model["input_schema"].get("properties", {})
+    follows = model.get("output") == "video" and "duration" not in props
+    # Las fórmulas de video se aplican a lo que el modelo hará: si faltan duración o resolución, sus valores por
+    # defecto (Kling 4.0 dura 10 s y sale en 1080p si no se dice otra cosa).
+    defaults = ("duration", "resolution") if model.get("output") == "video" else ()
+    priced = {k: props[k]["default"] for k in defaults if k not in filled and "default" in props.get(k, {})}
+    return normalize(raw, {**priced, **filled}, hints, placeholders, model["id"], follows)
 
 
 def total(quotes: list[dict], counts: list[int]) -> dict:

@@ -85,7 +85,8 @@ export const MEGA_MENUS: MegaMenu[] = [
     ],
     models: [
       { title: l("Seedance 2.5", "Seedance 2.5"), description: l("Videos cinematográficos de hasta 30 segundos", "Cinematic videos up to 30 seconds"), href: vid("bytedance/seedance-2.5/text-to-video"), icon: AudioLines, badge: "TOP" },
-      { title: l("Higgsfield Genjutsu", "Higgsfield Genjutsu"), description: l("Transfiere movimiento, cambia objetos o el estilo de un video", "Transfer motion, swap objects or restyle a reference video"), href: "/video?tab=genjutsu", icon: Sparkles, badge: "NEW" },
+      { title: l("Higgsfield Genjutsu", "Higgsfield Genjutsu"), description: l("Transfiere movimiento, cambia objetos o el estilo de un video (también en Light, más barato)", "Transfer motion, swap objects or restyle a video (also Light, cheaper)"), href: "/video?tab=genjutsu", icon: Sparkles, badge: "NEW" },
+      { title: l("Kling 4.0", "Kling 4.0"), description: l("Escenas de hasta 30 s con referencias y edición", "Up to 30s scenes with references and editing"), href: vid("kling-video/v4.0/text-to-video"), icon: Film, badge: "NEW" },
       { title: l("Kling 3.0", "Kling 3.0"), description: l("Videos cinematográficos con audio", "Cinematic videos with audio"), href: vid("kling-video/v3.0/pro/text-to-video"), icon: Film },
       { title: l("Kling Motion Control", "Kling Motion Control"), description: l("Transfiere el movimiento de un video a una imagen", "Transfer motion from video to image"), href: "/video?tab=motion", icon: Move },
       { title: l("Kling O3 Edit", "Kling O3 Edit"), description: l("Edita videos con texto", "Edit videos with text prompts"), href: vid("kling-video/o3/video-edit"), icon: Wand2 },

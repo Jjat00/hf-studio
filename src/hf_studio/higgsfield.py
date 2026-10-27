@@ -185,6 +185,15 @@ class HiggsfieldClient(Provider):
         _raise_for(response)
         return response.json()
 
+    async def model_options(self, model: str) -> dict:
+        """Catálogo de rasgos de un modelo (AI Influencer): `{config_revision, categories: [{key, tiers, max, options}]}`."""
+        try:
+            response = await self._api.get(f"/models/{model}/options")
+        except httpx.TransportError as exc:
+            raise HiggsfieldError("network", f"Network error while listing options: {exc}") from exc
+        _raise_for(response)
+        return response.json()
+
     async def check_credentials(self) -> bool:
         """Comprueba la clave sin gastar créditos: el estado de una solicitud inexistente
         responde 404 con credenciales válidas y 401 con inválidas."""

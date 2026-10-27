@@ -1,4 +1,5 @@
 import type { Flow, FlowSummary, RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
+import type { LiveCategory } from "./influencer-data";
 import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, ModelStyle, Usage, Voice, VoiceChangeBody, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
@@ -223,6 +224,7 @@ export const studio = {
   cancel: (id: string) => call<Generation>(`/v1/generations/${id}/cancel`, { method: "POST" }),
   elements: () => call<{ elements: StudioElement[] }>("/v1/elements"),
   styles: (model: string) => call<{ model: string; styles: ModelStyle[] }>(`/v1/model-styles/${model}`),
+  options: (model: string) => call<{ model: string; revision: string | null; categories: LiveCategory[] }>(`/v1/model-options/${model}`),
   /** URL vigente de una salida propia para usarla como entrada de otra generación (gratis). */
   useOutput: (id: string, index = 0, as?: "last_frame" | "audio") =>
     call<{ url: string; kind: string; content_type: string }>(`/v1/generations/${id}/outputs/${index}/use${as ? `?as=${as}` : ""}`, {

@@ -21,11 +21,19 @@ DOCS = "https://docs.higgsfield.ai"
 CATEGORIES = ["/docs/models/video-generation", "/docs/models/image-generation"]
 OUT = Path(__file__).resolve().parent / "catalog.json"
 
-LINK_RE = re.compile(r"(?:href=\"|\]\()(/docs/models/[a-z0-9._/-]+?)(?:\.md)?[\")#]")
+# Los enlaces llegan relativos (`](/docs/models/…)`) o, desde 2026-10, absolutos (`](https://docs.higgsfield.ai/docs/…)`).
+LINK_RE = re.compile(
+    r"(?:href=\"|\]\()(?:https://docs\.higgsfield\.ai)?(/docs/models/[a-z0-9._/-]+?)(?:\.md)?[\")#]"
+)
+# Modelos que Higgsfield solo documenta en su portal nuevo (open.higgsfield.ai, sin JSON Schema que extraer):
+# se escriben a mano en catalog.json con ese docs_url y el sync los conserva.
+MANUAL_DOCS = "https://open.higgsfield.ai/"
 ENDPOINT_RE = re.compile(r"\*\*Endpoint:\*\*\s*`POST\s+https://api\.higgsfield\.ai/([^`]+)`")
 TITLE_RE = re.compile(r"^# (.+)$", re.MULTILINE)
 SUMMARY_RE = re.compile(r"^> (?!##|Fetch|Use this)(.+)$", re.MULTILINE)
-SCHEMA_RE = re.compile(r"Complete JSON schema\">\s*```json[^\n]*\n(.*?)```", re.DOTALL)
+# El esquema completo va en un acordeón (`Complete JSON schema">`) o, desde 2026-10, en una cita (`> **Complete JSON
+# schema**`); `parse_workflow` quita antes los `> ` de las citas.
+SCHEMA_RE = re.compile(r"Complete JSON schema(?:\">|\*\*)\s*```json[^\n]*\n(.*?)```", re.DOTALL)
 OUTPUT_RE = re.compile(r"completed response includes.*?```json[^\n]*\n(.*?)```", re.DOTALL)
 # Páginas sin esa frase (p. ej. Ads Studio) muestran la respuesta en un bloque titulado «Completed».
 COMPLETED_RE = re.compile(r"```json Completed[^\n]*\n(.*?)```", re.DOTALL)
@@ -92,7 +100,7 @@ def capabilities(workflow: str, output: str, schema: dict) -> list[str]:
 def parse_workflow(path: str) -> dict | None:
     md = fetch(path)
     endpoint = ENDPOINT_RE.search(md)
-    schema = SCHEMA_RE.search(md)
+    schema = SCHEMA_RE.search(re.sub(r"^> ?", "", md, flags=re.MULTILINE))
     if not endpoint or not schema:
         return None
     output_type = "unknown"
@@ -129,7 +137,16 @@ def main() -> int:
     workflows = sorted({p for f, md in family_pages.items() for p in links(md) if p.startswith(f + "/")})
     with ThreadPoolExecutor(8) as pool:
         parsed = [m for m in pool.map(parse_workflow, workflows) if m]
-    models = sorted({m["id"]: m for m in parsed}.values(), key=lambda m: m["id"])
+    previous = json.loads(OUT.read_text())["models"] if OUT.exists() else []
+    found = {m["id"]: m for m in parsed}
+    # Si la doc cambia de formato y el sync no encuentra casi nada, no se pisa el catálogo bueno.
+    if len(found) < len(previous) // 2:
+        print(f"Solo {len(found)} endpoints (antes {len(previous)}): ¿cambió la doc? No se escribe {OUT}")
+        return 1
+    for m in previous:
+        if m.get("docs_url", "").startswith(MANUAL_DOCS):
+            found.setdefault(m["id"], m)
+    models = sorted(found.values(), key=lambda m: m["id"])
     OUT.write_text(
         json.dumps(
             {"synced_at": datetime.now(UTC).date().isoformat(), "source": DOCS, "models": models},

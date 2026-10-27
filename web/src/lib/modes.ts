@@ -103,7 +103,7 @@ export const VIDEO_TABS: Tab[] = [
         label: l("Transferir movimiento", "Motion transfer"),
         icon: "move",
         defaultModel: "higgsfield/genjutsu/motion-transfer/v1.0",
-        filter: (m) => m.id.includes("genjutsu/motion-transfer"),
+        filter: (m) => /genjutsu(-light)?\/motion-transfer/.test(m.id), // Genjutsu o Genjutsu Light (unas 3 veces más barato)
         hero: { title: genjutsu, subtitle: l("Manipula la realidad · cambia quién hace el movimiento", "Reality manipulation · recast the motion"), tone: "lime", art: "/art/genjutsu-motion.webp" },
         labels: {
           video_url: [l("Añade un video de referencia", "Add a reference video"), l("para extraer el movimiento · 4–30 segundos", "to extract motion · 4–30 seconds")],
@@ -115,7 +115,7 @@ export const VIDEO_TABS: Tab[] = [
         label: l("Cambiar objetos", "Objects swap"),
         icon: "swap",
         defaultModel: "higgsfield/genjutsu/object-swap/v1.0",
-        filter: (m) => m.id.includes("genjutsu/object-swap"),
+        filter: (m) => /genjutsu(-light)?\/object-swap/.test(m.id),
         hero: { title: genjutsu, subtitle: l("Manipula la realidad · cambia un elemento y conserva el resto", "Reality manipulation · swap one element, keep the rest"), tone: "violet", art: "/art/object-swap.webp" },
         labels: {
           video_url: [l("Añade un video de referencia", "Add a reference video"), l("4–30 segundos · al menos 640×640 px por fotograma", "4–30 seconds · at least 640×640 px per frame")],

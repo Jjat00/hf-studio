@@ -13,6 +13,8 @@ from .higgsfield import HiggsfieldError
 from .service import ServiceError
 
 STYLE_MODELS = frozenset({"higgsfield/genjutsu/restyle/v1.0"})
+# Modelos que eligen rasgos por clave (`selection`): su catálogo sale de `GET /models/<id>/options`.
+OPTION_MODELS = frozenset({"higgsfield/ai-influencer"})
 TTL_SECONDS = 600
 FAILURE_SECONDS = (
     60  # tras un fallo de red no se reintenta en cada cotización: no la frena un timeout cada vez
@@ -24,6 +26,22 @@ class StyleCatalog:
         self.hf = hf
         self._cache: dict[str, tuple[float, list[dict]]] = {}
         self._failed_at: dict[str, float] = {}
+        self._options: dict[str, tuple[float, dict]] = {}
+
+    async def options(self, model_id: str) -> dict:
+        """Categorías y opciones vigentes de AI Influencer (tipos de personaje, rasgos, miniaturas). Gratis."""
+        if model_id not in OPTION_MODELS:
+            raise ServiceError(404, "no_options", f"{model_id} has no option catalog")
+        cached = self._options.get(model_id)
+        if cached and time.monotonic() - cached[0] < TTL_SECONDS:
+            return cached[1]
+        body = await self.hf.model_options(model_id)
+        data = {
+            "revision": body.get("config_revision"),
+            "categories": [c for c in body.get("categories") or [] if isinstance(c, dict) and c.get("key")],
+        }
+        self._options[model_id] = (time.monotonic(), data)
+        return data
 
     async def list(self, model_id: str, fresh: bool = False) -> list[dict]:
         if model_id not in STYLE_MODELS:

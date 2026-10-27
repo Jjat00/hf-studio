@@ -665,6 +665,14 @@ def create_app(
             raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
         return {"model": model["id"], "styles": await request.app.state.styles.list(model["id"])}
 
+    @app.get("/v1/model-options/{model_id:path}", tags=["modelos"])
+    async def list_model_options(model_id: str, request: Request, _: Owner, catalog: CatalogDep) -> dict:
+        """Rasgos vigentes de un modelo que los elige por clave (AI Influencer: `selection`). Gratis."""
+        model = catalog.get(model_id)
+        if not model:
+            raise ServiceError(404, "unknown_model", f"Unknown model: {model_id}")
+        return {"model": model["id"], **await request.app.state.styles.options(model["id"])}
+
     async def complete_hints(
         request: Request, session: AsyncSession, owner: ApiClient, arguments: dict, hints: dict
     ) -> dict:

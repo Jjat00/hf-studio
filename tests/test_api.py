@@ -31,6 +31,7 @@ class FakeHiggsfield:
         self.upload_failures = 0  # cuántas veces responde 500 a generate-upload-url antes de funcionar
         self.styles = [{"id": STYLE, "name": "Cel-Shaded CG Anime", "preview_url": "https://cdn.test/s.webp"}]
         self.style_calls = 0
+        self.option_calls = 0
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         url, path = str(request.url), request.url.path
@@ -55,6 +56,11 @@ class FakeHiggsfield:
             return httpx.Response(
                 200, json={"model": "higgsfield/genjutsu/restyle/v1.0", "items": self.styles}
             )
+        if path == "/models/higgsfield/ai-influencer/options":
+            self.option_calls += 1
+            return httpx.Response(200, json={"config_revision": "r1", "categories": [
+                {"key": "gender", "label": "Gender", "tiers": ["normal"], "max": 1,
+                 "options": [{"key": "female", "label": "Female", "img": None, "tiers": None}]}]})  # fmt: skip
         if path.startswith("/estimate/"):
             return httpx.Response(
                 200, json={"type": "estimate", "credits": "1.000", "usd": "0.060", "discount": None}
@@ -496,6 +502,16 @@ async def test_upload_rejects_content_that_is_not_the_declared_type(env):
     mpd = b'<?xml version="1.0"?><MPD><BaseURL>https://127.0.0.1/internal.mp4</BaseURL></MPD>'
     r = await http.post("/v1/uploads", files={"file": ("a.mp4", mpd, "video/mp4")})
     assert r.status_code == 415 and r.json()["error"]["code"] == "content_mismatch"
+
+
+async def test_influencer_options_are_listed_and_cached(env):
+    _, http, fake = env
+    r = await http.get("/v1/model-options/higgsfield/ai-influencer")
+    assert r.status_code == 200 and r.json()["revision"] == "r1"
+    assert r.json()["categories"][0]["options"][0]["key"] == "female"
+    await http.get("/v1/model-options/higgsfield/ai-influencer")
+    assert fake.option_calls == 1  # 10 min en memoria
+    assert (await http.get(f"/v1/model-options/{RESTYLE}")).json()["error"]["code"] == "no_options"
 
 
 async def test_restyle_styles_are_listed_cached_and_checked_before_quoting(env):

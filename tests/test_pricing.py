@@ -195,3 +195,51 @@ def test_placeholders_follow_nested_conditions_and_fill_the_restyle_preset():
                "properties": {"video_url": {"type": "string"}, "preset_id": {"type": "string", "format": "uuid"}}}  # fmt: skip
     filled, added = fill_placeholders(restyle, {})
     assert added == ["preset_id", "video_url"] and len(filled["preset_id"]) == 36
+
+
+KLING4 = (
+    "Without input video: 720p $0.157/s, 1080p $0.235/s, charged on output duration. With input video: 720p"
+    " $0.094/s, 1080p $0.141/s, charged on output duration + max(total input video duration, output duration)."
+    " Input duration includes video elements and explicit videos after the 30-second trim."
+)
+GENJUTSU_LIGHT = (
+    "Priced per total second by resolution: 480p $0.05, 720p $0.10, or 1080p $0.20. Rates shown are before any"
+    " applicable customer discount. Billable seconds = output duration + the sum of input reference video durations."
+    " Input video durations are measured during preprocessing; without video references, only output duration is"
+    " billed. Genjutsu Light trims the source to 15 seconds; output duration is rounded up to whole seconds before"
+    " billing."
+)
+
+
+def test_kling4_charges_output_alone_or_plus_the_longer_of_input_and_output():
+    assert round(approximate(KLING4, {"duration": 10, "resolution": "1080p"}, {})["usd"], 3) == 2.35
+    edit = {"duration": 5, "resolution": "720p", "video_url": "https://x/v.mp4"}
+    # Video de 12 s y salida de 5 s: 5 + max(12, 5) = 17 s a la tarifa con video.
+    assert round(approximate(KLING4, edit, {"input_video_seconds": 12})["usd"], 3) == round(17 * 0.094, 3)
+    assert approximate(KLING4, edit, {})["missing"] == ["input video duration"]
+
+
+def test_genjutsu_light_bills_output_trimmed_to_15s_plus_input():
+    args = {"resolution": "480p", "video_url": "https://x/v.mp4", "image_urls": ["https://x/a.png"]}
+    assert approximate(GENJUTSU_LIGHT, args, {})["usd"] is None
+    assert approximate(GENJUTSU_LIGHT, args, {"input_video_seconds": 8.2})["usd"] == (9 + 8.2) * 0.05
+    assert approximate(GENJUTSU_LIGHT, args, {"input_video_seconds": 20})["usd"] == (15 + 20) * 0.05
+
+
+def test_quote_prices_text_formulas_with_schema_defaults():
+    import asyncio
+
+    from hf_studio.catalog import get_catalog
+    from hf_studio.pricing import quote
+
+    class FakeHF:
+        async def estimate(self, model, args):
+            return {"type": "description", "pricing_description": KLING4}
+
+    catalog = get_catalog()
+    model = catalog.get("kling-video/v4.0/reference-to-video")
+    r = asyncio.run(
+        quote(FakeHF(), catalog, model, {"prompt": "x @image_1", "image_urls": ["https://x/a.png"]}, {})
+    )
+    # Sin duración ni resolución, Kling 4.0 hace 10 s en 1080p.
+    assert round(r["usd"], 3) == 2.35 and "1080p" in r["basis"]
