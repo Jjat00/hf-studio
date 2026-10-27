@@ -222,9 +222,10 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const [motionExtra, setMotionExtra] = useState("");
   const [motionVideo, setMotionVideo] = useState<string | undefined>();
   const [motionModel, setMotionModel] = useState(MOTION_MODELS[0].id);
-  const [live, setLive] = useState<LiveCategory[] | null>(null);
-  const [liveError, setLiveError] = useState<string | null>(null);
+  // Cada consulta del catálogo vivo lleva su número: solo la respuesta de la consulta vigente habilita el envío.
   const [liveTry, setLiveTry] = useState(0);
+  const [liveData, setLiveData] = useState<{ at: number; categories: LiveCategory[] } | null>(null);
+  const [liveError, setLiveError] = useState<{ at: number; message: string } | null>(null);
   // Cotización y envío
   const [details, setDetails] = useState<Record<string, ModelDetail>>({});
   const [quote, setQuote] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
@@ -241,26 +242,26 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const modelId = tab === "motion" ? motionModel : photo && createModel.photo ? createModel.photo : createModel.id;
   const detail = details[modelId];
   const native = modelKey === NATIVE;
+  const live = liveData?.at === liveTry ? liveData.categories : null; // la de una consulta anterior no vale para enviar
+  const liveFailed = liveError?.at === liveTry ? liveError.message : null;
   const genjutsu = GENJUTSU.has(motionModel);
   const isAnimal = ANIMALS.includes(tier);
   // Se pide cada vez que se elige el modelo de Higgsfield (la API lo guarda 10 min): las claves cambian sin aviso.
   useEffect(() => {
     if (!native) return;
     let alive = true;
+    const at = liveTry;
     studio.options(NATIVE).then(
-      (r) => {
-        if (!alive) return;
-        setLive(r.categories);
-        setLiveError(null);
-      },
-      (e) => alive && setLiveError(e instanceof Error ? e.message : String(e)),
+      (r) => alive && setLiveData({ at, categories: r.categories }),
+      (e) => alive && setLiveError({ at, message: e instanceof Error ? e.message : String(e) }),
     );
     return () => {
       alive = false;
     };
   }, [native, liveTry]);
   // Con el modelo de Higgsfield, sus rasgos vigentes; con los demás, el catálogo copiado (se traduce a prompt).
-  const groupsFor = (t: Tier): Group[] => (native && live ? liveGroups(live, t) : staticGroups(t));
+  const shown = live ?? liveData?.categories ?? null; // mientras recarga se pinta el anterior, sin poder enviar
+  const groupsFor = (t: Tier): Group[] => (native && shown ? liveGroups(shown, t) : staticGroups(t));
   const groups = groupsFor(tier);
   useEffect(() => {
     if (details[modelId]) return;
@@ -433,7 +434,11 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
               <SettingCard label={pick(T.model)}>
                 <div className="flex flex-wrap gap-1.5">
                   {CREATE_MODELS.map((m) => (
-                    <Chip key={m.id} active={modelKey === m.id} onClick={() => setModelKey(m.id)}>
+                    <Chip key={m.id} active={modelKey === m.id} onClick={() => {
+                        // Volver al modelo de Higgsfield abre una consulta nueva del catálogo: hasta que llegue no se envía.
+                        if (m.id === NATIVE && modelKey !== NATIVE) setLiveTry((n) => n + 1);
+                        setModelKey(m.id);
+                      }}>
                       {m.name}
                       {photo && !m.photo && <span className="ml-1 font-normal text-fg-4">({pick(T.noPhoto)})</span>}
                     </Chip>
@@ -443,7 +448,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
               {native && isAnimal && <p className="px-1 text-[13px] text-danger">{pick(T.noAnimals)}</p>}
               {native && !live && (
                 <p className="px-1 text-[13px] text-fg-3">
-                  {liveError ? (
+                  {liveFailed ? (
                     <>
                       <span className="text-danger">{pick(T.optionsError)}</span>{" "}
                       <button type="button" onClick={() => setLiveTry((n) => n + 1)} className="underline hover:text-fg">
