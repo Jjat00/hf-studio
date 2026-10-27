@@ -9,6 +9,8 @@ la entrada llega completa (`routes.with_defaults`) y se envía todo explícito.
 
 from __future__ import annotations
 
+import math
+import re
 from typing import Any
 
 from .routes import (
@@ -712,6 +714,89 @@ def omni() -> Routes:
     return routes
 
 
+# --- Kling 4.0 (2026-10-27) -----------------------------------------------------------------------
+# Fuente: docs.apimart.ai («Kling V4 Video Generation»). Un solo modelo, `kling-v4`: el modo sale de los
+# medios y de `omni_reference_task_type`. APIMart cita los medios como @Image1 y @Video1; Higgsfield, como
+# @image_1 y @video_1. Sin referencias en video en la edición.
+
+K4 = "kling-v4"
+K4_MENTION = re.compile(r"@(image|video)_(\d+)(?![A-Za-z0-9_])")
+
+
+def _k4_mentions(source: dict, out: dict) -> dict:
+    if out.get("prompt"):
+        out["prompt"] = K4_MENTION.sub(lambda m: f"@{m[1].capitalize()}{m[2]}", out["prompt"])
+    return out
+
+
+def _k4_frames(source: dict, out: dict) -> dict:
+    roles = [{"url": source["image_url"], "role": "first_frame"}]
+    roles += [{"url": u, "role": "keyframe"} for u in source.get("image_urls") or []]
+    if source.get("end_image_url"):
+        roles.append({"url": source["end_image_url"], "role": "last_frame"})
+    for key in ("image_url", "image_urls", "end_image_url"):
+        out.pop(key, None)
+    out["image_with_roles"] = roles
+    return out
+
+
+def _k4_price(i: dict, hints: dict, prices: dict) -> float | None:
+    """Con video de entrada (docs, «Billing»): salida + max(salida, segundos de entrada redondeados hacia
+    arriba y topados en 30) a la tarifa `-input`; sin video, los segundos de salida."""
+    res = str(i.get("resolution", "720p")).upper()
+    output = i.get("duration")
+    if output is None:
+        return None
+    if i.get("video_url") or i.get("video_urls"):
+        seconds = video_seconds(hints)
+        if seconds is None:
+            return None
+        return per_second(prices, f"{K4}|{res}-input", output + max(output, min(math.ceil(seconds), 30)))
+    return per_second(prices, f"{K4}|{res}", output)
+
+
+def _k4_refs_length(source: dict, hints: dict) -> None:
+    seconds = video_seconds(hints)
+    if source.get("video_urls") and seconds is not None and seconds > 30:
+        raise unsupported(P, "APIMart takes reference videos of up to 30 s in total")
+
+
+def _k4_edit_length(source: dict, hints: dict) -> None:
+    seconds = video_seconds(hints)
+    if seconds is not None and seconds < 3:
+        raise unsupported(P, "APIMart edits videos of at least 3 s")
+
+
+def kling4() -> Routes:
+    base = "kling-video/v4.0"
+    common = ("prompt", "duration", "resolution")
+    return {
+        f"{base}/text-to-video": Route(
+            P, K4, Spec(P, K4, keep=(*common, "aspect_ratio"), build=_k4_mentions), _k4_price
+        ),
+        f"{base}/image-to-video": Route(
+            P, K4, Spec(P, K4, keep=(*common, "image_url", "image_urls", "end_image_url"), build=_k4_frames),
+            _k4_price,
+        ),
+        f"{base}/reference-to-video": Route(
+            P, K4,
+            Spec(P, K4, keep=(*common, "image_urls", "video_urls"),
+                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v},
+                 fixed={"omni_reference_task_type": "reference"}, build=_k4_mentions),
+            _k4_price, check=_k4_refs_length,
+        ),
+        f"{base}/video-edit": Route(
+            P, K4,
+            Spec(P, K4, keep=(*common, "video_url", "image_urls"),
+                 convert={"aspect_ratio": lambda v: None if v == "adaptive" else v,
+                          "video_urls": _no_list("reference videos in an edit")},
+                 fixed={"omni_reference_task_type": "edit"}, build=_k4_mentions),
+            _k4_price, check=_k4_edit_length,
+            notes=("APIMart keeps the source video's audio in edits; Higgsfield does not document it",),
+        ),
+    }  # fmt: skip
+
+
 # --- Imágenes (endpoint /v1/images/generations) -------------------------------------------------------
 
 IMAGE_MODELS = frozenset({"z-image-turbo", "grok-imagine-image-2.0"})
@@ -760,4 +845,4 @@ def images() -> Routes:
 def apimart_routes() -> Routes:
     from ..store import routes as store_routes
 
-    return {**seedance(), **kling(), **wan(), **others(), **omni(), **images(), **store_routes(P)}
+    return {**seedance(), **kling(), **wan(), **others(), **omni(), **kling4(), **images(), **store_routes(P)}

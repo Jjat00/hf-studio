@@ -191,6 +191,68 @@ def kling() -> dict[str, Route]:
     return routes
 
 
+# --- Kling 4.0 (2026-10-27) -----------------------------------------------------------------------
+# Fuente: docs.kie.ai (`kling-4.0/keyframe-to-video` y `kling-4.0/reference-to-video`). Cita los medios como
+# Higgsfield (@image_1, @video_1). No tiene edición de video. Fotogramas y referencias exigen prompt.
+
+K4_FRAMES = "kling-4.0/keyframe-to-video"
+K4_REFS = "kling-4.0/reference-to-video"
+
+
+def _k4_frame_cap(duration: int) -> int:
+    """Fotogramas (primero + intermedios + último) que admite una duración: 3 s → 4, …, 9 s o más → 10."""
+    return min(duration + 1, 10)
+
+
+def _k4_frames(source: dict, out: dict) -> dict:
+    count = 1 + len(source.get("image_urls") or []) + bool(source.get("end_image_url"))
+    duration = int(source.get("duration", 5))
+    if count > _k4_frame_cap(duration):
+        raise unsupported(P, f"KIE takes at most {_k4_frame_cap(duration)} frames for {duration} s")
+    return _need_prompt(source, out)
+
+
+def _k4_price(row: str):
+    def price(i: dict, hints: dict, prices: dict) -> float | None:
+        res, output = i.get("resolution", "720p"), i.get("duration")
+        if output is None:
+            return None
+        if row == "keyframe-to-video":
+            return per_second(prices, f"kling 4.0, {row}, {res}", output)
+        if not i.get("video_urls"):
+            return per_second(prices, f"kling 4.0, {row}, {res} no video input", output)
+        # Como Kling en Higgsfield y APIMart: salida + max(salida, segundos de entrada), sin tope (cota alta).
+        seconds = video_seconds(hints)
+        if seconds is None:
+            return None
+        return per_second(prices, f"kling 4.0, {row}, {res} with video input", output + max(output, seconds))
+
+    return price
+
+
+def kling4() -> dict[str, Route]:
+    base = "kling-video/v4.0"
+    common = ("prompt", "duration", "resolution")
+    frames = _k4_price("keyframe-to-video")
+    return {
+        f"{base}/text-to-video": Route(
+            P, K4_FRAMES, Spec(P, K4_FRAMES, keep=(*common, "aspect_ratio"), build=_need_prompt), frames
+        ),
+        f"{base}/image-to-video": Route(
+            P, K4_FRAMES,
+            Spec(P, K4_FRAMES, keep=common, build=_k4_frames,
+                 rename={"image_url": "first_frame_url", "image_urls": "keyframe_urls", "end_image_url": "last_frame_url"}),
+            frames,
+        ),
+        f"{base}/reference-to-video": Route(
+            P, K4_REFS,
+            Spec(P, K4_REFS, keep=(*common, "image_urls", "video_urls"),
+                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v}, build=_need_prompt),
+            _k4_price("reference-to-video"),
+        ),
+    }  # fmt: skip
+
+
 # --- Wan ----------------------------------------------------------------------------------------
 
 
@@ -476,4 +538,4 @@ def _fixed_seed(value):
 def kie_routes() -> dict[str, Route]:
     from ..store import routes as store_routes
 
-    return {**seedance(), **kling(), **wan(), **others(), **recent(), **store_routes(P)}
+    return {**seedance(), **kling(), **kling4(), **wan(), **others(), **recent(), **store_routes(P)}

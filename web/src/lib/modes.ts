@@ -23,6 +23,8 @@ export type EmptyState = {
 const has = (m: ModelSummary, cap: string) => m.capabilities.includes(cap);
 const isVideo = (m: ModelSummary) => m.output === "video";
 const isAds = (m: ModelSummary) => m.id.startsWith("higgsfield/ads-studio/");
+// AI Influencer tiene su propia página (/influencer): el formulario genérico no sabe elegir sus rasgos.
+const isInfluencer = (m: ModelSummary) => m.id === "higgsfield/ai-influencer";
 const genjutsu = l("Higgsfield Genjutsu", "Higgsfield Genjutsu");
 const generate = l("Generar", "Generate");
 const writePrompt = l("Escribe el prompt", "Write the prompt");
@@ -215,7 +217,7 @@ export const IMAGE_TABS: Tab[] = [
         label: l("Texto a imagen", "Text to image"),
         icon: "sparkles",
         defaultModel: "higgsfield-ai/soul/v2/standard",
-        filter: (m) => m.output === "image" && has(m, "text-to-image") && !isAds(m),
+        filter: (m) => m.output === "image" && has(m, "text-to-image") && !isAds(m) && !isInfluencer(m),
         hero: { title: l("Texto a imagen", "Text to image"), subtitle: l("Fotografía editorial a partir de una frase", "Editorial photography from a sentence"), tone: "pink", art: "/art/text-to-image.webp" },
       },
       {

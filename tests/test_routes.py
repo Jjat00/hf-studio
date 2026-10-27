@@ -269,3 +269,42 @@ def test_o3_automatic_multi_shot_refuses_requested_shots():
     _unsupported(route, logical)  # «intelligence» repartiría los planos solo y se perderían
     automatic = {**logical, "multi_prompt": None}
     assert route.translate(automatic, frozenset(automatic))["shot_type"] == "intelligence"
+
+
+def test_kling4_translates_frames_mentions_and_prices_video_input():
+    k4 = "kling-video/v4.0"
+    frames = {
+        **sample(f"{k4}/image-to-video"),
+        "image_urls": ["https://x/b.png"],
+        "end_image_url": "https://x/c.png",
+    }
+    roles = route_of("apimart", f"{k4}/image-to-video").translate(frames, frozenset(frames))[
+        "image_with_roles"
+    ]
+    assert [r["role"] for r in roles] == ["first_frame", "keyframe", "last_frame"]
+    kie_frames = route_of("kie", f"{k4}/image-to-video")
+    out = kie_frames.translate(frames, frozenset(frames))
+    assert out["keyframe_urls"] == ["https://x/b.png"] and out["last_frame_url"] == "https://x/c.png"
+    # 3 s admite 4 fotogramas: primero, tres intermedios y último son 5.
+    _unsupported(kie_frames, {**frames, "duration": 3, "image_urls": ["https://x/b.png"] * 3})
+    _unsupported(kie_frames, {**frames, "prompt": None})  # KIE exige prompt
+
+    refs = {**sample(f"{k4}/reference-to-video"), "prompt": "@image_1 dances like @video_1", "image_urls": ["https://x/a.png"],
+            "video_urls": ["https://x/v.mp4"], "duration": 10, "resolution": "720p"}  # fmt: skip
+    apimart = route_of("apimart", f"{k4}/reference-to-video")
+    out = apimart.translate(refs, frozenset(refs))
+    assert out["prompt"] == "@Image1 dances like @Video1" and out["aspect_ratio"] == "auto"
+    # Salida + max(salida, entrada topada en 30 s), a la tarifa con video de entrada.
+    assert apimart.price(refs, {"input_video_seconds": 40}, _prices("apimart")) == round(0.094 * (10 + 30), 4)
+    assert route_of("kie", f"{k4}/reference-to-video").price(
+        refs, {"input_video_seconds": 8}, _prices("kie")
+    ) == round(0.085 * 20, 4)
+    with pytest.raises(ProviderError):
+        apimart.check(refs, {"input_video_seconds": 31})
+
+    edit = {**sample(f"{k4}/video-edit"), "video_url": "https://x/v.mp4"}
+    route = route_of("apimart", f"{k4}/video-edit")
+    # «adaptive» no se envía: la salida sigue al video de origen. APIMart no toma videos de referencia al editar.
+    assert "aspect_ratio" not in route.translate(edit, frozenset(edit))
+    _unsupported(route, {**edit, "video_urls": ["https://x/r.mp4"]})
+    assert not routes_for(PROVIDERS["kie"].routes(), f"{k4}/video-edit")

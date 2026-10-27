@@ -74,7 +74,8 @@ selection (claves de list_model_options), brief, seed y una foto opcional; los t
 Higgsfield. Para animarla como Higgsfield, Genjutsu motion transfer con la hoja en image_urls y un video del
 movimiento en video_url: higgsfield/genjutsu-light/motion-transfer/v1.0 (unas 3 veces más barato, 15 s, conserva
 el audio) o higgsfield/genjutsu/motion-transfer/v1.0. Kling 4.0 (kling-video/v4.0/…) hace clips de 3 a 30 s
-desde texto, fotogramas, referencias (@image_1, @video_1) o editando un video.
+desde texto, fotogramas, referencias (@image_1, @video_1) o editando un video; también sale por APIMart y
+KIE (KIE, un 9 % más barato, no edita).
 Spaces (lienzos de nodos): list_spaces, get_space, create_space y update_space leen y arman un lienzo; cada
 nodo es texto, medio, nota, lista o generador (cualquier modelo del catálogo, incluidas las herramientas
 gratis hf-studio/frame, hf-studio/combine y hf-studio/mix, el audio elevenlabs/tts, elevenlabs/sfx y
