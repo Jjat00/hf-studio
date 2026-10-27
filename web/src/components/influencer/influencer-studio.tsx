@@ -112,6 +112,9 @@ const T = {
   motionExtraHint: l("Lugar, ropa, música…", "Location, outfit, music…"),
   motionVideo: l("Video del movimiento", "Motion video"),
   motionVideoHint: l("El baile o la acción a copiar · 4–15 s en Light, hasta 30 s en Genjutsu", "The dance or action to copy · 4–15s on Light, up to 30s on Genjutsu"),
+  optionsLoading: l("Cargando los rasgos vigentes de Higgsfield…", "Loading Higgsfield's current traits…"),
+  optionsError: l("No se pudieron cargar los rasgos de Higgsfield.", "Couldn't load Higgsfield's traits."),
+  retry: l("Reintentar", "Retry"),
   noAnimals: l(
     "Higgsfield aún no crea animales por su API (falla en su lado a 2026-10-26). Elige otro modelo para animales.",
     "Higgsfield can't create animals through its API yet (it fails on their side as of 2026-10-26). Pick another model for animals.",
@@ -146,7 +149,9 @@ function rememberMine(id: string) {
     // Sin almacenamiento local solo se pierde el filtro del historial (la generación sigue en la biblioteca).
   }
 }
-const LEGACY = ["Full-body fashion portrait of a", "same face and outfit, smooth realistic motion", "Two-panel character sheet", "Traits:"];
+/** Instrucción de las animaciones con Genjutsu: también las reconoce el historial sin el almacenamiento local. */
+const GENJUTSU_PROMPT = "Swap the video's main character for the character in the reference image, same face and outfit.";
+const LEGACY = ["Full-body fashion portrait of a", "same face and outfit, smooth realistic motion", "Two-panel character sheet", "Traits:", GENJUTSU_PROMPT];
 
 /** Miniatura de una opción; si aún no existe la imagen, muestra el emoji de respaldo (o nada). */
 function Thumb({ src, fallback, fill }: { src: string; fallback?: string; fill?: boolean }) {
@@ -218,6 +223,8 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const [motionVideo, setMotionVideo] = useState<string | undefined>();
   const [motionModel, setMotionModel] = useState(MOTION_MODELS[0].id);
   const [live, setLive] = useState<LiveCategory[] | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveTry, setLiveTry] = useState(0);
   // Cotización y envío
   const [details, setDetails] = useState<Record<string, ModelDetail>>({});
   const [quote, setQuote] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
@@ -236,10 +243,22 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const native = modelKey === NATIVE;
   const genjutsu = GENJUTSU.has(motionModel);
   const isAnimal = ANIMALS.includes(tier);
+  // Se pide cada vez que se elige el modelo de Higgsfield (la API lo guarda 10 min): las claves cambian sin aviso.
   useEffect(() => {
-    if (!native || live) return;
-    studio.options(NATIVE).then((r) => setLive(r.categories), () => undefined);
-  }, [native, live]);
+    if (!native) return;
+    let alive = true;
+    studio.options(NATIVE).then(
+      (r) => {
+        if (!alive) return;
+        setLive(r.categories);
+        setLiveError(null);
+      },
+      (e) => alive && setLiveError(e instanceof Error ? e.message : String(e)),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [native, liveTry]);
   // Con el modelo de Higgsfield, sus rasgos vigentes; con los demás, el catálogo copiado (se traduce a prompt).
   const groupsFor = (t: Tier): Group[] => (native && live ? liveGroups(live, t) : staticGroups(t));
   const groups = groupsFor(tier);
@@ -255,13 +274,14 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
       if (genjutsu) {
         if (!motionVideo) return null;
         const extra = motionExtra.trim() ? ` ${motionExtra.trim()}` : "";
-        return { video_url: motionVideo, image_urls: [character], prompt: `Swap the video's main character for the character in the reference image, same face and outfit.${extra}`, resolution: "720p" };
+        return { video_url: motionVideo, image_urls: [character], prompt: `${GENJUTSU_PROMPT}${extra}`, resolution: "720p" };
       }
       const prompt = `The character ${MOTIONS[motion].en.toLowerCase()}, ${MOTION_TAG}${motionExtra.trim() ? `, ${motionExtra.trim()}` : ""}, smooth realistic motion, social media video`;
       return buildInput(detail, { prompt, image: character, ratio: "9:16", motion: true });
     }
     if (native) {
-      if (isAnimal) return null;
+      // Sin el catálogo vigente no se envía: el copiado tiene claves que Higgsfield ya retiró.
+      if (isAnimal || !live) return null;
       // Solo las claves que el catálogo vigente admite para este tipo: las viejas o de otro tipo se rechazan.
       const selection = Object.fromEntries(
         groups.map((grp) => [grp.id, (sel[grp.id] ?? []).filter((id) => grp.options.some((o) => o.id === id)).slice(0, grp.max)]).filter(([, ids]) => ids.length),
@@ -366,7 +386,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
 
   const picked = groups.flatMap((grp) => (sel[grp.id] ?? []).flatMap((id) => grp.options.filter((o) => o.id === id).map((opt) => ({ grp, opt }))));
   const history = items.filter((g) => {
-    if (mine.includes(g.id)) return true;
+    if (mine.includes(g.id) || g.model === NATIVE) return true;
     const p = String((g.input as Record<string, unknown>)?.prompt ?? "");
     return LEGACY.some((m) => p.includes(m));
   });
@@ -421,6 +441,20 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
                 </div>
               </SettingCard>
               {native && isAnimal && <p className="px-1 text-[13px] text-danger">{pick(T.noAnimals)}</p>}
+              {native && !live && (
+                <p className="px-1 text-[13px] text-fg-3">
+                  {liveError ? (
+                    <>
+                      <span className="text-danger">{pick(T.optionsError)}</span>{" "}
+                      <button type="button" onClick={() => setLiveTry((n) => n + 1)} className="underline hover:text-fg">
+                        {pick(T.retry)}
+                      </button>
+                    </>
+                  ) : (
+                    pick(T.optionsLoading)
+                  )}
+                </p>
+              )}
               {section(
                 "type",
                 pick(T.type),

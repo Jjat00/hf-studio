@@ -144,7 +144,8 @@ def approximate(
                     billable = 2 * seconds
                     basis = f"({seconds:g}s + {seconds:g}s assumed for the input video)"
                 else:
-                    billable = seconds + max(min(float(input_secs), 30), seconds)
+                    # El recorte a 30 s es por video y aquí solo se conoce la suma: se usa entera (por lo alto).
+                    billable = seconds + max(float(input_secs), seconds)
                     basis = f"({seconds:g}s + max({float(input_secs):g}s of input video, {seconds:g}s))"
             return {"usd": billable * float(rates[res]), "basis": f"{basis} × ${rates[res]}/s at {res}",
                     "missing": missing}  # fmt: skip

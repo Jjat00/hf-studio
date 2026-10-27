@@ -243,3 +243,23 @@ def test_quote_prices_text_formulas_with_schema_defaults():
     )
     # Sin duración ni resolución, Kling 4.0 hace 10 s en 1080p.
     assert round(r["usd"], 3) == 2.35 and "1080p" in r["basis"]
+
+
+def test_kling4_does_not_cap_the_sum_of_input_videos():
+    # Dos referencias de 20 s: el recorte a 30 s es por video, así que se cobran los 40 s.
+    args = {"duration": 10, "resolution": "1080p", "video_urls": ["https://x/a.mp4", "https://x/b.mp4"]}
+    r = approximate(KLING4, args, {"input_video_seconds": 40})
+    assert round(r["usd"], 3) == round(50 * 0.141, 3)
+
+
+def test_ai_influencer_schema_keeps_animal_only_fields_off_humans():
+    from hf_studio.catalog import get_catalog
+
+    catalog = get_catalog()
+    model = "higgsfield/ai-influencer"
+    assert catalog.validate(model, {"tier": "freak", "selection": {"gender": ["male"]}, "seed": 42}) == []
+    assert catalog.validate(model, {"tier": "normal", "variation_index": 1})
+    assert catalog.validate(model, {"body_color": "#abcdef"})  # sin tier es normal
+    assert catalog.validate(model, {"tier": "cats", "pinned_species": "beetle"})
+    assert catalog.validate(model, {"tier": "cats", "variation_index": 3, "body_color": "#abcdef"}) == []
+    assert catalog.validate(model, {"tier": "insects", "pinned_species": "beetle"}) == []

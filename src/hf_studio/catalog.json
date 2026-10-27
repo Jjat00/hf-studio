@@ -2388,7 +2388,71 @@
             ],
             "title": "Trait variants"
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "tier"
+              ],
+              "properties": {
+                "tier": {
+                  "enum": [
+                    "insects",
+                    "frogs",
+                    "cats",
+                    "dogs",
+                    "capybaras",
+                    "birds"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "variation_index": {
+                  "const": 0
+                },
+                "body_color": {
+                  "type": "null"
+                },
+                "trait_variants": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": [
+                          "animal_choices"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "tier"
+              ],
+              "properties": {
+                "tier": {
+                  "const": "insects"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "pinned_species": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
