@@ -68,6 +68,13 @@ use_output(generation_id) da su URL vigente; no reutilices URLs viejas de output
 Genjutsu Restyle (higgsfield/genjutsu/restyle/v1.0) cambia el estilo de un video y conserva su movimiento y su
 audio: elige el estilo con list_styles y pasa su id en preset_id. Ads Studio (higgsfield/ads-studio/v1.0) hace
 de 1 a 8 anuncios en imagen a partir de un brief y fotos del producto (batch_size = número de imágenes).
+Usa las funciones propias de Higgsfield antes que imitarlas con otros modelos. AI Influencer
+(higgsfield/ai-influencer, 0,05 USD) hace la hoja del personaje (primer plano y cuerpo entero) a partir de tier,
+selection (claves de list_model_options), brief, seed y una foto opcional; los tipos de animal fallan hoy en
+Higgsfield. Para animarla como Higgsfield, Genjutsu motion transfer con la hoja en image_urls y un video del
+movimiento en video_url: higgsfield/genjutsu-light/motion-transfer/v1.0 (unas 3 veces más barato, 15 s, conserva
+el audio) o higgsfield/genjutsu/motion-transfer/v1.0. Kling 4.0 (kling-video/v4.0/…) hace clips de 3 a 30 s
+desde texto, fotogramas, referencias (@image_1, @video_1) o editando un video.
 Spaces (lienzos de nodos): list_spaces, get_space, create_space y update_space leen y arman un lienzo; cada
 nodo es texto, medio, nota, lista o generador (cualquier modelo del catálogo, incluidas las herramientas
 gratis hf-studio/frame, hf-studio/combine y hf-studio/mix, el audio elevenlabs/tts, elevenlabs/sfx y
@@ -151,6 +158,20 @@ def list_styles(model_id: str = "higgsfield/genjutsu/restyle/v1.0") -> dict:
     """Estilos vigentes de un modelo que elige uno por preset_id (hoy Genjutsu Restyle): id, nombre y
     preview_url. Pon el id en preset_id; cambian sin aviso, no reutilices uno viejo sin mirar la lista. Gratis."""
     return _call("GET", f"/v1/model-styles/{model_id}")
+
+
+@mcp.tool(
+    title="List model options",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
+def list_model_options(model_id: str = "higgsfield/ai-influencer") -> dict:
+    """Rasgos vigentes de un modelo que los elige por clave (hoy AI Influencer): categorías con key, tiers, max y
+    opciones (key, label, img, color, slot, exclusive). Pon en selection {categoría: [claves]}, solo de categorías
+    cuyo tiers incluya tu tier, como mucho max por categoría, una opción exclusiva sola y una por slot. Cambian sin
+    aviso. Gratis."""
+    return _call("GET", f"/v1/model-options/{model_id}")
 
 
 def _local_path(path: str) -> Path:

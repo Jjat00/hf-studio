@@ -47,7 +47,9 @@ owner's credits.
   `elements` field and cite each as `@name` in the prompt; they run on APIMart and KIE only (KIE also needs
   `image_url`).
 - Genjutsu Restyle (`higgsfield/genjutsu/restyle/v1.0`) restyles a video and keeps its motion and audio: pick the
-  style with `list_styles` and pass its id in `preset_id` (styles change without notice). Ads Studio
+  style with `list_styles` and pass its id in `preset_id` (styles change without notice). Prefer Higgsfield's own
+  functions over imitating them: AI Influencer (`higgsfield/ai-influencer`) takes `selection` keys from
+  `list_model_options`, and its sheet is animated with Genjutsu (Light) motion transfer over a motion video. Ads Studio
   (`higgsfield/ads-studio/v1.0`) makes 1 to 8 ad images from a brief and product photos (`batch_size` = number of images).
 - Spaces (node canvases): `create_space` / `update_space` build one; `estimate_space_run` quotes every step and the
   total (with a `quote_id`), and after the user's OK `run_space` runs it on the server under that budget. A run that

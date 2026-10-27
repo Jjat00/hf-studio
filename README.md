@@ -275,7 +275,7 @@ Tools (41). Every tool declares all four MCP hints (`readOnlyHint`, `destructive
 
 | Group | Tools |
 | --- | --- |
-| Models | `find_models`, `get_model`, `recommend_models`, `list_styles` |
+| Models | `find_models`, `get_model`, `recommend_models`, `list_styles`, `list_model_options` |
 | Generate | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
 | Tracking | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
 | Providers | `providers_status` |

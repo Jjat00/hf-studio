@@ -23,7 +23,14 @@ FAILED = "mux_failed"
 
 
 # Conservan el audio del video de origen por sí mismos (y su duración puede variar: remezclarlo lo desfasaría).
-KEEPS_SOURCE_AUDIO = frozenset({"higgsfield/genjutsu/restyle/v1.0"})
+# Conservan solos el audio del video de origen (Genjutsu Light lo dice en su ficha, 2026-10).
+KEEPS_SOURCE_AUDIO = frozenset(
+    {
+        "higgsfield/genjutsu/restyle/v1.0",
+        "higgsfield/genjutsu-light/motion-transfer/v1.0",
+        "higgsfield/genjutsu-light/object-swap/v1.0",
+    }
+)
 
 
 def supports_source_audio(model: dict) -> bool:
@@ -47,6 +54,19 @@ def studio_notes(model: dict) -> list[str]:
         notes.append(
             "preset_id is the id of one current style: list them with list_styles (GET /v1/model-styles/<model>). "
             "Restyle keeps the source audio by itself and bills each second of the source video, trimmed to 30 s."
+        )
+    if model["id"] == "higgsfield/ai-influencer":
+        notes.append(
+            "selection takes category and option KEYS, not labels: list the current ones with list_model_options "
+            "(GET /v1/model-options/<model>) and keep only categories whose tiers include your tier; keys change "
+            "without notice. Animal tiers fail on Higgsfield's side as of 2026-10-26: use human tiers. To animate "
+            "the sheet like Higgsfield does, pass it in image_urls of higgsfield/genjutsu-light/motion-transfer/v1.0 "
+            "(or genjutsu/motion-transfer) with a video of the motion in video_url."
+        )
+    if model["id"].startswith("higgsfield/genjutsu-light/"):
+        notes.append(
+            "Genjutsu Light keeps the source audio by itself and uses only the first 15 s of the source video. "
+            "Billed on output + input seconds, about 3x cheaper than Genjutsu."
         )
     if not supports_source_audio(model):
         return notes
