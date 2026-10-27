@@ -13,7 +13,7 @@ import { MediaSlot } from "@/components/studio/media-slot";
 import { l } from "@/lib/i18n";
 import { ANIMALS, EXAMPLES, IMAGE_GROUPS, SWATCH, TIERS, buildPrompt, liveGroups, randomSelection, staticGroups, thumb, tierThumb, type Example, type Group, type LiveCategory, type Selection, type Tier } from "@/lib/influencer-data";
 import { costShort, fieldErrors, studio, StudioError, type Estimate } from "@/lib/studio";
-import type { ModelDetail } from "@/lib/types";
+import type { Generation, ModelDetail } from "@/lib/types";
 
 /** El modelo de Higgsfield: recibe el tipo y los rasgos por clave (no un prompt) y devuelve la hoja del personaje. */
 const NATIVE = "higgsfield/ai-influencer";
@@ -237,6 +237,16 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   const mineRaw = useSyncExternalStore(subscribeMine, readMine, () => "[]");
   const mine = useMemo(() => JSON.parse(mineRaw) as string[], [mineRaw]);
   const { items, add, remove } = useGenerations();
+  // `items` son solo las 80 más recientes de la biblioteca: el historial pide además las suyas al servidor.
+  const [older, setOlder] = useState<Generation[]>([]);
+  useEffect(() => {
+    // Al abrir la página (para el contador) y cada vez que se cambia de vista.
+    studio.find({ models: [NATIVE], texts: LEGACY }).then((r) => setOlder(r.generations), () => undefined);
+  }, [view]);
+  const removeOne = (id: string) => {
+    setOlder((prev) => prev.filter((g) => g.id !== id));
+    return remove(id);
+  };
 
   const createModel = CREATE_MODELS.find((m) => m.id === modelKey)!;
   const modelId = tab === "motion" ? motionModel : photo && createModel.photo ? createModel.photo : createModel.id;
@@ -386,11 +396,14 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
   }
 
   const picked = groups.flatMap((grp) => (sel[grp.id] ?? []).flatMap((id) => grp.options.filter((o) => o.id === id).map((opt) => ({ grp, opt }))));
-  const history = items.filter((g) => {
+  const isOurs = (g: Generation) => {
     if (mine.includes(g.id) || g.model === NATIVE) return true;
     const p = String((g.input as Record<string, unknown>)?.prompt ?? "");
     return LEGACY.some((m) => p.includes(m));
-  });
+  };
+  // El filtro del servidor busca en toda la entrada: se vuelve a aplicar el de la página (prompt) a lo que llega.
+  const byId = new Map([...older, ...items].map((g) => [g.id, g]));
+  const history = [...byId.values()].filter(isOurs).sort((a, b) => b.created_at.localeCompare(a.created_at));
   const short = costShort(current?.value ?? null);
   const confirming = confirmKey === quoteKey && !!quoteKey;
 
@@ -712,7 +725,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {history.map((g) => (
-                <GenerationCard key={g.id} g={g} layout="grid" onDelete={remove} />
+                <GenerationCard key={g.id} g={g} layout="grid" onDelete={removeOne} />
               ))}
             </div>
           )}

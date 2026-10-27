@@ -496,6 +496,15 @@ async def test_studio_notes_warn_about_silent_edits(env):
     assert (await http.get(f"/v1/models/{T2V}")).json()["studio_notes"] == []
 
 
+async def test_model_detail_says_whether_keep_source_audio_is_accepted(env):
+    """La UI ofrece «Conservar audio» con este campo: debe coincidir con lo que acepta create_generation."""
+    _, http, _ = env
+    assert (await http.get(f"/v1/models/{EDIT}")).json()["keep_source_audio"] is True
+    assert (await http.get(f"/v1/models/{T2V}")).json()["keep_source_audio"] is False
+    for model in ("higgsfield/genjutsu/restyle/v1.0", "higgsfield/genjutsu-light/motion-transfer/v1.0"):
+        assert (await http.get(f"/v1/models/{model}")).json()["keep_source_audio"] is False
+
+
 async def test_upload_rejects_content_that_is_not_the_declared_type(env):
     """Revisión 28: un manifiesto DASH subido como video/mp4 haría que ffmpeg abriera sus URLs."""
     _, http, _ = env
@@ -579,3 +588,21 @@ async def test_a_stored_plan_with_a_renamed_id_can_be_requoted(env):
     }
     fresh = await requote(app.state.router, model, SWAP_INPUT, option)
     assert fresh is not None and fresh["model"] == NEW_SWAP
+
+
+async def test_generations_can_be_filtered_by_model_or_input_text(env):
+    """El historial de AI Influencer pide sus generaciones aunque haya cientos más recientes."""
+    _, http, _ = env
+    base = {"input": {"prompt": "a cat"}, "confirm_unknown_cost": True}
+    for i, prompt in enumerate(["Traits: gender: male", "a dog", "50% off"]):
+        body = {**base, "model": T2V, "input": {"prompt": prompt}, "idempotency_key": f"f{i}"}
+        assert (await http.post("/v1/generations", json=body)).status_code in (200, 201, 202)
+    found = (await http.get("/v1/generations", params={"text": ["Traits:"], "limit": 100})).json()[
+        "generations"
+    ]
+    assert [g["input"]["prompt"] for g in found] == ["Traits: gender: male"]
+    # % y _ se buscan literales, no como comodines de LIKE.
+    found = (await http.get("/v1/generations", params={"text": ["50%"]})).json()["generations"]
+    assert [g["input"]["prompt"] for g in found] == ["50% off"]
+    assert len((await http.get("/v1/generations", params={"model": [T2V]})).json()["generations"]) == 3
+    assert (await http.get("/v1/generations", params={"model": ["x/y"]})).json()["generations"] == []

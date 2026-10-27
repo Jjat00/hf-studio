@@ -25,7 +25,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { ElementPicker } from "@/components/studio/element-picker";
 import { StylePicker } from "@/components/studio/style-picker";
-import { cleanInput, defaultsFor, fieldsFor, keepsSourceAudio, takesStudioElements, type Field } from "@/lib/schema";
+import { cleanInput, defaultsFor, fieldsFor, takesStudioElements, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
 import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate, modelMap } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
@@ -139,9 +139,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const elementsField = fields.find((f) => f.kind === "elements");
   const styleField = fields.find((f) => f.kind === "style");
   const settings = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
-  // Opción de HF Studio (no de Higgsfield): mismo criterio que audio.supports_source_audio en la API.
-  const canKeepAudio =
-    detail?.output === "video" && "video_url" in (detail.input_schema.properties ?? {}) && !keepsSourceAudio(detail.id);
+  // Opción de HF Studio (no de Higgsfield): la API dice si la acepta (audio.supports_source_audio).
+  const canKeepAudio = !!detail?.keep_source_audio;
   const advanced = fields.filter((f) => ["text", "number", "json"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
 
   const setValue = useCallback((key: string, v: unknown) => {

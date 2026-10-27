@@ -38,6 +38,8 @@ export type ModelDetail = ModelSummary & {
   summary: string;
   notes: string[];
   input_schema: JSONSchema;
+  /** La API acepta keep_source_audio (video de origen cuyo audio el modelo no conserva solo). */
+  keep_source_audio?: boolean;
 };
 
 export type Output = {

@@ -41,9 +41,6 @@ export function takesStudioElements(modelId: string) {
 const STYLE_MODELS = new Set(["higgsfield/genjutsu/restyle/v1.0"]);
 export const hasStyles = (modelId: string) => STYLE_MODELS.has(modelId);
 
-/** Conservan el audio del video de origen por sí mismos: no se ofrece remezclarlo (igual que en la API). */
-export const keepsSourceAudio = (modelId: string) => modelId === "higgsfield/genjutsu/restyle/v1.0";
-
 export function fieldsFor(schema: JSONSchema, modelId = ""): Field[] {
   const props = schema.properties ?? {};
   const req = requiredKeys(schema);

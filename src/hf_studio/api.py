@@ -23,13 +23,13 @@ from fastapi import Depends, FastAPI, File, Form, Header, Query, Request, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete, func, select, true, update
+from sqlalchemy import String, case, cast, delete, func, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from .audio import _run as run_ffmpeg
-from .audio import guarded, has_audio, studio_notes
+from .audio import guarded, has_audio, studio_notes, supports_source_audio
 from .catalog import ALIASES as CATALOG_ALIASES
 from .catalog import Catalog, get_catalog
 from .config import Settings, get_settings
@@ -557,6 +557,8 @@ def create_app(
                 "summary": m["summary"],
                 "notes": m["notes"],
                 "studio_notes": studio_notes(m),
+                # Si admite keep_source_audio: la UI ofrece «Conservar audio» solo cuando la API lo acepta.
+                "keep_source_audio": supports_source_audio(m),
                 "input_schema": m["input_schema"],
             }
             if full
@@ -923,6 +925,10 @@ def create_app(
         offset: int = Query(0, ge=0),
         ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
+        model: Annotated[list[str] | None, Query(description="Modelos (repetible); OR con text")] = None,
+        text: Annotated[
+            list[str] | None, Query(description="Texto que contiene la entrada (repetible, OR)")
+        ] = None,
     ) -> dict:
         query = select(Job) if owner.sees_all else select(Job).where(Job.owner_id == owner.id)
         if ids:
@@ -930,6 +936,13 @@ def create_app(
             query = query.where(Job.id.in_(wanted))
         if status:
             query = query.where(Job.status == status)
+        # Filtro de una página (p. ej. el historial de AI Influencer): cualquiera de los modelos o de los textos.
+        matches = [Job.model.in_(model[:20])] if model else []
+        matches += [
+            cast(Job.input, String).contains(t[:200], autoescape=True) for t in (text or [])[:10] if t
+        ]
+        if matches:
+            query = query.where(or_(*matches))
         query = query.order_by(Job.created_at.desc()).offset(offset).limit(limit)
         jobs = list(await session.scalars(query))
         deadline = asyncio.get_running_loop().time() + (wait if ids else 0)

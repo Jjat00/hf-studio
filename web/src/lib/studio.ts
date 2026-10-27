@@ -186,6 +186,13 @@ export const studio = {
     }),
   importElevenlabs: () => call<{ imported: number; skipped: number }>("/v1/sounds/import-elevenlabs", { method: "POST" }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
+  /** Generaciones de cualquiera de esos modelos o cuya entrada contenga alguno de esos textos (historial de una página). */
+  find: (filter: { models?: string[]; texts?: string[] }, limit = 100) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    for (const m of filter.models ?? []) q.append("model", m);
+    for (const t of filter.texts ?? []) q.append("text", t);
+    return call<{ generations: Generation[] }>(`/v1/generations?${q}`);
+  },
   get: (id: string, wait = 0) => call<Generation>(`/v1/generations/${id}${wait ? `?wait=${wait}` : ""}`),
   presets: () => call<{ presets: Preset[] }>("/v1/presets"),
   preset: (slug: string) => call<Preset>(`/v1/presets/${slug}`),
