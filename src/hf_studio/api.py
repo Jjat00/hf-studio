@@ -1188,31 +1188,40 @@ def create_app(
         await session.commit()
         shutil.rmtree(Path(settings.storage_dir) / "outputs" / job_id, ignore_errors=True)
 
+    async def set_library_flag(
+        session: AsyncSession, owner: ApiClient, ids: list[str], values: dict, *conditions: Any
+    ) -> set[str]:
+        """Cambia una marca de biblioteca (oculta, favorita) de varias generaciones del cliente (o de todos con
+        sees_all). Es una UPDATE directa que no sube `Job.version`: organizar la biblioteca no debe invalidar la
+        escritura de un worker que en ese momento envía o sondea el trabajo (perdería su request_id). El worker,
+        por su parte, solo escribe las columnas que cambió, así que tampoco pisa la marca."""
+        where = [Job.id.in_(set(ids)), *conditions]
+        if not owner.sees_all:
+            where.append(Job.owner_id == owner.id)
+        changed = set(await session.scalars(select(Job.id).where(*where)))
+        if changed:
+            await session.execute(
+                update(Job)
+                .where(Job.id.in_(changed))
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+        await session.commit()
+        return changed
+
     @app.post("/v1/generations/hide", tags=["generaciones"])
     async def hide_generations(body: HideIn, session: Session, owner: Owner) -> dict:
         """Oculta (o vuelve a mostrar, con `hidden: false`) varias generaciones terminadas del historial y de los
         listados. Siguen accesibles por su id. Las que siguen en curso o no son del cliente se dejan igual."""
-        query = select(Job).where(Job.id.in_(set(body.ids)), Job.status.in_(TERMINAL))
-        if not owner.sees_all:
-            query = query.where(Job.owner_id == owner.id)
-        jobs = list(await session.scalars(query))
-        for job in jobs:
-            job.hidden = body.hidden
-        await session.commit()
-        changed = {j.id for j in jobs}
+        changed = await set_library_flag(
+            session, owner, body.ids, {"hidden": body.hidden}, Job.status.in_(TERMINAL)
+        )
         return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}
 
     @app.post("/v1/generations/favorite", tags=["generaciones"])
     async def favorite_generations(body: FavoriteIn, session: Session, owner: Owner) -> dict:
         """Marca (o desmarca, con `favorite: false`) varias generaciones como favoritas de la biblioteca."""
-        query = select(Job).where(Job.id.in_(set(body.ids)))
-        if not owner.sees_all:
-            query = query.where(Job.owner_id == owner.id)
-        jobs = list(await session.scalars(query))
-        for job in jobs:
-            job.favorite = body.favorite
-        await session.commit()
-        changed = {j.id for j in jobs}
+        changed = await set_library_flag(session, owner, body.ids, {"favorite": body.favorite})
         return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}
 
     @app.post("/v1/generations/{job_id}/approve", tags=["generaciones"])

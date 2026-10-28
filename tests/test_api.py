@@ -658,3 +658,24 @@ async def test_favorites_are_marked_in_bulk_and_listed_on_their_own(env):
     await http.post("/v1/generations/favorite", json={"ids": [ids[0]], "favorite": False})
     favs = (await http.get("/v1/generations", params={"favorite": "true"})).json()["generations"]
     assert [g["id"] for g in favs] == [ids[1]]
+
+
+async def test_a_library_flag_does_not_break_a_worker_writing_the_same_job(env):
+    """Marcar favorita u ocultar no sube Job.version: el worker que ya leyó el trabajo (p. ej. mientras lo
+    envía al proveedor) guarda igual su resultado, y su escritura no pisa la marca."""
+    app, http, _ = env
+    body = {
+        "model": T2V,
+        "input": {"prompt": "race"},
+        "confirm_unknown_cost": True,
+        "idempotency_key": "race",
+    }
+    job_id = (await http.post("/v1/generations", json=body)).json()["id"]
+    async with app.state.sessions() as worker:
+        job = await worker.get(Job, job_id)  # el worker lo leyó antes de que llegue la estrella
+        assert (await http.post("/v1/generations/favorite", json={"ids": [job_id]})).status_code == 200
+        job.status, job.hf_request_id = "queued", "req-race"
+        await worker.commit()  # sin StaleDataError
+    async with app.state.sessions() as s:
+        saved = await s.get(Job, job_id)
+        assert saved.status == "queued" and saved.hf_request_id == "req-race" and saved.favorite is True

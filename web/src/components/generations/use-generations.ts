@@ -7,28 +7,56 @@ import type { Generation } from "@/lib/types";
 /**
  * Historial del cliente con sondeo adaptativo: cada 2,5 s mientras haya trabajos activos,
  * cada 20 s en reposo. El servidor ya hace el backoff contra Higgsfield; esto solo lee la BD propia.
+ *
+ * Cada lectura lleva un número y solo se aplica si es la más nueva y empezó después del último cambio de la lista
+ * (otra consulta u otra marca): una respuesta lenta de antes no deshace lo que se ve ahora. Los cambios (ocultar,
+ * favoritas, borrar) se aplican al momento, se envían en orden y al terminar se reconcilian con el servidor.
  */
 export function useGenerations({ hidden = false, favorite = false }: { hidden?: boolean; favorite?: boolean } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const asked = useRef(0);
+  const applied = useRef(0);
+  const changedAt = useRef(0);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+
+  // Otra consulta (otro filtro): no se muestra la lista de la anterior como si fuera de esta.
+  const query = `${hidden}|${favorite}`;
+  const [shownQuery, setShownQuery] = useState(query);
+  if (shownQuery !== query) {
+    setShownQuery(query);
+    setItems([]);
+    setLoading(true);
+  }
 
   const refresh = useCallback(async () => {
+    const id = ++asked.current;
     try {
       const { generations } = await studio.list(80, hidden, favorite);
+      if (id <= applied.current || id <= changedAt.current) return generations;
+      applied.current = id;
       setItems(generations);
       setError(null);
+      setLoading(false);
       return generations;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (id > applied.current && id > changedAt.current) {
+        setError(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      }
       return null;
-    } finally {
-      setLoading(false);
     }
   }, [hidden, favorite]);
 
+  /** Lo que esté en vuelo ya no vale: la lista cambió (otra consulta o un cambio hecho aquí). */
+  const invalidate = useCallback(() => {
+    changedAt.current = asked.current;
+  }, []);
+
   useEffect(() => {
+    invalidate();
     let alive = true;
     const loop = async () => {
       const list = await refresh();
@@ -41,11 +69,12 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       alive = false;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [refresh]);
+  }, [refresh, invalidate]);
 
   /** Inserta una generación recién creada y acelera el siguiente sondeo. */
   const add = useCallback(
     (g: Generation) => {
+      invalidate();
       setItems((prev) => [g, ...prev.filter((p) => p.id !== g.id)]);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(async function tick() {
@@ -54,50 +83,54 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
         timer.current = setTimeout(tick, active ? 2500 : 20000);
       }, 1500);
     },
-    [refresh],
+    [refresh, invalidate],
   );
 
-  /** Borra del historial una generación terminada (optimista; si falla, se recarga). */
+  /** Un cambio de la lista: se ve al momento (`optimistic`), se envía en orden tras los anteriores y, al terminar
+   * (bien o mal), se descarta lo leído mientras tanto y se vuelve a leer el estado confirmado. */
+  const change = useCallback(
+    <T,>(optimistic: (prev: Generation[]) => Generation[], send: () => Promise<T>): Promise<T> => {
+      invalidate();
+      setItems(optimistic);
+      const run = queue.current.then(send, send);
+      queue.current = run.catch(() => undefined);
+      const settle = () => {
+        invalidate();
+        void refresh();
+      };
+      run.then(settle, settle);
+      return run;
+    },
+    [invalidate, refresh],
+  );
+
+  /** Borra del historial una generación terminada. */
   const remove = useCallback(
     async (id: string) => {
-      setItems((prev) => prev.filter((g) => g.id !== id));
-      await studio.remove(id).catch(() => refresh());
+      await change((prev) => prev.filter((g) => g.id !== id), () => studio.remove(id)).catch(() => undefined);
     },
-    [refresh],
+    [change],
   );
 
-  /** Oculta o vuelve a mostrar varias (optimista: salen de esta lista al momento; si falla, se recarga). */
+  /** Oculta o vuelve a mostrar varias: salen de esta lista al momento. */
   const setHidden = useCallback(
-    async (ids: string[], value: boolean) => {
+    (ids: string[], value: boolean) => {
       const gone = new Set(ids);
-      setItems((prev) => prev.filter((g) => !gone.has(g.id)));
-      try {
-        const res = await studio.hide(ids, value);
-        if (res.skipped.length) await refresh();
-        return res;
-      } catch (e) {
-        await refresh();
-        throw e;
-      }
+      return change((prev) => prev.filter((g) => !gone.has(g.id)), () => studio.hide(ids, value));
     },
-    [refresh],
+    [change],
   );
 
-  /** Marca o desmarca favoritas (optimista; en la vista de favoritas, las que se quitan salen al momento). */
+  /** Marca o desmarca favoritas; en la vista de favoritas, las que se quitan salen al momento. */
   const setFavorite = useCallback(
-    async (ids: string[], value: boolean) => {
+    (ids: string[], value: boolean) => {
       const touched = new Set(ids);
-      setItems((prev) =>
-        favorite && !value ? prev.filter((g) => !touched.has(g.id)) : prev.map((g) => (touched.has(g.id) ? { ...g, favorite: value } : g)),
+      return change(
+        (prev) => (favorite && !value ? prev.filter((g) => !touched.has(g.id)) : prev.map((g) => (touched.has(g.id) ? { ...g, favorite: value } : g))),
+        () => studio.favorite(ids, value),
       );
-      try {
-        return await studio.favorite(ids, value);
-      } catch (e) {
-        await refresh();
-        throw e;
-      }
     },
-    [refresh, favorite],
+    [change, favorite],
   );
 
   return { items, loading, error, refresh, add, remove, setHidden, setFavorite };
