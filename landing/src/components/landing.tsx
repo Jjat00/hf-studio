@@ -184,18 +184,41 @@ function Promo() {
   );
 }
 
-type Item = { type: "video" | "image"; src: string; tag: string; model: string; tall?: boolean };
+type Item = { type: "video" | "image"; src: string; tag: string; model: string; aspect: string };
+const TALL = "aspect-[9/16]";
+const WIDE = "aspect-video";
 const EXAMPLES: Item[] = [
-  { type: "video", src: "soda-producto", model: "Kling O3", tag: "video-reference", tall: true },
-  { type: "video", src: "tinta", model: "Wan 2.7", tag: "text-to-video" },
-  { type: "image", src: "sneaker", model: "Soul V2", tag: "text-to-image" },
-  { type: "video", src: "anime", model: "Seedance 2.5", tag: "video-edit" },
-  { type: "video", src: "frappe-ugc", model: "Kling O3", tag: "first-last-frame", tall: true },
-  { type: "image", src: "robot", model: "Soul V2", tag: "text-to-image" },
-  { type: "video", src: "ciudad", model: "Wan 2.7", tag: "text-to-video" },
-  { type: "video", src: "soda-ugc", model: "Wan 3.0", tag: "reference-to-video", tall: true },
-  { type: "image", src: "lago", model: "Soul V2", tag: "text-to-image" },
+  { type: "video", src: "soda-producto", model: "Kling O3", tag: "video-reference", aspect: TALL },
+  { type: "video", src: "tinta", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE },
+  { type: "video", src: "moto-callejon", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
+  { type: "image", src: "mohicano", model: "Z-Image Turbo", tag: "text-to-image", aspect: WIDE },
+  { type: "video", src: "frankenstein", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
+  { type: "video", src: "anime", model: "Seedance 2.5", tag: "video-edit", aspect: WIDE },
+  { type: "video", src: "frappe-ugc", model: "Kling O3", tag: "first-last-frame", aspect: TALL },
+  { type: "video", src: "cafe", model: "Kling 3.0 Pro", tag: "image-to-video", aspect: WIDE },
+  { type: "video", src: "granizado", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
+  { type: "image", src: "tienda-chicle", model: "Nano Banana 2", tag: "image-edit", aspect: TALL },
+  { type: "video", src: "ugc-sofa", model: "Kling 3.0 Turbo", tag: "text-to-video", aspect: TALL },
+  { type: "video", src: "ciudad", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE },
+  { type: "video", src: "boba-impacto", model: "PixVerse V6", tag: "image-to-video", aspect: TALL },
+  { type: "video", src: "crochet", model: "Genjutsu Restyle", tag: "restyle", aspect: "aspect-[2/3]" },
+  { type: "video", src: "auto-cansada", model: "Kling Omni", tag: "first-last-frame", aspect: TALL },
+  { type: "video", src: "soda-ugc", model: "Wan 3.0", tag: "reference-to-video", aspect: TALL },
+  { type: "video", src: "frankenstein-ojo", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
+  { type: "video", src: "moto-lluvia", model: "PixVerse V6", tag: "image-to-video", aspect: TALL },
+  { type: "video", src: "granizado-macro", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
 ];
+
+/** Capacidades con una generación real de los ejemplos en vez de la ilustración (las demás conservan su arte). */
+const CAP_MEDIA: Record<string, { type: "video" | "image"; src: string; position?: string }> = {
+  "text-to-video": { type: "video", src: "ugc-sofa", position: "object-[50%_40%]" },
+  frames: { type: "video", src: "auto-cansada", position: "object-[50%_45%]" },
+  references: { type: "video", src: "soda-ugc" },
+  "video-edit": { type: "video", src: "anime" },
+  "object-swap": { type: "video", src: "crochet", position: "object-[50%_60%]" },
+  "text-to-image": { type: "image", src: "mohicano" },
+  "image-edit": { type: "image", src: "tienda-chicle", position: "object-[50%_25%]" },
+};
 
 function Examples() {
   const { t } = useI18n();
@@ -206,14 +229,14 @@ function Examples() {
         <h2 className="headline mt-2 text-[40px] md:text-[56px]">{t.examples.title}</h2>
         <p className="mt-3 text-[17px] text-fg-2">{t.examples.body}</p>
       </div>
-      <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
+      <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
         {EXAMPLES.map((e) => (
           <figure key={e.src} className="group relative mb-4 break-inside-avoid overflow-hidden rounded-[20px] bg-surface-3">
             {e.type === "video" ? (
-              <LoopVideo src={`${M}/${e.src}.mp4`} poster={`${M}/${e.src}.jpg`} className={clsx("w-full object-cover", e.tall ? "aspect-[9/16]" : "aspect-video")} />
+              <LoopVideo src={`${M}/${e.src}.mp4`} poster={`${M}/${e.src}.jpg`} className={clsx("w-full object-cover", e.aspect)} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={`${M}/${e.src}.webp`} alt="" loading="lazy" className="aspect-square w-full object-cover" />
+              <img src={`${M}/${e.src}.webp`} alt="" loading="lazy" className={clsx("w-full object-cover", e.aspect)} />
             )}
             <figcaption className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/80 to-transparent p-3 pt-10">
               <span className="rounded-lg bg-black/50 px-2 py-1 text-[13px] font-semibold backdrop-blur">{e.model}</span>
@@ -235,16 +258,24 @@ function Capabilities() {
         <p className="mt-3 text-[17px] text-fg-2">{t.caps.body}</p>
       </div>
       <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-        {t.caps.items.map((c) => (
-          <div key={c.art} className="group">
-            <div className="grain relative aspect-[16/9] overflow-hidden rounded-[18px] bg-surface-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/art/${c.art}.webp`} alt="" loading="lazy" className="size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]" />
+        {t.caps.items.map((c) => {
+          const real = CAP_MEDIA[c.art];
+          const cls = clsx("size-full object-cover transition-transform duration-700 group-hover:scale-[1.03]", real?.position);
+          return (
+            <div key={c.art} className="group">
+              <div className="grain relative aspect-[16/9] overflow-hidden rounded-[18px] bg-surface-3">
+                {real?.type === "video" ? (
+                  <LoopVideo src={`${M}/${real.src}.mp4`} poster={`${M}/${real.src}.jpg`} className={cls} />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={real ? `${M}/${real.src}.webp` : `/art/${c.art}.webp`} alt="" loading="lazy" className={cls} />
+                )}
+              </div>
+              <p className="headline mt-4 text-[20px] tracking-[-0.03em]">{c.title}</p>
+              <p className="mt-1 text-[16px] text-fg-3">{c.desc}</p>
             </div>
-            <p className="headline mt-4 text-[20px] tracking-[-0.03em]">{c.title}</p>
-            <p className="mt-1 text-[16px] text-fg-3">{c.desc}</p>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
