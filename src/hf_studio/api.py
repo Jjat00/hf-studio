@@ -223,6 +223,11 @@ class BatchItem(BaseModel):
     )
 
 
+class HideIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
+    hidden: bool = True
+
+
 class BatchIn(BaseModel):
     items: list[BatchItem] = Field(min_length=1, max_length=20)
     dry_run: bool = Field(False, description="Solo cotiza: devuelve costo por ítem y total, sin generar")
@@ -527,6 +532,7 @@ def create_app(
                 for o in job.plan or []
             ],
             "attempts": job.attempts_log or [],
+            "hidden": bool(job.hidden),
             "created_at": iso(job.created_at),
             "submitted_at": iso(job.submitted_at),
             "finished_at": iso(job.finished_at),
@@ -925,6 +931,7 @@ def create_app(
         offset: int = Query(0, ge=0),
         ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
+        hidden: bool = Query(False, description="true: solo las ocultas (sin ids, las ocultas no se listan)"),
         model: Annotated[list[str] | None, Query(description="Modelos (repetible); OR con text")] = None,
         text: Annotated[
             list[str] | None, Query(description="Texto que contiene la entrada (repetible, OR)")
@@ -934,6 +941,9 @@ def create_app(
         if ids:
             wanted = [i for i in ids.split(",") if i][:50]
             query = query.where(Job.id.in_(wanted))
+        else:
+            # Pedidas por id (un lienzo, una espera) se devuelven aunque estén ocultas; en un listado, no.
+            query = query.where(Job.hidden == hidden)
         if status:
             query = query.where(Job.status == status)
         # Filtro de una página (p. ej. el historial de AI Influencer): cualquiera de los modelos o de los textos.
@@ -1168,6 +1178,20 @@ def create_app(
         await session.delete(job)
         await session.commit()
         shutil.rmtree(Path(settings.storage_dir) / "outputs" / job_id, ignore_errors=True)
+
+    @app.post("/v1/generations/hide", tags=["generaciones"])
+    async def hide_generations(body: HideIn, session: Session, owner: Owner) -> dict:
+        """Oculta (o vuelve a mostrar, con `hidden: false`) varias generaciones terminadas del historial y de los
+        listados. Siguen accesibles por su id. Las que siguen en curso o no son del cliente se dejan igual."""
+        query = select(Job).where(Job.id.in_(set(body.ids)), Job.status.in_(TERMINAL))
+        if not owner.sees_all:
+            query = query.where(Job.owner_id == owner.id)
+        jobs = list(await session.scalars(query))
+        for job in jobs:
+            job.hidden = body.hidden
+        await session.commit()
+        changed = {j.id for j in jobs}
+        return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}
 
     @app.post("/v1/generations/{job_id}/approve", tags=["generaciones"])
     async def approve(

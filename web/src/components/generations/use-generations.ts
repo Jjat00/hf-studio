@@ -8,7 +8,7 @@ import type { Generation } from "@/lib/types";
  * Historial del cliente con sondeo adaptativo: cada 2,5 s mientras haya trabajos activos,
  * cada 20 s en reposo. El servidor ya hace el backoff contra Higgsfield; esto solo lee la BD propia.
  */
-export function useGenerations() {
+export function useGenerations({ hidden = false }: { hidden?: boolean } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export function useGenerations() {
 
   const refresh = useCallback(async () => {
     try {
-      const { generations } = await studio.list(80);
+      const { generations } = await studio.list(80, hidden);
       setItems(generations);
       setError(null);
       return generations;
@@ -26,7 +26,7 @@ export function useGenerations() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [hidden]);
 
   useEffect(() => {
     let alive = true;
@@ -66,5 +66,22 @@ export function useGenerations() {
     [refresh],
   );
 
-  return { items, loading, error, refresh, add, remove };
+  /** Oculta o vuelve a mostrar varias (optimista: salen de esta lista al momento; si falla, se recarga). */
+  const setHidden = useCallback(
+    async (ids: string[], value: boolean) => {
+      const gone = new Set(ids);
+      setItems((prev) => prev.filter((g) => !gone.has(g.id)));
+      try {
+        const res = await studio.hide(ids, value);
+        if (res.skipped.length) await refresh();
+        return res;
+      } catch (e) {
+        await refresh();
+        throw e;
+      }
+    },
+    [refresh],
+  );
+
+  return { items, loading, error, refresh, add, remove, setHidden };
 }

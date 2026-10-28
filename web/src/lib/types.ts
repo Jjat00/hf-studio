@@ -94,6 +94,8 @@ export type Generation = {
   reserve_usd?: number | null;
   plan?: { provider: string; model?: string | null; official?: boolean; usd: number | null; kind?: string | null; reserve_usd?: number | null }[];
   attempts?: { provider: string; error_kind: string | null; error: string | null; at: string }[];
+  /** Oculta del historial y de los listados (solo se ve en /history/hidden). */
+  hidden?: boolean;
 };
 
 export type ProviderInfo = {

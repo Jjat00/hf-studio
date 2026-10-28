@@ -126,6 +126,8 @@ class Job(Base):
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     poll_delay: Mapped[float] = mapped_column(Float, default=2.0)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # Oculta del historial y de los listados (se ve solo en /history/hidden); sigue accesible por su id.
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Bloqueo optimista: cada escritura exige la versión leída. Así un sondeo o webhook tardío no pisa un
     # trabajo que otro proceso ya movió (p. ej. al proveedor de respaldo) y no se envía dos veces.
     # Las actualizaciones directas (`update(Job)`) deben subirla a mano: `version=Job.version + 1`.
@@ -221,6 +223,7 @@ ADDED_COLUMNS = {
     "api_clients": {"sees_all": "BOOLEAN NOT NULL DEFAULT 0"},
     "jobs": {
         "keep_source_audio": "BOOLEAN NOT NULL DEFAULT 0",
+        "hidden": "BOOLEAN NOT NULL DEFAULT 0",
         "provider": "VARCHAR(30) NOT NULL DEFAULT 'higgsfield'",
         "plan": "JSON",
         "plan_index": "INTEGER NOT NULL DEFAULT 0",

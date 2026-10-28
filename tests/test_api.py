@@ -606,3 +606,34 @@ async def test_generations_can_be_filtered_by_model_or_input_text(env):
     assert [g["input"]["prompt"] for g in found] == ["50% off"]
     assert len((await http.get("/v1/generations", params={"model": [T2V]})).json()["generations"]) == 3
     assert (await http.get("/v1/generations", params={"model": ["x/y"]})).json()["generations"] == []
+
+
+async def test_hidden_generations_leave_the_lists_but_not_their_links(env):
+    app, http, _ = env
+    ids = []
+    for i in range(3):
+        body = {
+            "model": T2V,
+            "input": {"prompt": f"p{i}"},
+            "confirm_unknown_cost": True,
+            "idempotency_key": f"h{i}",
+        }
+        ids.append((await http.post("/v1/generations", json=body)).json()["id"])
+    async with app.state.sessions() as s:
+        await s.execute(
+            update(Job).where(Job.id.in_(ids[:2])).values(status="completed", version=Job.version + 1)
+        )
+        await s.commit()
+    # La tercera sigue en curso: no se oculta.
+    res = (await http.post("/v1/generations/hide", json={"ids": ids})).json()
+    assert res == {"changed": sorted(ids[:2]), "skipped": [ids[2]]}
+    listed = [g["id"] for g in (await http.get("/v1/generations")).json()["generations"]]
+    assert listed == [ids[2]]
+    hidden = (await http.get("/v1/generations", params={"hidden": "true"})).json()["generations"]
+    assert sorted(g["id"] for g in hidden) == sorted(ids[:2]) and all(g["hidden"] for g in hidden)
+    # Por id (un lienzo, el detalle) se siguen viendo.
+    assert (await http.get(f"/v1/generations/{ids[0]}")).json()["hidden"] is True
+    by_ids = (await http.get("/v1/generations", params={"ids": ids[0]})).json()["generations"]
+    assert [g["id"] for g in by_ids] == [ids[0]]
+    await http.post("/v1/generations/hide", json={"ids": [ids[0]], "hidden": False})
+    assert len((await http.get("/v1/generations")).json()["generations"]) == 2
