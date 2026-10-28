@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-41%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+[![MCP](https://img.shields.io/badge/MCP-42%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
 **Español** · [English](README.md) · [Web y ejemplos](https://hf-studio.jato.run)
 
@@ -21,9 +21,10 @@ biblioteca.
 
 - **El proveedor más barato para cada video (y algunas imágenes):** el mismo modelo por Higgsfield, APIMart o KIE, cotizado en todos, con
   un respaldo seguro (ver [Más barato con varios proveedores](#más-barato-con-varios-proveedores)).
-- **Un solo lugar para 82 endpoints de Higgsfield** (Seedance, Kling, Wan, Hailuo, PixVerse, LTX, Grok Imagine,
+- **Un solo lugar para 91 endpoints de Higgsfield** (Seedance, Kling 4.0, Wan, Hailuo, PixVerse, LTX, Grok Imagine,
   Ideogram, Recraft…), que se buscan por lo que hacen (texto a video, fotograma inicial y final, edición de video,
-  transferencia de movimiento…) y no por marca.
+  transferencia de movimiento…) y no por marca, **más 156 modelos que solo venden APIMart y KIE** (Nano Banana,
+  GPT Image, Midjourney, Seedream, FLUX, Veo 3.1, Vidu, Runway…).
 - **Agentes que cotizan antes de gastar.** Toda herramienta MCP que inicia una generación de pago exige un `quote_id`
   de un solo uso, sacado de una cotización previa de esa misma petición, y el servidor le pide al agente que te
   muestre el costo y espere tu OK.
@@ -102,8 +103,10 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
 - **Apps de un clic:** reiluminar, cambiar paleta, cambio de cara, cambio de personaje, reencuadrar, reiluminar video,
   etalonar video y multiplicador de anuncios, cada una un preset de serie sobre un modelo del catálogo: subes,
   ajustas y generas.
-- **82 endpoints de Higgsfield** (66 de video, 15 de imagen y 1 de referencias personalizadas), cada uno con su JSON
-  Schema sacado de la documentación oficial (`hf-studio sync-catalog`).
+- **91 endpoints de Higgsfield** (73 de video, 17 de imagen y 1 de referencias personalizadas), cada uno con su JSON
+  Schema sacado de la documentación oficial (`hf-studio sync-catalog`; Kling 4.0, Genjutsu Light y AI Influencer, que
+  solo están en open.higgsfield.ai, se escriben a mano y el sync los conserva), y 156 modelos que solo venden APIMart y
+  KIE.
 - **Todas las capacidades de video e imagen:** texto a video, imagen a video, fotograma inicial y final, videos de
   referencia, edición y extensión de video, transferencia de movimiento, cambio de objetos y de estilo (Genjutsu: anime,
   stop motion, 3D… con el mismo movimiento y audio, y los estilos vigentes de Higgsfield), texto a imagen, edición de
@@ -266,7 +269,7 @@ se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se det
 mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
 `HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-Herramientas (41). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Herramientas (42). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
@@ -323,7 +326,7 @@ Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nom
   Apps (con los flujos publicados en `/flows/<id>`), Spaces (`/spaces`), Biblioteca (con detalle en
   `/history/<id>`), Uso (`/usage`: gasto por día, proveedor y modelo, y el saldo de cada proveedor), Modelos
   (`/models`) y MCP.
-- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 82 endpoints funcionan sin código
+- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 247 modelos funcionan sin código
   específico. El formato muestra un rectángulo con su proporción.
 - **Voz** (`/voice`): elige un video, marca el tramo sobre la línea de tiempo, busca una voz (tu cuenta o la
   biblioteca pública de ElevenLabs, con escucha previa), añade un efecto y decide cuánto del audio original se oye.
