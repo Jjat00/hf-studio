@@ -96,6 +96,8 @@ export type Generation = {
   attempts?: { provider: string; error_kind: string | null; error: string | null; at: string }[];
   /** Oculta del historial y de los listados (solo se ve en /history/hidden). */
   hidden?: boolean;
+  /** Marcada como favorita (filtro «Favoritas» de la biblioteca). */
+  favorite?: boolean;
 };
 
 export type ProviderInfo = {

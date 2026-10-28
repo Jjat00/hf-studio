@@ -637,3 +637,24 @@ async def test_hidden_generations_leave_the_lists_but_not_their_links(env):
     assert [g["id"] for g in by_ids] == [ids[0]]
     await http.post("/v1/generations/hide", json={"ids": [ids[0]], "hidden": False})
     assert len((await http.get("/v1/generations")).json()["generations"]) == 2
+
+
+async def test_favorites_are_marked_in_bulk_and_listed_on_their_own(env):
+    _, http, _ = env
+    ids = []
+    for i in range(3):
+        body = {
+            "model": T2V,
+            "input": {"prompt": f"f{i}"},
+            "confirm_unknown_cost": True,
+            "idempotency_key": f"fav{i}",
+        }
+        ids.append((await http.post("/v1/generations", json=body)).json()["id"])
+    res = (await http.post("/v1/generations/favorite", json={"ids": [*ids[:2], "nope"]})).json()
+    assert res == {"changed": sorted(ids[:2]), "skipped": ["nope"]}
+    favs = (await http.get("/v1/generations", params={"favorite": "true"})).json()["generations"]
+    assert sorted(g["id"] for g in favs) == sorted(ids[:2]) and all(g["favorite"] for g in favs)
+    assert len((await http.get("/v1/generations")).json()["generations"]) == 3  # siguen en la biblioteca
+    await http.post("/v1/generations/favorite", json={"ids": [ids[0]], "favorite": False})
+    favs = (await http.get("/v1/generations", params={"favorite": "true"})).json()["generations"]
+    assert [g["id"] for g in favs] == [ids[1]]

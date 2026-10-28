@@ -228,6 +228,11 @@ class HideIn(BaseModel):
     hidden: bool = True
 
 
+class FavoriteIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=200)
+    favorite: bool = True
+
+
 class BatchIn(BaseModel):
     items: list[BatchItem] = Field(min_length=1, max_length=20)
     dry_run: bool = Field(False, description="Solo cotiza: devuelve costo por ítem y total, sin generar")
@@ -533,6 +538,7 @@ def create_app(
             ],
             "attempts": job.attempts_log or [],
             "hidden": bool(job.hidden),
+            "favorite": bool(job.favorite),
             "created_at": iso(job.created_at),
             "submitted_at": iso(job.submitted_at),
             "finished_at": iso(job.finished_at),
@@ -932,6 +938,7 @@ def create_app(
         ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
         hidden: bool = Query(False, description="true: solo las ocultas (sin ids, las ocultas no se listan)"),
+        favorite: bool = Query(False, description="true: solo las favoritas"),
         model: Annotated[list[str] | None, Query(description="Modelos (repetible); OR con text")] = None,
         text: Annotated[
             list[str] | None, Query(description="Texto que contiene la entrada (repetible, OR)")
@@ -944,6 +951,8 @@ def create_app(
         else:
             # Pedidas por id (un lienzo, una espera) se devuelven aunque estén ocultas; en un listado, no.
             query = query.where(Job.hidden == hidden)
+        if favorite:
+            query = query.where(Job.favorite.is_(True))
         if status:
             query = query.where(Job.status == status)
         # Filtro de una página (p. ej. el historial de AI Influencer): cualquiera de los modelos o de los textos.
@@ -1189,6 +1198,19 @@ def create_app(
         jobs = list(await session.scalars(query))
         for job in jobs:
             job.hidden = body.hidden
+        await session.commit()
+        changed = {j.id for j in jobs}
+        return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}
+
+    @app.post("/v1/generations/favorite", tags=["generaciones"])
+    async def favorite_generations(body: FavoriteIn, session: Session, owner: Owner) -> dict:
+        """Marca (o desmarca, con `favorite: false`) varias generaciones como favoritas de la biblioteca."""
+        query = select(Job).where(Job.id.in_(set(body.ids)))
+        if not owner.sees_all:
+            query = query.where(Job.owner_id == owner.id)
+        jobs = list(await session.scalars(query))
+        for job in jobs:
+            job.favorite = body.favorite
         await session.commit()
         changed = {j.id for j in jobs}
         return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}

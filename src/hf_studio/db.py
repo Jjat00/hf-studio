@@ -128,6 +128,8 @@ class Job(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     # Oculta del historial y de los listados (se ve solo en /history/hidden); sigue accesible por su id.
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Marcada como favorita en la biblioteca (filtro «Favoritas»).
+    favorite: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Bloqueo optimista: cada escritura exige la versión leída. Así un sondeo o webhook tardío no pisa un
     # trabajo que otro proceso ya movió (p. ej. al proveedor de respaldo) y no se envía dos veces.
     # Las actualizaciones directas (`update(Job)`) deben subirla a mano: `version=Job.version + 1`.
@@ -224,6 +226,7 @@ ADDED_COLUMNS = {
     "jobs": {
         "keep_source_audio": "BOOLEAN NOT NULL DEFAULT 0",
         "hidden": "BOOLEAN NOT NULL DEFAULT 0",
+        "favorite": "BOOLEAN NOT NULL DEFAULT 0",
         "provider": "VARCHAR(30) NOT NULL DEFAULT 'higgsfield'",
         "plan": "JSON",
         "plan_index": "INTEGER NOT NULL DEFAULT 0",

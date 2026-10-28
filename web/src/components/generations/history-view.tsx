@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, EyeOff, Eye } from "lucide-react";
+import { Check, EyeOff, Eye, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
@@ -11,7 +11,7 @@ import { useI18n } from "@/components/i18n-provider";
 import { outputOf, reuseHref, studio, modelMap } from "@/lib/studio";
 import type { Generation, ModelSummary } from "@/lib/types";
 
-const FILTERS = ["all", "video", "image", "audio", "active", "failed"] as const;
+const FILTERS = ["all", "favorites", "video", "image", "audio", "active", "failed"] as const;
 
 /**
  * Biblioteca: todo lo generado (`/history`) o lo que se ocultó de ella (`hidden`, en `/history/hidden`, una página
@@ -22,9 +22,11 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   const { t } = useI18n();
   const h = t.history;
   const router = useRouter();
-  const { items, loading, error, remove, setHidden } = useGenerations({ hidden });
-  const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  // «Favoritas» se pide al servidor: aparecen aunque sean más antiguas que las últimas de la biblioteca.
+  const favorites = filter === "favorites";
+  const { items, loading, error, remove, setHidden, setFavorite } = useGenerations({ hidden, favorite: favorites });
+  const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -40,6 +42,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
         if (filter === "video" || filter === "image" || filter === "audio") return out === filter;
         if (filter === "active") return !g.terminal;
         if (filter === "failed") return g.terminal && g.status !== "completed";
+        if (filter === "favorites") return !!g.favorite;
         return true;
       }),
     [items, models, filter],
@@ -65,12 +68,12 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
     setPicked(new Set());
     setNotice(null);
   };
-  async function apply() {
+  async function apply(action: "hide" | "favorite") {
     if (!chosen.length) return;
     setBusy(true);
     setNotice(null);
     try {
-      const res = await setHidden(chosen, !hidden);
+      const res = action === "hide" ? await setHidden(chosen, !hidden) : await setFavorite(chosen, !favorites);
       setPicked(new Set());
       if (res.skipped.length) setNotice(h.skipped(res.skipped.length));
       else setSelecting(false);
@@ -122,7 +125,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
           ))}
         </div>
       ) : shown.length === 0 ? (
-        <p className="mt-16 text-center text-fg-3">{hidden ? h.hiddenNothing : h.nothing}</p>
+        <p className="mt-16 text-center text-fg-3">{hidden ? h.hiddenNothing : favorites ? h.favoritesNothing : h.nothing}</p>
       ) : (
         <div className="mt-6">
           <Masonry
@@ -138,7 +141,14 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
                   {/* Mientras se selecciona, la tarjeta es inerte: ni el puntero ni Tab llegan a sus controles (abrir,
                       reproducir, borrar); solo el botón de selección. */}
                   <div inert={selecting}>
-                    <GenerationCard g={g} layout="grid" models={models} onReuse={reuse} onDelete={remove} />
+                    <GenerationCard
+                      g={g}
+                      layout="grid"
+                      models={models}
+                      onReuse={reuse}
+                      onDelete={remove}
+                      onFavorite={(x) => void setFavorite([x.id], !x.favorite).catch(() => undefined)}
+                    />
                   </div>
                   {selecting && (
                     // Encima de la tarjeta: en modo selección un clic marca, no abre ni reproduce.
@@ -179,11 +189,22 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
           >
             {h.selectAll}
           </button>
+          {!hidden && (
+            <button
+              type="button"
+              disabled={!chosen.length || busy}
+              onClick={() => apply("favorite")}
+              className="ml-auto flex h-9 items-center gap-1.5 rounded-xl bg-surface-4 px-4 text-sm font-semibold text-fg disabled:opacity-40"
+            >
+              <Star className="size-4" />
+              {favorites ? h.unfavorite(chosen.length) : h.favorite(chosen.length)}
+            </button>
+          )}
           <button
             type="button"
             disabled={!chosen.length || busy}
-            onClick={apply}
-            className="ml-auto flex h-9 items-center gap-1.5 rounded-xl bg-lime px-4 text-sm font-semibold text-ink disabled:opacity-40"
+            onClick={() => apply("hide")}
+            className={clsx("flex h-9 items-center gap-1.5 rounded-xl bg-lime px-4 text-sm font-semibold text-ink disabled:opacity-40", hidden && "ml-auto")}
           >
             {hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
             {hidden ? h.unhide(chosen.length) : h.hide(chosen.length)}

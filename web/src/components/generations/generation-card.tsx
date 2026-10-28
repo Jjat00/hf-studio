@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, Play, RotateCcw, ShieldAlert, Trash2, X } from "lucide-react";
+import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, Play, RotateCcw, ShieldAlert, Star, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MediaViewer } from "@/components/generations/media-viewer";
@@ -108,12 +108,15 @@ export function GenerationCard({
   models,
   onReuse,
   onDelete,
+  onFavorite,
 }: {
   g: Generation;
   layout: "grid" | "list";
   models?: Map<string, ModelSummary>;
   onReuse?: (g: Generation) => void;
   onDelete?: (id: string) => void;
+  /** Marca o desmarca la generación como favorita (estrella). */
+  onFavorite?: (g: Generation) => void;
 }) {
   const { t, locale } = useI18n();
   const STAGE = t.generation.stage;
@@ -221,6 +224,11 @@ export function GenerationCard({
   const detailHref = `/history/${g.id}`;
   const actions = (
     <div className="flex items-center gap-1">
+      {onFavorite && (
+        <IconButton label={g.favorite ? t.generation.removeFavorite : t.generation.addFavorite} onClick={() => onFavorite(g)}>
+          <Star className={clsx("size-4", g.favorite && "fill-lime text-lime")} />
+        </IconButton>
+      )}
       <Link href={detailHref} title={t.history.detail.open} aria-label={t.history.detail.open} className={ICON_BUTTON}>
         <Info className="size-4" />
       </Link>

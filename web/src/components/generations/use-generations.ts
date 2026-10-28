@@ -8,7 +8,7 @@ import type { Generation } from "@/lib/types";
  * Historial del cliente con sondeo adaptativo: cada 2,5 s mientras haya trabajos activos,
  * cada 20 s en reposo. El servidor ya hace el backoff contra Higgsfield; esto solo lee la BD propia.
  */
-export function useGenerations({ hidden = false }: { hidden?: boolean } = {}) {
+export function useGenerations({ hidden = false, favorite = false }: { hidden?: boolean; favorite?: boolean } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export function useGenerations({ hidden = false }: { hidden?: boolean } = {}) {
 
   const refresh = useCallback(async () => {
     try {
-      const { generations } = await studio.list(80, hidden);
+      const { generations } = await studio.list(80, hidden, favorite);
       setItems(generations);
       setError(null);
       return generations;
@@ -26,7 +26,7 @@ export function useGenerations({ hidden = false }: { hidden?: boolean } = {}) {
     } finally {
       setLoading(false);
     }
-  }, [hidden]);
+  }, [hidden, favorite]);
 
   useEffect(() => {
     let alive = true;
@@ -83,5 +83,22 @@ export function useGenerations({ hidden = false }: { hidden?: boolean } = {}) {
     [refresh],
   );
 
-  return { items, loading, error, refresh, add, remove, setHidden };
+  /** Marca o desmarca favoritas (optimista; en la vista de favoritas, las que se quitan salen al momento). */
+  const setFavorite = useCallback(
+    async (ids: string[], value: boolean) => {
+      const touched = new Set(ids);
+      setItems((prev) =>
+        favorite && !value ? prev.filter((g) => !touched.has(g.id)) : prev.map((g) => (touched.has(g.id) ? { ...g, favorite: value } : g)),
+      );
+      try {
+        return await studio.favorite(ids, value);
+      } catch (e) {
+        await refresh();
+        throw e;
+      }
+    },
+    [refresh, favorite],
+  );
+
+  return { items, loading, error, refresh, add, remove, setHidden, setFavorite };
 }
