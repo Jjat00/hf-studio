@@ -83,7 +83,8 @@ elevenlabs/music-gen, y claude/assistant, que escribe texto para el prompt de ot
 ANTHROPIC_API_KEY). Una arista lleva la salida de un nodo a un campo de entrada de otro (targetHandle = clave
 del input_schema: prompt, image_url, video_url, audio_urls…). Una lista hace que el generador conectado corra
 una vez por elemento, y el lote baja en pares por la cadena; data.count (variantes) hace lo mismo con una sola
-entrada. update_space con flow publica el lienzo como formulario simple (/flows/<id>) y run_space lo corre
+entrada. Un claude/assistant con values.list_items = N (1 a 20) escribe N elementos y, conectado a una lista de
+texto (targetHandle "items"), la llena: el generador que sigue a la lista corre una vez por elemento. update_space con flow publica el lienzo como formulario simple (/flows/<id>) y run_space lo corre
 con inputs. Para correrlo en el servidor:
 estimate_space_run (precio de cada paso y total, con quote_id) → dile al usuario el total y espera su OK →
 run_space con ese quote_id (si falla de forma ambigua, repítelo con el mismo quote_id: devuelve la misma
@@ -965,7 +966,8 @@ def create_space(title: str, nodes: list[dict] | None = None, edges: list[dict] 
     nodes: [{id, type, position: {x, y}, data}] con type text (data.text), media (data.url de upload_media o
     use_output, data.kind image|video|audio), note (data.text), list (data.kind text|image|video|audio,
     data.items = [{id, value, checked}], hasta 20: textos o URLs propias; el generador conectado corre una vez
-    por elemento marcado) o generator (data.model = id del catálogo,
+    por elemento marcado; una lista de texto puede llenarla un claude/assistant con values.list_items = N,
+    conectándolo a ella con targetHandle "items") o generator (data.model = id del catálogo,
     data.values = ajustes de su input_schema, p. ej. {"prompt": "…", "duration": 5}; data.count de 1 a 4 lo
     repite como variantes). edges: [{id, source, target, targetHandle, sourceHandle?}]: targetHandle es la
     clave del campo de entrada del generador destino (prompt, image_url, end_image_url, image_urls, video_url,

@@ -19,6 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 NODE_TYPES = ("text", "media", "generator", "note", "list")
 LIST_KINDS = ("text", "image", "video", "audio")
 MAX_LIST_ITEMS = 20  # el lote del nodo usa /v1/generations/batch (máx. 20 ítems)
+# Una Lista de texto puede recibir por este puerto la salida de un Assistant en modo lista (`list_items`): sus
+# elementos pasan a ser los que escribió, uno por línea (como el modo «replace» de Magnific).
+LIST_INPUT = "items"
+ASSISTANT_MODEL = "claude/assistant"
 MEDIA_KINDS = ("image", "video", "audio")
 MAX_NODES = 300
 MAX_EDGES = 1000
@@ -45,6 +49,11 @@ class Share:
     def of(cls, graph: dict | None) -> Share:
         jobs, urls = graph_refs(graph)
         return cls(frozenset(jobs), frozenset(urls))
+
+
+def list_feeder(graph: dict, list_id: str) -> str | None:
+    """Assistant que llena una Lista (la única arista que puede entrar a ella), o None."""
+    return next((e["source"] for e in graph.get("edges", []) if e["target"] == list_id), None)
 
 
 def graph_refs(graph: dict | None) -> tuple[set[str], set[str]]:
@@ -250,7 +259,12 @@ def _normalize_list(node: Node, data: dict) -> dict:
         if not isinstance(value, str) or len(value) > limit:
             raise GraphError(f"Node {node.id}: list values are strings of at most {limit} characters")
         out.append({"id": item_id, "value": value, "checked": item.get("checked", True) is not False})
-    return {"kind": kind, "items": out}
+    result = {"kind": kind, "items": out}
+    # Generación del Assistant con la que se llenó por última vez: la UI no la vuelve a aplicar sobre lo editado.
+    filled = _optional_str(node, data, "filled_from", 64)
+    if filled:
+        result["filled_from"] = filled
+    return result
 
 
 def _normalize_data(node: Node) -> dict:
@@ -321,6 +335,26 @@ def _check_acyclic(nodes: list[Node], edges: list[Edge]) -> None:
         raise GraphError("Connections cannot form a loop")
 
 
+def _check_list_inputs(graph: Graph) -> None:
+    """Lo único que entra a una Lista es un Assistant, por `items`, y solo a una Lista de texto."""
+    nodes = {n.id: n for n in graph.nodes}
+    fed: set[str] = set()
+    for e in graph.edges:
+        target = nodes[e.target]
+        if target.type != "list":
+            continue
+        source = nodes[e.source]
+        if e.targetHandle != LIST_INPUT or (e.sourceHandle or "out") != "out":
+            raise GraphError(f"Connection {e.id}: a list only takes an assistant through {LIST_INPUT}")
+        if source.type != "generator" or source.data.get("model") != ASSISTANT_MODEL:
+            raise GraphError(f"Connection {e.id}: only an assistant can fill a list")
+        if target.data.get("kind") != "text":
+            raise GraphError(f"Connection {e.id}: an assistant fills a text list")
+        if e.target in fed:
+            raise GraphError(f"List {e.target} is filled by more than one assistant")
+        fed.add(e.target)
+
+
 def check_graph(raw: Any) -> dict:
     """Valida y normaliza un grafo. Devuelve solo los campos conocidos; lanza GraphError si no vale."""
     try:
@@ -344,6 +378,7 @@ def check_graph(raw: Any) -> dict:
             raise GraphError("A node cannot be connected to itself")
     for node in graph.nodes:
         node.data = _normalize_data(node)
+    _check_list_inputs(graph)
     _check_acyclic(graph.nodes, graph.edges)
     clean = graph.model_dump(exclude_none=True)
     if len(json.dumps(clean, separators=(",", ":"))) > MAX_GRAPH_BYTES:

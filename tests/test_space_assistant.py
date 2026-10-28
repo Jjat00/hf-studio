@@ -29,6 +29,17 @@ class FakeClaude:
         body = json.loads(request.content)
         if self.refuse:
             content, stop = [], "refusal"
+        elif body.get("output_config", {}).get(
+            "format"
+        ):  # modo lista: un arreglo JSON (con algo que limpiar)
+            items = [
+                "A paper boat\non a river",
+                "",
+                "A kite over the sea",
+                "A lantern in the fog",
+                "A fourth one",
+            ]
+            content, stop = [{"type": "text", "text": json.dumps({"items": items})}], "end_turn"
         else:
             content, stop = (
                 [{"type": "text", "text": "A paper boat drifts down a rainy street at dusk"}],
@@ -191,3 +202,107 @@ def test_the_quote_bounds_any_valid_input():
     q = assistant_quote({"prompt": prompt, "image_urls": ["https://x.test/a.png"] * 4})
     assert q["usd"] >= ((60000 + 4 * IMAGE_TOKENS) * 4 + MAX_TOKENS * 20) / 1_000_000
     assert assistant_quote({"prompt": "hi"})["usd"] > MAX_TOKENS * 20 / 1_000_000
+
+
+LIST_GRAPH = {
+    "nodes": [
+        {"id": "a", "type": "generator", "position": {"x": 0, "y": 0},
+         "data": {"model": "claude/assistant", "values": {"prompt": "Write video prompts", "list_items": 3}, "runs": []}},
+        {"id": "l", "type": "list", "position": {"x": 400, "y": 0}, "data": {"kind": "text", "items": []}},
+        {"id": "v", "type": "generator", "position": {"x": 800, "y": 0}, "data": {"model": T2V, "values": SETTINGS, "runs": []}},
+    ],
+    "edges": [
+        {"id": "e1", "source": "a", "target": "l", "sourceHandle": "out", "targetHandle": "items"},
+        {"id": "e2", "source": "l", "target": "v", "sourceHandle": "out", "targetHandle": "prompt"},
+    ],
+}  # fmt: skip
+
+
+async def test_in_list_mode_the_assistant_writes_one_item_per_line(claude_env):
+    app, http, claude = claude_env
+    body = {"model": "claude/assistant", "input": {"prompt": "Write prompts", "list_items": 3}}
+    est = (await http.post("/v1/estimate", json=body)).json()
+    done = await finish(
+        app, (await http.post("/v1/generations", json={**body, "max_usd": est["usd"]})).json()["id"]
+    )
+    assert done.status == "completed", done.error
+    text = (app.state.settings.storage_dir / "outputs" / done.id / done.files[0]["name"]).read_text()
+    # Sin saltos dentro de un elemento, sin vacíos y hasta `list_items`.
+    assert text.splitlines() == ["A paper boat on a river", "A kite over the sea", "A lantern in the fog"]
+    sent = json.loads(claude.requests[-1].content)
+    assert sent["output_config"]["format"]["type"] == "json_schema"
+    assert sent["output_config"]["effort"] == "medium" and "exactly 3 items" in sent["system"]
+
+
+async def test_only_an_assistant_fills_a_text_list(claude_env):
+    _, http, _ = claude_env
+    assert (await http.post("/v1/spaces", json={"graph": LIST_GRAPH})).status_code == 201
+    other = json.loads(json.dumps(LIST_GRAPH))
+    other["nodes"][0]["data"]["model"] = T2V
+    other["nodes"][0]["data"]["values"] = SETTINGS
+    images = json.loads(json.dumps(LIST_GRAPH))
+    images["nodes"][1]["data"]["kind"] = "image"
+    twice = json.loads(json.dumps(LIST_GRAPH))
+    twice["nodes"].append({**twice["nodes"][0], "id": "b"})
+    twice["edges"].append(
+        {"id": "e3", "source": "b", "target": "l", "sourceHandle": "out", "targetHandle": "items"}
+    )
+    for graph in (other, images, twice):
+        res = await http.post("/v1/spaces", json={"graph": graph})
+        assert res.status_code == 422 and res.json()["error"]["code"] == "invalid_graph"
+
+
+async def test_a_list_filled_by_the_assistant_runs_the_next_node_once_per_item(claude_env):
+    app, http, _ = claude_env
+    space = (await http.post("/v1/spaces", json={"graph": LIST_GRAPH})).json()
+    body = {"mode": "workflow", "version": space["version"]}
+    est = (await http.post(f"/v1/spaces/{space['id']}/runs", json={**body, "dry_run": True})).json()
+    # El lote mide lo que el Assistant va a escribir; cada paso se cotiza al llegar.
+    assert [s["node_id"] for s in est["steps"]] == ["a", "v#0", "v#1", "v#2"]
+    assert [s["status"] for s in est["steps"][1:]] == ["later"] * 3
+    run = (await http.post(f"/v1/spaces/{space['id']}/runs", json={**body, "max_total_usd": 20})).json()
+    runner = app.state.space_runner
+    await runner.tick(run["id"])
+    async with app.state.sessions() as s:
+        state = await s.get(SpaceRun, run["id"])
+        assert state.nodes["v#0"]["status"] == "pending"  # espera al Assistant
+        a_job = state.nodes["a"]["job_id"]
+    await finish(app, a_job)
+    await runner.tick(run["id"])
+    async with app.state.sessions() as s:
+        state = await s.get(SpaceRun, run["id"])
+        prompts = [(await s.get(Job, state.nodes[f"v#{i}"]["job_id"])).input["prompt"] for i in range(3)]
+    assert prompts == ["A paper boat on a river", "A kite over the sea", "A lantern in the fog"]
+
+
+async def test_the_assistant_that_fills_a_list_needs_its_size(claude_env):
+    _, http, _ = claude_env
+    graph = json.loads(json.dumps(LIST_GRAPH))
+    del graph["nodes"][0]["data"]["values"]["list_items"]
+    space = (await http.post("/v1/spaces", json={"graph": graph})).json()
+    res = await http.post(
+        f"/v1/spaces/{space['id']}/runs", json={"mode": "workflow", "version": 1, "dry_run": True}
+    )
+    assert res.status_code == 422 and "list items" in res.json()["error"]["message"]
+
+
+async def test_items_the_assistant_did_not_write_fail_without_blocking_the_rest(claude_env):
+    app, http, _ = claude_env
+    graph = json.loads(json.dumps(LIST_GRAPH))
+    graph["nodes"][0]["data"]["values"]["list_items"] = 5  # el Assistant simulado escribe solo 4
+    space = (await http.post("/v1/spaces", json={"graph": graph})).json()
+    run = (
+        await http.post(
+            f"/v1/spaces/{space['id']}/runs", json={"mode": "workflow", "version": 1, "max_total_usd": 20}
+        )
+    ).json()
+    runner = app.state.space_runner
+    await runner.tick(run["id"])
+    async with app.state.sessions() as s:
+        a_job = (await s.get(SpaceRun, run["id"])).nodes["a"]["job_id"]
+    await finish(app, a_job)
+    await runner.tick(run["id"])
+    async with app.state.sessions() as s:
+        nodes = (await s.get(SpaceRun, run["id"])).nodes
+    assert [nodes[f"v#{i}"]["status"] for i in range(5)] == ["running"] * 4 + ["failed"]
+    assert "wrote only 4 items" in nodes["v#4"]["error"]

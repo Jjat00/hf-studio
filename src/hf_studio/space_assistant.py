@@ -12,6 +12,7 @@ otro modelo ni reintentos automáticos: lo que se aprueba es lo único que se en
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,8 +21,8 @@ import anthropic
 
 from .config import Settings
 from .space_tools import ASSISTANT_PROVIDER, BackgroundProvider
+from .spaces import ASSISTANT_MODEL, MAX_LIST_ITEMS
 
-ASSISTANT_MODEL = "claude/assistant"
 MAX_TOKENS = 6000
 MAX_IMAGES = 4
 # USD por millón de tokens (entrada, salida), tarifa de API a 2026-09.
@@ -57,13 +58,45 @@ ASSISTANT_NODE = {
             "system": {"type": "string", "maxLength": 4000, "title": "System prompt"},
             "model_id": {"type": "string", "enum": list(CLAUDE_PRICES), "default": DEFAULT_CLAUDE},
             "effort": {"type": "string", "enum": ["low", "medium", "high"], "default": "medium"},
+            # Modo lista (como «as_list» de Magnific): escribe tantos elementos y su texto sale uno por línea.
+            # Una Lista conectada a su salida los recibe y el generador que sigue corre una vez por cada uno.
+            "list_items": {"type": "integer", "minimum": 1, "maximum": MAX_LIST_ITEMS, "title": "List items"},
         },
+    },
+}
+
+
+LIST_SYSTEM = (
+    "Answer with exactly {n} items in the `items` array, each one complete and self-contained (for example, one "
+    "ready-to-use prompt per item), with no numbering and nothing else."
+)
+LIST_FORMAT = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+        "required": ["items"],
+        "additionalProperties": False,
     },
 }
 
 
 def is_assistant(model_id: str | None) -> bool:
     return model_id == ASSISTANT_MODEL
+
+
+def list_lines(raw: str, limit: int) -> list[str]:
+    """Elementos de una respuesta en modo lista: cada uno en una sola línea (sin saltos), sin vacíos y hasta
+    `limit`. Así el texto guardado (uno por línea) se vuelve a partir sin ambigüedad."""
+    try:
+        items = json.loads(raw).get("items")
+    except (ValueError, AttributeError):
+        items = None
+    lines = [" ".join(i.split()) for i in (items if isinstance(items, list) else []) if isinstance(i, str)]
+    lines = [x for x in lines if x][:limit]
+    if not lines:
+        raise RuntimeError("Claude did not return a list")
+    return lines
 
 
 def assistant_quote(arguments: dict) -> dict:
@@ -118,10 +151,17 @@ class AnthropicJobs(BackgroundProvider):
             "max_tokens": MAX_TOKENS,
             "messages": [{"role": "user", "content": content}],
         }
-        if arguments.get("system"):
-            params["system"] = arguments["system"]
+        size = arguments.get("list_items")
+        system = [arguments.get("system") or "", LIST_SYSTEM.format(n=size) if size else ""]
+        if any(system):
+            params["system"] = "\n\n".join(x for x in system if x)
+        output_config: dict = {}
         if claude != "claude-haiku-4-5":  # Haiku 4.5 no acepta effort
-            params["output_config"] = {"effort": arguments.get("effort") or "medium"}
+            output_config["effort"] = arguments.get("effort") or "medium"
+        if size:
+            output_config["format"] = LIST_FORMAT
+        if output_config:
+            params["output_config"] = output_config
         # Sin reintentos del SDK: un error ambiguo (respuesta perdida) no reenvía una petición pagada fuera del
         # presupuesto aprobado; el paso falla visible y el usuario decide (revisión 69).
         client = anthropic.AsyncAnthropic(
@@ -143,6 +183,8 @@ class AnthropicJobs(BackgroundProvider):
             category = getattr(response.stop_details, "category", None) if response.stop_details else None
             raise RuntimeError(f"Claude declined this request ({category or 'policy'})")
         text = "".join(block.text for block in response.content if block.type == "text").strip()
+        if size and text:
+            text = "\n".join(list_lines(text, size))
         if not text:
             raise RuntimeError("Claude returned no text")
         out = folder / "0-text.txt"

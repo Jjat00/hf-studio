@@ -31,14 +31,18 @@ import { NodeBar, type BarOutput } from "./node-bar";
 import { useCanvasEdit } from "./use-canvas-edit";
 import { cleanInput, defaultsFor } from "@/lib/schema";
 import {
+  DEFAULT_LIST_ITEMS,
   incoming,
   inPorts,
+  LIST_INPUT,
+  listFeeder,
   KIND_COLOR,
   mediaFields,
   isAssistant,
   isDerived,
   isTool,
   listValues,
+  MAX_LIST_ITEMS,
   MAX_RUNS,
   splitStep,
   newId,
@@ -551,6 +555,36 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     [prepare, estimateFor, patchRun, setNodes, errorText, t, s, recordRuns],
   );
 
+  // Una Lista que llena un Assistant toma lo que escribió su generación elegida (un elemento por línea) cuando
+  // termina, venga de Generar o de una corrida. `filled_from` evita volver a pisar lo que el usuario editó.
+  const filling = useRef(new Set<string>());
+  useEffect(() => {
+    for (const list of nodes) {
+      if (list.type !== "list" || list.data.kind !== "text") continue;
+      const feeder = nodes.find((n): n is GeneratorNode => n.id === listFeeder(edges, list.id) && n.type === "generator");
+      const jobId = feeder ? selectedRun(feeder.data) : undefined;
+      const job = jobId ? jobs[jobId] : undefined;
+      if (!jobId || !job || job.status !== "completed" || !job.outputs[0] || list.data.filled_from === jobId) continue;
+      const key = `${list.id}:${jobId}`;
+      if (filling.current.has(key)) continue;
+      filling.current.add(key);
+      fetch(outputSrc(job.outputs[0]))
+        .then((res) => (res.ok ? res.text() : Promise.reject(new Error(String(res.status)))))
+        .then((text) => {
+          const values = text.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, MAX_LIST_ITEMS);
+          setNodes((ns) =>
+            ns.map((n) =>
+              n.id === list.id && n.type === "list" && n.data.filled_from !== jobId
+                ? { ...n, data: { ...n.data, items: values.map((value) => ({ id: newId("i"), value, checked: true })), filled_from: jobId } }
+                : n,
+            ),
+          );
+        })
+        .catch(() => undefined)
+        .finally(() => filling.current.delete(key));
+    }
+  }, [nodes, edges, jobs, setNodes]);
+
   const update = useCallback<SpaceCtx["update"]>(
     (nodeId, patch) => setNodes((ns) => ns.map((n) => (n.id === nodeId ? ({ ...n, data: { ...n.data, ...patch } } as SpaceNode) : n))),
     [setNodes],
@@ -603,7 +637,18 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       const ns = nodesRef.current;
       const src = ns.find((n) => n.id === c.source);
       const tgt = ns.find((n) => n.id === c.target);
-      if (!src || !tgt || tgt.type !== "generator" || !c.targetHandle) return false;
+      if (!src || !tgt || !c.targetHandle) return false;
+      // Un Assistant (su salida principal) puede llenar una Lista de texto, como el modo lista de Magnific.
+      if (tgt.type === "list")
+        return (
+          c.targetHandle === LIST_INPUT &&
+          tgt.data.kind === "text" &&
+          src.type === "generator" &&
+          isAssistant(src.data.model) &&
+          (c.sourceHandle ?? "out") === "out" &&
+          !reaches(edgesRef.current, c.target, c.source)
+        );
+      if (tgt.type !== "generator") return false;
       const kind = outKind(src, outputOf, c.sourceHandle);
       const detail = detailsRef.current[tgt.data.model];
       const port = detail && inPorts(detail).find((p) => p.key === c.targetHandle);
@@ -616,6 +661,19 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   const onConnect = useCallback(
     (c: Connection) => {
       const tgt = nodesRef.current.find((n) => n.id === c.target);
+      if (tgt?.type === "list" && c.targetHandle === LIST_INPUT) {
+        // Una Lista tiene un solo Assistant que la llena: el nuevo reemplaza al anterior. El Assistant pasa a
+        // modo lista (escribe tantos elementos) si aún no lo estaba.
+        setEdges((es) => [...es.filter((e) => e.target !== c.target), { id: newId("e"), source: c.source, target: c.target, sourceHandle: "out", targetHandle: LIST_INPUT }]);
+        setNodes((ns) =>
+          ns.map((n) =>
+            n.id === c.source && n.type === "generator" && n.data.values.list_items === undefined
+              ? { ...n, data: { ...n.data, values: { ...n.data.values, list_items: DEFAULT_LIST_ITEMS } } }
+              : n,
+          ),
+        );
+        return;
+      }
       if (!tgt || tgt.type !== "generator" || !c.targetHandle) return;
       const detail = detailsRef.current[tgt.data.model];
       const port = detail && inPorts(detail).find((p) => p.key === c.targetHandle);
@@ -630,7 +688,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         return [...next, { id: newId("e"), source: c.source, target: c.target, sourceHandle: c.sourceHandle ?? "out", targetHandle: c.targetHandle }];
       });
     },
-    [setEdges],
+    [setEdges, setNodes],
   );
 
   const center = useCallback((): Menu["at"] => {
@@ -690,6 +748,8 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       else if (choice.type === "list") node = { id: nid, type: "list", position, data: { kind: "text", items: [] } };
       else node = { id: nid, type: choice.type, position, data: { text: "" } };
       setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true }]);
+      // Una Lista nueva que sale de un Assistant queda llenada por él (y el Assistant, en modo lista).
+      if (choice.type === "list" && from) onConnect({ source: from.nodeId, sourceHandle: "out", target: nid, targetHandle: LIST_INPUT });
       if (choice.type !== "generator") return;
       loadDetail(choice.model).then(
         (d) => {
@@ -718,7 +778,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         () => undefined,
       );
     },
-    [setNodes, setEdges, patchHistory],
+    [setNodes, setEdges, patchHistory, onConnect],
   );
 
   // «/» abre el buscador de nodos (salvo escribiendo en un campo).
@@ -1323,6 +1383,10 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         key={menu ? `${menu.at.x}:${menu.at.y}:${menu.from?.nodeId ?? ""}:${menu.from?.handle ?? ""}` : "closed"}
         at={menu?.at ?? null}
         from={menu?.from?.kind ?? null}
+        fromAssistant={(() => {
+          const src = menu?.from && nodes.find((n) => n.id === menu.from!.nodeId);
+          return !!src && src.type === "generator" && isAssistant(src.data.model) && menu?.from?.handle === "out";
+        })()}
         models={list}
         onPick={(choice) => menu && addNode(choice, menu.flowAt, menu.from, menu.exact)}
         onClose={() => setMenu(null)}

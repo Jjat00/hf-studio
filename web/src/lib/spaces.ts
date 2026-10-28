@@ -29,9 +29,19 @@ export function isDerived(handle: string | null | undefined): handle is DerivedO
 }
 /** Lista para lotes: cada elemento marcado es una corrida del generador al que se conecta. */
 export type ListItem = { id: string; value: string; checked: boolean };
-export type ListData = { kind: PortKind; items: ListItem[] };
+/** `filled_from`: generación del Assistant con la que se llenó por última vez (no se vuelve a aplicar). */
+export type ListData = { kind: PortKind; items: ListItem[]; filled_from?: string };
 /** Elementos por lista (mismo límite que la API y que /v1/generations/batch). */
 export const MAX_LIST_ITEMS = 20;
+/** Puerto por el que un Assistant en modo lista llena una Lista de texto (mismo nombre que la API). */
+export const LIST_INPUT = "items";
+/** Elementos que escribe por defecto un Assistant al conectarlo a una Lista (como los 8 de Magnific). */
+export const DEFAULT_LIST_ITEMS = 8;
+
+/** Assistant que llena una Lista (la única conexión que puede entrar a ella), o undefined. */
+export function listFeeder(edges: Edge[], listId: string) {
+  return edges.find((e) => e.target === listId)?.source;
+}
 
 export type TextNode = Node<TextData, "text">;
 export type NoteNode = Node<NoteData, "note">;
@@ -191,7 +201,14 @@ export function normalizeNode(n: SpaceNode): SpaceNode {
     };
   if (n.type === "text" || n.type === "note") return { ...n, data: { ...n.data, text: typeof data.text === "string" ? data.text : "" } } as SpaceNode;
   if (n.type === "list")
-    return { ...n, data: { kind: (data.kind as PortKind) ?? "text", items: Array.isArray(data.items) ? (data.items as ListItem[]) : [] } };
+    return {
+      ...n,
+      data: {
+        kind: (data.kind as PortKind) ?? "text",
+        items: Array.isArray(data.items) ? (data.items as ListItem[]) : [],
+        ...(typeof data.filled_from === "string" ? { filled_from: data.filled_from } : {}),
+      },
+    };
   return n;
 }
 

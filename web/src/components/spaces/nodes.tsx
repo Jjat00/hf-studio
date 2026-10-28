@@ -12,7 +12,7 @@ import { ModelPicker } from "@/components/studio/model-picker";
 import type { Dict } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
 import { humanize, type Field } from "@/lib/schema";
-import { DERIVED_OUTPUTS, inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, MAX_LIST_ITEMS, MAX_VARIANTS, newId, settingFields, validValues, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
+import { DERIVED_OUTPUTS, inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, LIST_INPUT, listFeeder, MAX_LIST_ITEMS, MAX_VARIANTS, newId, settingFields, validValues, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
 import { costShort, modelLabel, outputSrc, studio, uniqueModels } from "@/lib/studio";
 import type { ModelDetail, Output } from "@/lib/types";
 import { selectedRun, useSpace } from "./context";
@@ -523,12 +523,14 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
 export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
   const { t } = useI18n();
   const s = t.spaces;
-  const { update } = useSpace();
+  const { update, edges } = useSpace();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const kind = data.kind;
+  // Una Lista de texto puede llenarla un Assistant en modo lista (puerto de entrada a la izquierda).
+  const fed = !!listFeeder(edges, id);
   const full = data.items.length >= MAX_LIST_ITEMS;
   const checked = data.items.filter((i) => i.checked && i.value).length;
   const setItems = (items: ListItem[]) => update(id, { items });
@@ -565,7 +567,7 @@ export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
         {checked > 1 && <span className="font-normal text-fg-3">· {s.listBatch(checked)}</span>}
       </Title>
       <Card selected={selected} className="relative p-2.5">
-        {data.items.length === 0 && (
+        {data.items.length === 0 && !fed && (
           <div className="mb-2 grid grid-cols-4 gap-1">
             {(["text", "image", "video", "audio"] as const).map((k) => (
               <button
@@ -579,7 +581,11 @@ export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
             ))}
           </div>
         )}
-        {data.items.length === 0 && <p className="mb-2 px-1 text-[11px] leading-snug text-fg-4">{s.listEmptyHint}</p>}
+        {fed ? (
+          <p className="mb-2 px-1 text-[11px] leading-snug text-fg-4">{data.items.length ? s.listFed : s.listFedEmpty}</p>
+        ) : (
+          data.items.length === 0 && <p className="mb-2 px-1 text-[11px] leading-snug text-fg-4">{s.listEmptyHint}</p>
+        )}
         <div className="nowheel thin-scrollbar flex max-h-72 flex-col gap-1.5 overflow-y-auto">
           {data.items.map((item, i) => (
             <div key={item.id} className="group flex items-start gap-1.5 rounded-lg bg-surface-3 p-1.5">
@@ -637,6 +643,7 @@ export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
         </div>
         {full && <p className="mt-1 text-[11px] text-fg-3">{s.listFull(MAX_LIST_ITEMS)}</p>}
         {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
+        {kind === "text" && <Dot kind="text" type="target" id={LIST_INPUT} />}
         <Dot kind={kind} type="source" id="out" />
       </Card>
       {picking && (kind === "image" || kind === "video") && <CreationsPicker kind={kind} onPick={(url) => add(url)} onClose={() => setPicking(false)} />}

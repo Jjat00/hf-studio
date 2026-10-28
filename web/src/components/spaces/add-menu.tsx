@@ -80,12 +80,15 @@ function loadPinned(): string[] {
 export function AddMenu({
   at,
   from,
+  fromAssistant = false,
   models,
   onPick,
   onClose,
 }: {
   at: { x: number; y: number } | null;
   from: PortKind | null;
+  /** La conexión sale de un Assistant: también puede llenar una Lista nueva. */
+  fromAssistant?: boolean;
   models: ModelSummary[];
   onPick: (choice: AddChoice) => void;
   onClose: () => void;
@@ -115,7 +118,9 @@ export function AddMenu({
     const textMatch = (i: Pick<Item, "title" | "hint">) => !query || fold(`${i.title} ${i.hint}`).includes(query);
 
     const base: Item[] = from
-      ? []
+      ? fromAssistant
+        ? [{ key: "list", choice: { type: "list" }, icon: ListChecks, title: s.addList, hint: s.addListHint, group: s.groupBasics, tab: "utility" }]
+        : []
       : [
           { key: "text", choice: { type: "text" }, icon: Type, title: s.addText, hint: s.addTextHint, group: s.groupBasics, tab: "utility" },
           { key: "media", choice: { type: "media" }, icon: Upload, title: s.addMedia, hint: s.addMediaHint, group: s.groupBasics, tab: "utility" },
@@ -152,7 +157,7 @@ export function AddMenu({
     const pins = all.filter((i) => pinned.includes(i.key)).map((i) => ({ ...i, key: `pin:${i.key}`, group: s.groupPinned }));
     const order = [s.groupBasics, s.groupAssets, s.groupActions, s.assistantGroup, s.tools, s.audioGroup, s.addImage, s.addVideo];
     return [...pins, ...order.flatMap((g) => all.filter((x) => x.group === g))];
-  }, [from, models, q, tab, locale, s, pinned]);
+  }, [from, fromAssistant, models, q, tab, locale, s, pinned]);
 
   useEffect(() => {
     if (!at) return;

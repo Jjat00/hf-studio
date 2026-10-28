@@ -26,7 +26,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from .db import TERMINAL, ApiClient, Job, Space, SpaceRun, utcnow
 from .providers.base import ProviderError
 from .service import ServiceError
-from .spaces import DERIVED_OUTPUTS, Share, graph_refs
+from .spaces import DERIVED_OUTPUTS, Share, graph_refs, list_feeder
 
 log = logging.getLogger("hf_studio.space_runs")
 
@@ -161,6 +161,22 @@ def run_scope(graph: dict, mode: str, start: str | None) -> list[str]:
     return [i for i in order if i in reach]
 
 
+def filled_lists(graph: dict, texts: dict[str, str]) -> dict:
+    """Copia del grafo con las Listas que llenan Assistants de esta corrida (`texts`: id del Assistant → su
+    texto, un elemento por línea). Las demás Listas quedan como están en el lienzo."""
+    if not texts:
+        return graph
+    out = {**graph, "nodes": []}
+    for node in graph["nodes"]:
+        feeder = list_feeder(graph, node["id"]) if node["type"] == "list" else None
+        if feeder in texts:
+            lines = [x.strip() for x in texts[feeder].splitlines() if x.strip()]
+            items = [{"id": f"a{k}", "value": v, "checked": True} for k, v in enumerate(lines)]
+            node = {**node, "data": {**node["data"], "items": items}}
+        out["nodes"].append(node)
+    return out
+
+
 def upstream(graph: dict, node_id: str) -> list[str]:
     return [e["source"] for e in graph["edges"] if e["target"] == node_id]
 
@@ -184,6 +200,7 @@ def run_steps(graph: dict, mode: str, start: str | None, output_of: Callable[[st
     generador con variantes (`count`) hace lo mismo con su propia entrada repetida."""
     nodes = {n["id"]: n for n in graph["nodes"]}
     scope = run_scope(graph, mode, start)
+    in_scope = set(scope)
     # Un nodo en lote lleva índice aunque su lote tenga un solo elemento: así resuelve el valor de la Lista
     # igual que con varios (revisión 69).
     fan: dict[str, int] = {}
@@ -191,7 +208,16 @@ def run_steps(graph: dict, mode: str, start: str | None, output_of: Callable[[st
         sizes = set()
         count = nodes[node_id]["data"].get("count") or 1
         for src in upstream(graph, node_id):
-            if nodes[src]["type"] == "list":
+            feeder = list_feeder(graph, src) if nodes[src]["type"] == "list" else None
+            if feeder in in_scope:
+                # La Lista la llena un Assistant de esta corrida: el lote mide lo que le toca escribir.
+                size = nodes[feeder]["data"].get("values", {}).get("list_items")
+                if not isinstance(size, int) or size < 1:
+                    raise NodeInputError(f"Set how many list items the assistant {feeder} writes")
+                if feeder in fan:
+                    raise NodeInputError(f"The assistant {feeder} fills a list: it cannot run as a batch")
+                sizes.add(size)
+            elif nodes[src]["type"] == "list":
                 values = list_values(nodes[src])
                 if not values:
                     raise NodeInputError(f"The list connected to {node_id} has no checked items")
@@ -217,7 +243,10 @@ def step_deps(graph: dict, steps: Iterable[str], step: str) -> list[str]:
     known = set(steps)
     node_id, item = split_step(step)
     deps = []
-    for src in upstream(graph, node_id):
+    sources = upstream(graph, node_id)
+    # A través de una Lista llenada por un Assistant: el paso espera a que el Assistant escriba.
+    sources += [f for f in (list_feeder(graph, src) for src in sources) if f]
+    for src in sources:
         if item is not None and f"{src}#{item}" in known:
             deps.append(f"{src}#{item}")
         elif src in known:
@@ -259,6 +288,8 @@ async def resolve_input(
 
         def from_list(src: dict) -> str:
             values = list_values(src)
+            if item is not None and item >= len(values) and list_feeder(graph, src["id"]):
+                raise NodeInputError(f"The assistant wrote only {len(values)} items for the list {src['id']}")
             if item is None or item >= len(values):
                 raise NodeInputError(f"The list {src['id']} feeds a batch: run it from the node or as a run")
             return values[item]
@@ -585,8 +616,20 @@ class SpaceRunner:
             return selected_run(graph_nodes[src]["data"])
 
         try:
+            graph = run.graph
+            if self.hooks.output_text:
+                # Las Listas que llena un Assistant de esta corrida toman lo que escribió (ya terminó: es su
+                # dependencia).
+                texts = {}
+                for n in graph["nodes"]:
+                    feeder = list_feeder(graph, n["id"]) if n["type"] == "list" else None
+                    if feeder in nodes and nodes[feeder].get("job_id") and nodes[feeder]["status"] == "done":
+                        texts[feeder] = await self.hooks.output_text(
+                            session, owner, nodes[feeder]["job_id"], share
+                        )
+                graph = filled_lists(graph, texts)
             arguments = await resolve_input(
-                run.graph,
+                graph,
                 node_id,
                 schema,
                 self.hooks.output_of,
