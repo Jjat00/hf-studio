@@ -12,7 +12,7 @@ function claim(a: HTMLAudioElement) {
 }
 
 /** Video en bucle y sin sonido que solo se reproduce cuando está a la vista. */
-export function LoopVideo({ src, poster, className }: { src: string; poster: string; className?: string }) {
+export function LoopVideo({ src, poster, className, label }: { src: string; poster: string; className?: string; label?: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const v = ref.current;
@@ -21,7 +21,7 @@ export function LoopVideo({ src, poster, className }: { src: string; poster: str
     io.observe(v);
     return () => io.disconnect();
   }, []);
-  return <video ref={ref} src={src} poster={poster} muted loop playsInline preload="none" className={className} />;
+  return <video ref={ref} src={src} poster={poster} aria-label={label} muted loop playsInline preload="none" className={className} />;
 }
 
 function Bars({ on }: { on: boolean }) {

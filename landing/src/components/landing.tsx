@@ -184,35 +184,35 @@ function Promo() {
   );
 }
 
-type Item = { type: "video" | "image"; src: string; tag: string; model: string; aspect: string };
+type Item = { type: "video" | "image"; src: string; tag: string; model: string; aspect: string; alt: { es: string; en: string } };
 const TALL = "aspect-[9/16]";
 const WIDE = "aspect-video";
 const EXAMPLES: Item[] = [
-  { type: "video", src: "soda-producto", model: "Kling O3", tag: "video-reference", aspect: TALL },
-  { type: "video", src: "tinta", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE },
-  { type: "video", src: "moto-callejon", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
-  { type: "image", src: "mohicano", model: "Z-Image Turbo", tag: "text-to-image", aspect: WIDE },
-  { type: "video", src: "frankenstein", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
-  { type: "video", src: "anime", model: "Seedance 2.5", tag: "video-edit", aspect: WIDE },
-  { type: "video", src: "frappe-ugc", model: "Kling O3", tag: "first-last-frame", aspect: TALL },
-  { type: "video", src: "cafe", model: "Kling 3.0 Pro", tag: "image-to-video", aspect: WIDE },
-  { type: "video", src: "granizado", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
-  { type: "image", src: "tienda-chicle", model: "Nano Banana 2", tag: "image-edit", aspect: TALL },
-  { type: "video", src: "ugc-sofa", model: "Kling 3.0 Turbo", tag: "text-to-video", aspect: TALL },
-  { type: "video", src: "ciudad", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE },
-  { type: "video", src: "boba-impacto", model: "PixVerse V6", tag: "image-to-video", aspect: TALL },
-  { type: "video", src: "crochet", model: "Genjutsu Restyle", tag: "restyle", aspect: "aspect-[2/3]" },
-  { type: "video", src: "auto-cansada", model: "Kling Omni", tag: "first-last-frame", aspect: TALL },
-  { type: "video", src: "soda-ugc", model: "Wan 3.0", tag: "reference-to-video", aspect: TALL },
-  { type: "video", src: "frankenstein-ojo", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
-  { type: "video", src: "moto-lluvia", model: "PixVerse V6", tag: "image-to-video", aspect: TALL },
-  { type: "video", src: "granizado-macro", model: "Kling 3.0", tag: "image-to-video", aspect: TALL },
+  { type: "video", src: "soda-producto", model: "Kling O3", tag: "video-reference", aspect: TALL, alt: { es: "Soda roja con humo en un bar con luces moradas", en: "Red soda with smoke in a bar with purple lights" } },
+  { type: "video", src: "tinta", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE, alt: { es: "Tinta de colores que se expande dentro de una esfera", en: "Colored ink blooming inside a sphere" } },
+  { type: "video", src: "moto-callejon", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Motociclista que acelera por un callejón mojado", en: "Motorcyclist speeding down a wet alley" } },
+  { type: "image", src: "mohicano", model: "Z-Image Turbo", tag: "text-to-image", aspect: WIDE, alt: { es: "Hombre con cresta rosa en tres poses de casting", en: "Man with a pink mohawk in three casting poses" } },
+  { type: "video", src: "frankenstein", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "El monstruo de Frankenstein se acerca a la cámara", en: "Frankenstein's monster leaning toward the camera" } },
+  { type: "video", src: "anime", model: "Seedance 2.5", tag: "video-edit", aspect: WIDE, alt: { es: "Video real convertido en anime", en: "Live video turned into anime" } },
+  { type: "video", src: "frappe-ugc", model: "Kling O3", tag: "first-last-frame", aspect: TALL, alt: { es: "Mujer bebiendo un frappé en una cafetería", en: "Woman drinking a frappé in a café" } },
+  { type: "video", src: "cafe", model: "Kling 3.0 Pro", tag: "first-last-frame", aspect: WIDE, alt: { es: "Recorrido por una cafetería cálida con lámparas de mimbre", en: "Walk through a warm café with wicker lamps" } },
+  { type: "video", src: "granizado", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Granizado de Halloween con un ojo de gomita", en: "Halloween shaved ice with a gummy eyeball" } },
+  { type: "image", src: "tienda-chicle", model: "Nano Banana 2", tag: "image-edit", aspect: TALL, alt: { es: "Mujer haciendo una bomba de chicle en una tienda de dulces", en: "Woman blowing a bubblegum bubble in a candy shop" } },
+  { type: "video", src: "ugc-sofa", model: "Kling 3.0 Turbo", tag: "text-to-video", aspect: TALL, alt: { es: "Joven en el sofá mirando su teléfono, estilo UGC", en: "Young man on a couch looking at his phone, UGC style" } },
+  { type: "video", src: "ciudad", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE, alt: { es: "Ciudad de neón de noche", en: "Neon city at night" } },
+  { type: "video", src: "boba-impacto", model: "PixVerse V6", tag: "image-to-video", aspect: TALL, alt: { es: "Bolas de boba que estallan en un vaso azul con hielo", en: "Boba pearls bursting into a blue iced cup" } },
+  { type: "video", src: "crochet", model: "Genjutsu Restyle", tag: "restyle", aspect: "aspect-[2/3]", alt: { es: "Persona convertida en muñeco de crochet que baila", en: "Person turned into a dancing crochet doll" } },
+  { type: "video", src: "auto-cansada", model: "Kling Omni", tag: "image-to-video", aspect: TALL, alt: { es: "Mujer cansada apoyada en la puerta del auto con su teléfono", en: "Tired woman resting against a car door with her phone" } },
+  { type: "video", src: "soda-ugc", model: "Wan 3.0", tag: "reference-to-video", aspect: TALL, alt: { es: "Mujer presentando una soda roja", en: "Woman presenting a red soda" } },
+  { type: "video", src: "frankenstein-ojo", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Primer plano del ojo verde del monstruo que parpadea", en: "Close-up of the monster's green eye blinking" } },
+  { type: "video", src: "moto-lluvia", model: "PixVerse V6", tag: "image-to-video", aspect: TALL, alt: { es: "Moto que corre bajo la lluvia salpicando agua", en: "Motorcycle racing through the rain throwing spray" } },
+  { type: "video", src: "granizado-macro", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Macro de colmillos de gomita y almíbar oscuro", en: "Macro of gummy fangs and dark syrup" } },
 ];
 
 /** Capacidades con una generación real de los ejemplos en vez de la ilustración (las demás conservan su arte). */
 const CAP_MEDIA: Record<string, { type: "video" | "image"; src: string; position?: string }> = {
   "text-to-video": { type: "video", src: "ugc-sofa", position: "object-[50%_40%]" },
-  frames: { type: "video", src: "auto-cansada", position: "object-[50%_45%]" },
+  frames: { type: "video", src: "cafe" },
   references: { type: "video", src: "soda-ugc" },
   "video-edit": { type: "video", src: "anime" },
   "object-swap": { type: "video", src: "crochet", position: "object-[50%_60%]" },
@@ -221,7 +221,7 @@ const CAP_MEDIA: Record<string, { type: "video" | "image"; src: string; position
 };
 
 function Examples() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return (
     <section id="ejemplos" className="mx-auto w-full max-w-[1400px] scroll-mt-20 px-4">
       <div className="mb-8 max-w-2xl">
@@ -233,10 +233,10 @@ function Examples() {
         {EXAMPLES.map((e) => (
           <figure key={e.src} className="group relative mb-4 break-inside-avoid overflow-hidden rounded-[20px] bg-surface-3">
             {e.type === "video" ? (
-              <LoopVideo src={`${M}/${e.src}.mp4`} poster={`${M}/${e.src}.jpg`} className={clsx("w-full object-cover", e.aspect)} />
+              <LoopVideo src={`${M}/${e.src}.mp4`} poster={`${M}/${e.src}.jpg`} label={e.alt[locale]} className={clsx("w-full object-cover", e.aspect)} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={`${M}/${e.src}.webp`} alt="" loading="lazy" className={clsx("w-full object-cover", e.aspect)} />
+              <img src={`${M}/${e.src}.webp`} alt={e.alt[locale]} loading="lazy" className={clsx("w-full object-cover", e.aspect)} />
             )}
             <figcaption className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/80 to-transparent p-3 pt-10">
               <span className="rounded-lg bg-black/50 px-2 py-1 text-[13px] font-semibold backdrop-blur">{e.model}</span>
