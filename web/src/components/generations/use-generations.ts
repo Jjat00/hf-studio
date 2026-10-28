@@ -8,9 +8,10 @@ import type { Generation } from "@/lib/types";
  * Historial del cliente con sondeo adaptativo: cada 2,5 s mientras haya trabajos activos,
  * cada 20 s en reposo. El servidor ya hace el backoff contra Higgsfield; esto solo lee la BD propia.
  *
- * Cada lectura lleva un número y solo se aplica si es la más nueva y empezó después del último cambio de la lista
- * (otra consulta u otra marca): una respuesta lenta de antes no deshace lo que se ve ahora. Los cambios (ocultar,
- * favoritas, borrar) se aplican al momento, se envían en orden y al terminar se reconcilian con el servidor.
+ * Cada lectura lleva un número y solo se aplica si es de la consulta visible, la más nueva y posterior al último
+ * cambio de la lista: una respuesta lenta de antes o de otro filtro no deshace lo que se ve ahora. Los cambios
+ * (ocultar, favoritas, borrar) se aplican al momento, se envían en orden y, hasta que el servidor los confirma, se
+ * vuelven a aplicar sobre cualquier lectura; al terminar, se relee la consulta vigente.
  */
 export function useGenerations({ hidden = false, favorite = false }: { hidden?: boolean; favorite?: boolean } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
@@ -21,6 +22,11 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   const applied = useRef(0);
   const changedAt = useRef(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  // Cambios enviados y aún sin confirmar (en orden): se aplican encima de lo que llegue del servidor.
+  const pending = useRef(new Map<number, (prev: Generation[]) => Generation[]>());
+  const changes = useRef(0);
+  const visible = useRef("");
+  const latestRefresh = useRef<() => Promise<Generation[] | null>>(async () => null);
 
   // Otra consulta (otro filtro): no se muestra la lista de la anterior como si fuera de esta.
   const query = `${hidden}|${favorite}`;
@@ -33,16 +39,17 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
 
   const refresh = useCallback(async () => {
     const id = ++asked.current;
+    const mine = `${hidden}|${favorite}`;
     try {
       const { generations } = await studio.list(80, hidden, favorite);
-      if (id <= applied.current || id <= changedAt.current) return generations;
+      if (mine !== visible.current || id <= applied.current || id <= changedAt.current) return generations;
       applied.current = id;
-      setItems(generations);
+      setItems([...pending.current.values()].reduce((list, apply) => apply(list), generations));
       setError(null);
       setLoading(false);
       return generations;
     } catch (e) {
-      if (id > applied.current && id > changedAt.current) {
+      if (mine === visible.current && id > applied.current && id > changedAt.current) {
         setError(e instanceof Error ? e.message : String(e));
         setLoading(false);
       }
@@ -56,6 +63,8 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   }, []);
 
   useEffect(() => {
+    visible.current = `${hidden}|${favorite}`;
+    latestRefresh.current = refresh;
     invalidate();
     let alive = true;
     const loop = async () => {
@@ -69,7 +78,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       alive = false;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [refresh, invalidate]);
+  }, [refresh, invalidate, hidden, favorite]);
 
   /** Inserta una generación recién creada y acelera el siguiente sondeo. */
   const add = useCallback(
@@ -90,18 +99,22 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
    * (bien o mal), se descarta lo leído mientras tanto y se vuelve a leer el estado confirmado. */
   const change = useCallback(
     <T,>(optimistic: (prev: Generation[]) => Generation[], send: () => Promise<T>): Promise<T> => {
+      const key = ++changes.current;
+      pending.current.set(key, optimistic);
       invalidate();
       setItems(optimistic);
       const run = queue.current.then(send, send);
       queue.current = run.catch(() => undefined);
       const settle = () => {
+        // Confirmado (o rechazado): deja de reaplicarse y se relee la consulta que se ve ahora.
+        pending.current.delete(key);
         invalidate();
-        void refresh();
+        void latestRefresh.current();
       };
       run.then(settle, settle);
       return run;
     },
-    [invalidate, refresh],
+    [invalidate],
   );
 
   /** Borra del historial una generación terminada. */
