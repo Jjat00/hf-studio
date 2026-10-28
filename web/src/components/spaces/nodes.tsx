@@ -3,10 +3,10 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, FileAudio, ImageIcon, ListChecks, Loader2, Maximize2, Minus, Play, Plus, StickyNote, Type, Upload, Video, X } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
+import { ApprovalActions } from "@/components/generations/generation-card";
 import { CreationsPicker } from "@/components/studio/creations-picker";
 import { ModelPicker } from "@/components/studio/model-picker";
 import type { Dict } from "@/lib/i18n";
@@ -493,9 +493,12 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
           {runNodes[id]?.status === "failed" && runNodes[id]?.error && <p className="mt-1.5 text-[12px] text-danger">{runNodes[id].error}</p>}
           {confirming && <p className="mt-1.5 text-[12px] text-warning">{s.unknownCost}</p>}
           {job && !job.terminal && job.status === "awaiting_approval" && !runNodes[id] && (
-            <Link href={`/history/${job.id}`} className="nodrag mt-1.5 block text-[12px] text-lime hover:underline">
-              {s.openInHistory}
-            </Link>
+            // Se aprueba aquí mismo, sin salir del lienzo: el motivo, el precio nuevo y los botones.
+            <div className="nodrag mt-1.5 rounded-lg bg-warning/10 p-2">
+              <p className="text-[12px] font-semibold text-warning">{t.approval.title}</p>
+              {job.error && <p className="mt-0.5 line-clamp-3 text-[11px] leading-snug text-fg-3">{job.error}</p>}
+              <ApprovalActions g={job} className="mt-1.5 flex-wrap" />
+            </div>
           )}
         </div>
         {outKind === "video" && (

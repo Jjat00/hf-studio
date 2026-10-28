@@ -186,6 +186,8 @@ async def test_a_more_expensive_fallback_waits_for_approval(env):
     assert state["status"] == "awaiting_approval" and "KIE can do it for 1.0250 USD" in state["error"]
     assert state["provider"] == "kie" and state["cost_usd"] == 1.025
     assert fakes.sent["kie"] == []
+    pending = (await http.get("/v1/approvals")).json()  # suelta: sin corrida, se aprueba con /approve
+    assert pending["total"] == 1 and pending["generations"][0]["space_run"] is None
     r = await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.0})
     assert r.status_code == 409  # cuesta 1,025: más de lo que se aprueba
     approved = (await http.post(f"/v1/generations/{job['id']}/approve", json={"max_usd": 1.03})).json()

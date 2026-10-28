@@ -27,6 +27,9 @@ const LEGACY_MODELS: Record<string, string> = {
 };
 
 /** Modelos por id, incluidos los ids viejos de `LEGACY_MODELS`. */
+/** Generación en espera de aprobación; un paso de una corrida de Spaces se aprueba desde su corrida. */
+export type PendingApproval = Generation & { space_run: { run_id: string; space_id: string; title: string } | null };
+
 export function modelMap(list: ModelSummary[]): Map<string, ModelSummary> {
   const map = new Map(list.map((m) => [m.id, m]));
   for (const [old, current] of Object.entries(LEGACY_MODELS)) {
@@ -186,8 +189,8 @@ export const studio = {
     }),
   importElevenlabs: () => call<{ imported: number; skipped: number }>("/v1/sounds/import-elevenlabs", { method: "POST" }),
   list: (limit = 60) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}`),
-  /** Generaciones pausadas porque el siguiente proveedor cuesta más de lo aprobado (aviso global de la barra). */
-  awaitingApproval: () => call<{ generations: Generation[] }>("/v1/generations?status=awaiting_approval&limit=20"),
+  /** Generaciones que esperan aprobación, con su total; las de una corrida de Spaces traen `space_run`. */
+  approvals: () => call<{ total: number; generations: PendingApproval[] }>("/v1/approvals"),
   /** Generaciones de cualquiera de esos modelos o cuya entrada contenga alguno de esos textos (historial de una página). */
   find: (filter: { models?: string[]; texts?: string[] }, limit = 100) => {
     const q = new URLSearchParams({ limit: String(limit) });

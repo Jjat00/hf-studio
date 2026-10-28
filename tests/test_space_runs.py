@@ -371,6 +371,14 @@ async def test_a_pricier_fallback_is_approved_from_the_run_against_its_budget(en
     assert state.pause["needed_total_usd"] == 1.025
     loose = await http.post(f"/v1/generations/{job_id}/approve", json={"max_usd": 1.03})
     assert loose.status_code == 409 and loose.json()["error"]["code"] == "approve_in_run"
+    # El aviso de aprobaciones lo lista con su Space y su corrida, para aprobarlo ahí y no con /approve.
+    pending = (await http.get("/v1/approvals")).json()
+    assert pending["total"] == 1 and pending["generations"][0]["id"] == job_id
+    assert pending["generations"][0]["space_run"] == {
+        "run_id": run["id"],
+        "space_id": space_id,
+        "title": "Untitled space",
+    }
     low = await http.post(f"/v1/spaces/{space_id}/runs/{run['id']}/approve", json={"max_total_usd": 1.0})
     assert low.status_code == 422
     ok = (

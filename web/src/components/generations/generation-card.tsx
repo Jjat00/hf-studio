@@ -351,6 +351,9 @@ function ApprovalPanel({ g }: { g: Generation }) {
 export function ApprovalActions({ g, className, onDone }: { g: Generation; className?: string; onDone?: () => void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
+  // Resuelta (aprobada o cancelada): los botones quedan bloqueados hasta que llegue el estado nuevo, para que un
+  // segundo clic no actúe sobre lo que ya cambió (p. ej. cancelar lo recién aprobado).
+  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const next = currentOption(g);
   const price = next?.usd != null ? `${next.kind === "approx" ? "~" : ""}${formatUsd(next.usd)}` : t.approval.unknownPrice;
@@ -359,6 +362,7 @@ export function ApprovalActions({ g, className, onDone }: { g: Generation; class
     setError(null);
     try {
       await fn();
+      setDone(true);
       onDone?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -371,7 +375,7 @@ export function ApprovalActions({ g, className, onDone }: { g: Generation; class
       <div className={clsx("flex gap-2", className)}>
         <button
           type="button"
-          disabled={busy || !next}
+          disabled={busy || done || !next}
           onClick={() =>
             next &&
             act(() =>
@@ -389,7 +393,7 @@ export function ApprovalActions({ g, className, onDone }: { g: Generation; class
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || done}
           onClick={() => act(() => studio.cancel(g.id))}
           className="rounded-lg bg-glass px-3 py-1.5 text-xs font-semibold text-fg-2 disabled:opacity-50"
         >

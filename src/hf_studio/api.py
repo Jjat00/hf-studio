@@ -957,6 +957,37 @@ def create_app(
             "all_terminal": all(j.status in TERMINAL for j in jobs),
         }
 
+    @app.get("/v1/approvals", tags=["generaciones"])
+    async def list_approvals(session: Session, owner: Owner, limit: int = Query(50, ge=1, le=100)) -> dict:
+        """Generaciones que esperan aprobación (el precio, la retención o el proveedor cambió fuera de lo
+        aprobado), con su total. Las de una corrida de Spaces traen `space_run` (su Space y su corrida): se aprueban
+        desde la corrida, contra su tope, no con /approve."""
+        query = select(Job).where(Job.status == "awaiting_approval")
+        if not owner.sees_all:
+            query = query.where(Job.owner_id == owner.id)
+        total = await session.scalar(select(func.count()).select_from(query.subquery()))
+        jobs = list(await session.scalars(query.order_by(Job.created_at.desc()).limit(limit)))
+        run_ids = {j.idempotency_key.split(":")[1] for j in jobs if is_run_key(j.idempotency_key)}
+        runs = {}
+        if run_ids:
+            rows = await session.execute(
+                select(SpaceRun.id, SpaceRun.space_id, Space.title)
+                .join(Space, Space.id == SpaceRun.space_id)
+                .where(SpaceRun.id.in_(run_ids))
+            )
+            runs = {
+                run_id: {"run_id": run_id, "space_id": space_id, "title": title}
+                for run_id, space_id, title in rows
+            }
+        names = await client_names(session) if owner.sees_all else {}
+        out = []
+        for j in jobs:
+            body = job_out(j, source=names.get(j.owner_id))
+            run_id = j.idempotency_key.split(":")[1] if is_run_key(j.idempotency_key) else None
+            body["space_run"] = runs.get(run_id) if run_id else None
+            out.append(body)
+        return {"total": total, "generations": out}
+
     batch_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = weakref.WeakValueDictionary()
 
     @app.post("/v1/generations/batch", tags=["generaciones"])
