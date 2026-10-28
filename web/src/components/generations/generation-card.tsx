@@ -351,18 +351,21 @@ function ApprovalPanel({ g }: { g: Generation }) {
 export function ApprovalActions({ g, className, onDone }: { g: Generation; className?: string; onDone?: () => void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  // Resuelta (aprobada o cancelada): los botones quedan bloqueados hasta que llegue el estado nuevo, para que un
-  // segundo clic no actúe sobre lo que ya cambió (p. ej. cancelar lo recién aprobado).
-  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const next = currentOption(g);
+  // La aprobación concreta que se resolvió (aprobada o cancelada): sus botones quedan bloqueados mientras lo que
+  // llega siga describiéndola, para que un segundo clic no actúe sobre lo que ya cambió. Si el mismo trabajo pide
+  // otra aprobación (otro proveedor o precio), es otra solicitud y se puede responder.
+  const request = [g.id, g.provider, g.provider_model, next?.usd, next?.reserve_usd, g.error].join("|");
+  const [resolvedFor, setResolvedFor] = useState<string | null>(null);
+  const done = resolvedFor === request;
   const price = next?.usd != null ? `${next.kind === "approx" ? "~" : ""}${formatUsd(next.usd)}` : t.approval.unknownPrice;
   async function act(fn: () => Promise<unknown>) {
     setBusy(true);
     setError(null);
     try {
       await fn();
-      setDone(true);
+      setResolvedFor(request);
       onDone?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

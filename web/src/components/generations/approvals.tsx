@@ -5,7 +5,7 @@ import { AlertTriangle, ExternalLink, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import { formatUsd, studio, type PendingApproval } from "@/lib/studio";
+import { formatUsd, studio, StudioError, type PendingApproval } from "@/lib/studio";
 import { ApprovalActions, currentOption } from "./generation-card";
 
 const POLL_MS = 10000;
@@ -20,7 +20,9 @@ export function Approvals() {
   const { t, locale } = useI18n();
   const [items, setItems] = useState<PendingApproval[]>([]);
   const [total, setTotal] = useState(0);
-  const [stale, setStale] = useState(false);
+  // Por qué no se pudo consultar (null si la última consulta respondió): la sesión venció o la API no contestó.
+  const [failure, setFailure] = useState<"auth" | "other" | null>(null);
+  const stale = failure !== null;
   const [open, setOpen] = useState(false);
   const seen = useRef(new Set<string>());
   const root = useRef<HTMLDivElement>(null);
@@ -38,13 +40,14 @@ export function Approvals() {
       applied.current = id;
       setItems(res.generations);
       setTotal(res.total);
-      setStale(false);
+      setFailure(null);
       const fresh = res.generations.some((g) => !seen.current.has(g.id));
       for (const g of res.generations) seen.current.add(g.id);
       if (fresh) setOpen(true);
-    } catch {
-      // Sin respuesta (corte, sesión vencida): lo que se ve puede no estar al día y se dice; se reintenta.
-      if (id > applied.current) setStale(true);
+    } catch (e) {
+      // Sin respuesta: lo que se ve puede no estar al día y se dice (también sin pendientes conocidos, porque
+      // entonces no se sabe si hay); se reintenta en el siguiente ciclo.
+      if (id > applied.current) setFailure(e instanceof StudioError && e.status === 401 ? "auth" : "other");
     }
   }, []);
 
@@ -90,8 +93,21 @@ export function Approvals() {
     <div ref={root} className="relative">
       {/* Anuncio para lectores de pantalla, sin mover el foco. */}
       <span role="status" aria-live="polite" className="sr-only">
-        {total ? `${t.approval.pendingTitle}: ${t.approval.pending(total)}` : ""}
+        {total ? `${t.approval.pendingTitle}: ${t.approval.pending(total)}` : failure === "auth" ? t.approval.sessionExpired : failure ? t.approval.unknown : ""}
       </span>
+      {total === 0 && failure === "auth" && (
+        // Sin pendientes conocidos y sin poder comprobarlo: se dice; si es la sesión, con la salida.
+        <Link href="/login" title={t.approval.sessionExpired} className="flex h-8 items-center gap-1.5 rounded-lg bg-warning/10 px-2.5 text-sm font-medium text-warning">
+          <AlertTriangle className="size-4" />
+          <span className="hidden sm:inline">{t.approval.sessionExpired}</span>
+        </Link>
+      )}
+      {total === 0 && failure === "other" && (
+        <span title={t.approval.unknown} className="flex h-8 items-center gap-1.5 rounded-lg bg-warning/10 px-2.5 text-sm font-medium text-warning">
+          <AlertTriangle className="size-4" />
+          <span className="hidden sm:inline">{t.approval.unknown}</span>
+        </span>
+      )}
       {total > 0 && (
         <button
           type="button"
@@ -113,7 +129,7 @@ export function Approvals() {
             </button>
           </div>
           <p className="mb-2 text-xs leading-snug text-fg-3">{t.approval.pendingHint}</p>
-          {stale && <p className="mb-2 text-xs text-warning">{t.approval.stale}</p>}
+          {stale && <p className="mb-2 text-xs text-warning">{failure === "auth" ? t.approval.sessionExpired : t.approval.stale}</p>}
           <div className="thin-scrollbar flex max-h-[60dvh] flex-col gap-2 overflow-y-auto">
             {items.map((g) => {
               const next = currentOption(g);

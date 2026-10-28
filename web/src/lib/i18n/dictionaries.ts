@@ -300,6 +300,8 @@ const es = {
     showing: (shown: number, total: number) => `Se muestran las ${shown} más recientes de ${total}.`,
     stale: "No se pudo actualizar: puede que esto ya no esté al día.",
     close: "Cerrar",
+    unknown: "No se pudo comprobar si hay generaciones por aprobar",
+    sessionExpired: "Tu sesión venció: vuelve a entrar para ver las aprobaciones",
   },
   empty: {
     step: (n: number) => `Paso ${n}`,
@@ -1165,6 +1167,8 @@ const en: Dict = {
     showing: (shown, total) => `Showing the ${shown} most recent of ${total}.`,
     stale: "Could not refresh: this may be out of date.",
     close: "Close",
+    unknown: "Could not check for generations to approve",
+    sessionExpired: "Your session expired: sign in again to see approvals",
   },
   empty: {
     step: (n) => `Step ${n}`,
