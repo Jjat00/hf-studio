@@ -44,8 +44,8 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
       }),
     [items, models, filter],
   );
-  // Lo marcado que sigue en la lista (una que se borró o cambió de lista deja de contar).
-  const chosen = useMemo(() => items.filter((g) => picked.has(g.id) && g.terminal).map((g) => g.id), [items, picked]);
+  // Solo cuenta lo marcado que se ve (una que se borró, cambió de lista o quedó fuera del filtro no se toca).
+  const chosen = useMemo(() => shown.filter((g) => picked.has(g.id) && g.terminal).map((g) => g.id), [shown, picked]);
 
   const reuse = (g: Generation) => router.push(reuseHref(g.model, g.id, models));
   const toggle = (g: Generation) => {
@@ -90,7 +90,10 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
           <button
             key={f}
             type="button"
-            onClick={() => setFilter(f)}
+            onClick={() => {
+              setFilter(f);
+              setPicked(new Set()); // cambiar de filtro empieza una selección nueva
+            }}
             className={clsx(
               "h-10 rounded-xl px-4 text-[15px] font-medium transition-colors",
               filter === f ? "bg-surface-4 text-fg" : "text-fg-3 hover:text-fg-2",
@@ -132,7 +135,11 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
               const on = picked.has(g.id);
               return (
                 <div className="relative">
-                  <GenerationCard g={g} layout="grid" models={models} onReuse={reuse} onDelete={remove} />
+                  {/* Mientras se selecciona, la tarjeta es inerte: ni el puntero ni Tab llegan a sus controles (abrir,
+                      reproducir, borrar); solo el botón de selección. */}
+                  <div inert={selecting}>
+                    <GenerationCard g={g} layout="grid" models={models} onReuse={reuse} onDelete={remove} />
+                  </div>
                   {selecting && (
                     // Encima de la tarjeta: en modo selección un clic marca, no abre ni reproduce.
                     <button
