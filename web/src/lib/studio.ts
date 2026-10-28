@@ -188,8 +188,11 @@ export const studio = {
       body: JSON.stringify(patch),
     }),
   importElevenlabs: () => call<{ imported: number; skipped: number }>("/v1/sounds/import-elevenlabs", { method: "POST" }),
-  list: (limit = 60, hidden = false, favorite = false) =>
-    call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}${hidden ? "&hidden=true" : ""}${favorite ? "&favorite=true" : ""}`),
+  /** Las más recientes; con `before` (id de la última cargada), las anteriores a ella. */
+  list: (limit = 60, hidden = false, favorite = false, before?: string) =>
+    call<{ generations: Generation[] }>(
+      `/v1/generations?limit=${limit}${hidden ? "&hidden=true" : ""}${favorite ? "&favorite=true" : ""}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+    ),
   /** Marca (o desmarca) varias generaciones como favoritas. */
   favorite: (ids: string[], favorite = true) =>
     call<{ changed: string[]; skipped: string[] }>("/v1/generations/favorite", {

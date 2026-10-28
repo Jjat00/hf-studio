@@ -679,3 +679,42 @@ async def test_a_library_flag_does_not_break_a_worker_writing_the_same_job(env):
     async with app.state.sessions() as s:
         saved = await s.get(Job, job_id)
         assert saved.status == "queued" and saved.hf_request_id == "req-race" and saved.favorite is True
+
+
+async def test_the_library_pages_by_cursor_without_skipping_or_repeating(env):
+    app, http, _ = env
+    ids = []
+    for i in range(5):
+        body = {
+            "model": T2V,
+            "input": {"prompt": f"c{i}"},
+            "confirm_unknown_cost": True,
+            "idempotency_key": f"c{i}",
+        }
+        ids.append((await http.post("/v1/generations", json=body)).json()["id"])
+        async with app.state.sessions() as s:  # terminada: no ocupa cupo de trabajos activos
+            await s.execute(
+                update(Job).where(Job.id == ids[-1]).values(status="completed", version=Job.version + 1)
+            )
+            await s.commit()
+    # Dos creadas en el mismo instante: el desempate por id las separa sin perder ninguna.
+    async with app.state.sessions() as s:
+        same = (await s.get(Job, ids[1])).created_at
+        await s.execute(update(Job).where(Job.id == ids[2]).values(created_at=same, version=Job.version + 1))
+        await s.commit()
+    first = (await http.get("/v1/generations", params={"limit": 2})).json()["generations"]
+    seen = [g["id"] for g in first]
+    while True:
+        page = (await http.get("/v1/generations", params={"limit": 2, "before": seen[-1]})).json()[
+            "generations"
+        ]
+        if not page:
+            break
+        seen += [g["id"] for g in page]
+    assert sorted(seen) == sorted(ids) and len(seen) == len(set(seen))
+    # Una nueva arriba no desplaza las páginas que siguen al cursor.
+    body = {"model": T2V, "input": {"prompt": "new"}, "confirm_unknown_cost": True, "idempotency_key": "cn"}
+    await http.post("/v1/generations", json=body)
+    after = (await http.get("/v1/generations", params={"limit": 2, "before": seen[1]})).json()["generations"]
+    assert [g["id"] for g in after] == seen[2:4]
+    assert (await http.get("/v1/generations", params={"before": "nope"})).status_code == 404

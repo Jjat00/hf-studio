@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { Check, EyeOff, Eye, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { Masonry } from "@/components/masonry";
@@ -25,7 +25,11 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
   // «Favoritas» se pide al servidor: aparecen aunque sean más antiguas que las últimas de la biblioteca.
   const favorites = filter === "favorites";
-  const { items, loading, error, remove, setHidden, setFavorite } = useGenerations({ hidden, favorite: favorites });
+  const { items, loading, error, remove, setHidden, setFavorite, hasMore, loadingMore, loadMore } = useGenerations({
+    hidden,
+    favorite: favorites,
+  });
+  const sentinel = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -49,6 +53,18 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   );
   // Solo cuenta lo marcado que se ve (una que se borró, cambió de lista o quedó fuera del filtro no se toca).
   const chosen = useMemo(() => shown.filter((g) => picked.has(g.id) && g.terminal).map((g) => g.id), [shown, picked]);
+
+  // Scroll infinito: al acercarse al final se trae la página siguiente. El observador se rehace con cada página para
+  // que, si el final sigue a la vista (p. ej. un filtro con pocas tarjetas), se pida otra.
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore || loading || loadingMore) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) void loadMore();
+    }, { rootMargin: "800px 0px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, loadMore, items.length]);
 
   const reuse = (g: Generation) => router.push(reuseHref(g.model, g.id, models));
   const toggle = (g: Generation) => {
@@ -124,7 +140,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
             <div key={i} className="shimmer aspect-video rounded-2xl" />
           ))}
         </div>
-      ) : shown.length === 0 ? (
+      ) : shown.length === 0 && !hasMore ? (
         <p className="mt-16 text-center text-fg-3">{hidden ? h.hiddenNothing : favorites ? h.favoritesNothing : h.nothing}</p>
       ) : (
         <div className="mt-6">
@@ -177,6 +193,11 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
               );
             }}
           />
+        </div>
+      )}
+      {!loading && hasMore && (
+        <div ref={sentinel} className="flex h-16 items-center justify-center text-sm text-fg-3" aria-live="polite">
+          {loadingMore && h.loadingMore}
         </div>
       )}
       {selecting && (

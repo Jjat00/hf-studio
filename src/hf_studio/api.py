@@ -935,6 +935,9 @@ def create_app(
         status: str | None = None,
         limit: int = Query(20, ge=1, le=100),
         offset: int = Query(0, ge=0),
+        before: str | None = Query(
+            None, description="ID de la última ya cargada: devuelve las anteriores a ella"
+        ),
         ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
         hidden: bool = Query(False, description="true: solo las ocultas (sin ids, las ocultas no se listan)"),
@@ -962,7 +965,14 @@ def create_app(
         ]
         if matches:
             query = query.where(or_(*matches))
-        query = query.order_by(Job.created_at.desc()).offset(offset).limit(limit)
+        if before:
+            # Paginación por cursor (el scroll del historial): lo que llegue nuevo arriba no desplaza las páginas.
+            # Desempate por id para no saltar ni repetir dos creadas en el mismo instante.
+            mark = await session.scalar(select(Job.created_at).where(Job.id == before))
+            if mark is None:
+                raise ServiceError(404, "not_found", f"Unknown generation: {before}")
+            query = query.where(or_(Job.created_at < mark, (Job.created_at == mark) & (Job.id < before)))
+        query = query.order_by(Job.created_at.desc(), Job.id.desc()).offset(offset).limit(limit)
         jobs = list(await session.scalars(query))
         deadline = asyncio.get_running_loop().time() + (wait if ids else 0)
         while any(j.status not in TERMINAL for j in jobs) and asyncio.get_running_loop().time() < deadline:
