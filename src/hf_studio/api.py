@@ -223,13 +223,17 @@ class BatchItem(BaseModel):
     )
 
 
+# Tantas como la Biblioteca puede mostrar (su ventana de lectura): «Seleccionar todo» cabe en una sola escritura.
+MAX_LIBRARY_IDS = 2000
+
+
 class HideIn(BaseModel):
-    ids: list[str] = Field(min_length=1, max_length=200)
+    ids: list[str] = Field(min_length=1, max_length=MAX_LIBRARY_IDS)
     hidden: bool = True
 
 
 class FavoriteIn(BaseModel):
-    ids: list[str] = Field(min_length=1, max_length=200)
+    ids: list[str] = Field(min_length=1, max_length=MAX_LIBRARY_IDS)
     favorite: bool = True
 
 
@@ -934,7 +938,7 @@ def create_app(
         owner: Owner,
         status: str | None = None,
         # Hasta 2000: la Biblioteca relee de una vez todo lo que ya se cargó con el scroll.
-        limit: int = Query(20, ge=1, le=2000),
+        limit: int = Query(20, ge=1, le=MAX_LIBRARY_IDS),
         offset: int = Query(0, ge=0),
         ids: str | None = Query(None, description="IDs separados por coma (espera múltiple con wait)"),
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),

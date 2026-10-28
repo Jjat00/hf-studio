@@ -710,3 +710,8 @@ async def test_the_library_reads_its_whole_window_in_order(env):
     tied = sorted(ids[1:3], reverse=True)
     assert [i for i in whole if i in tied] == tied
     assert (await http.get("/v1/generations", params={"limit": 2001})).status_code == 422
+    # «Seleccionar todo» sobre la ventana entera cabe en una escritura (ids desconocidos: se saltan, no fallan).
+    many = [*ids, *(f"x{i}" for i in range(1995))]
+    res = (await http.post("/v1/generations/favorite", json={"ids": many})).json()
+    assert sorted(res["changed"]) == sorted(ids)
+    assert (await http.post("/v1/generations/hide", json={"ids": [*many, "y"]})).status_code == 422
