@@ -30,7 +30,7 @@ const es = {
     body: "La portada que abres en localhost:3000: los modelos destacados, AI Influencer, las Apps de un clic y un acceso a todo lo demás.",
     home: "Portada de HF Studio con modelos destacados, AI Influencer y accesos",
     cards: [
-      { src: "ui-influencer-apps", title: "AI Influencer y Apps de un clic", desc: "Diseña tu personaje por rasgos, genera su hoja con 9 modelos de imagen y anímalo con 7 de video. Y 8 Apps: reiluminar, cambio de cara, etalonar video, multiplicador de anuncios…" },
+      { src: "ui-influencer-apps", title: "AI Influencer y Apps de un clic", desc: "Diseña tu personaje por rasgos, genera su hoja con 19 modelos de imagen y anímalo con 17 de video. Y 8 Apps: reiluminar, cambio de cara, etalonar video, multiplicador de anuncios…" },
       { src: "ui-menu", title: "Funciones y modelos, a un clic", desc: "Imagen, Video y Audio abren un menú con lo que puedes hacer y con qué modelo, como en Higgsfield." },
     ],
   },
@@ -222,7 +222,7 @@ const en: Dict = {
     body: "The home page you open at localhost:3000: featured models, AI Influencer, one-click Apps and a shortcut to everything else.",
     home: "HF Studio home with featured models, AI Influencer and shortcuts",
     cards: [
-      { src: "ui-influencer-apps", title: "AI Influencer and one-click Apps", desc: "Design your character from traits, generate its sheet with 9 image models and animate it with 7 video models. Plus 8 Apps: relight, face swap, video color grade, ad multiplier…" },
+      { src: "ui-influencer-apps", title: "AI Influencer and one-click Apps", desc: "Design your character from traits, generate its sheet with 19 image models and animate it with 17 video models. Plus 8 Apps: relight, face swap, video color grade, ad multiplier…" },
       { src: "ui-menu", title: "Features and models, one click away", desc: "Image, Video and Audio open a menu with what you can do and with which model, like on Higgsfield." },
     ],
   },

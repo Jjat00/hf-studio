@@ -98,8 +98,9 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
 - **AI Influencer** (`/influencer`): diseña tu propio personaje por rasgos, con el catálogo de Higgsfield (9 tipos de
   personaje, de normal a animal, y 18 grupos de rasgos: cara, pelo, cuerpo, estilo, accesorios…) y sus 39 ejemplos,
   listos para recrear. Genera la hoja de personaje de dos paneles (primer plano y cuerpo entero) con Soul 2.0, Soul
-  Cinema, Sunburst, Flare, Grok Imagine, Qwen Image, Z-Image, Recraft o Ideogram, si quieres a partir de tu foto, y
-  luego anímalo con 7 modelos de video y 8 movimientos. Cada paso se cotiza antes de correr.
+  Cinema, Sunburst, Flare, Grok Imagine, Qwen Image, Z-Image, Recraft o Ideogram (y, con APIMart o KIE, Nano Banana,
+  GPT Image, Seedream, FLUX, Midjourney…: 19 en total), si quieres a partir de tu foto, y luego anímalo con 17 modelos
+  de video (Genjutsu y Genjutsu Light copian el movimiento de un video tuyo) y 8 movimientos. Cada paso se cotiza antes de correr.
 - **Apps de un clic:** reiluminar, cambiar paleta, cambio de cara, cambio de personaje, reencuadrar, reiluminar video,
   etalonar video y multiplicador de anuncios, cada una un preset de serie sobre un modelo del catálogo: subes,
   ajustas y generas.
@@ -274,7 +275,7 @@ Herramientas (42). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destru
 
 | Grupo | Herramientas |
 | --- | --- |
-| Modelos | `find_models`, `get_model`, `recommend_models`, `list_styles` |
+| Modelos | `find_models`, `get_model`, `recommend_models`, `list_styles`, `list_model_options` |
 | Generar | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
 | Seguimiento | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
 | Proveedores | `providers_status` |
