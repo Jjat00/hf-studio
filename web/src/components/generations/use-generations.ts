@@ -8,9 +8,8 @@ import type { Generation } from "@/lib/types";
  * Historial del cliente con sondeo adaptativo: cada 2,5 s mientras haya trabajos activos,
  * cada 20 s en reposo. El servidor ya hace el backoff contra Higgsfield; esto solo lee la BD propia.
  *
- * El sondeo lee solo la primera página (las más recientes) y la funde con las anteriores que ya se cargaron con
- * `loadMore` (scroll): cada página siguiente se pide por cursor (la última cargada), así lo que llega nuevo arriba
- * no repite ni salta tarjetas.
+ * Cada lectura trae de una vez todo lo cargado (una ventana de las más recientes); el scroll (`loadMore`) amplía la
+ * ventana en una página. Así cada sondeo deja la lista entera al día: sin huecos ni tarjetas viejas congeladas.
  *
  * Cada lectura lleva un número y solo se aplica si es de la consulta visible, la más nueva y posterior al último
  * cambio de la lista: una respuesta lenta de antes o de otro filtro no deshace lo que se ve ahora. Los cambios
@@ -22,47 +21,28 @@ type Query = { hidden: boolean; favorite: boolean };
 /** Un cambio aplicado a una lista según su consulta (quitar una estrella saca la tarjeta de Favoritas, no de Todo). */
 type Change = (prev: Generation[], query: Query) => Generation[];
 
-/** Tamaño de cada página: la primera (la que se sondea) y las que trae el scroll. */
-const PAGE = 60;
-
-/** `a` va después que `b` en el orden de la lista (más reciente primero; desempate por id, como el servidor). */
-function olderThan(a: Generation, b: Generation): boolean {
-  return a.created_at < b.created_at || (a.created_at === b.created_at && a.id < b.id);
-}
-
-/** La primera página recién leída más las anteriores ya cargadas que quedan por debajo de ella. */
-function mergeHead(head: Generation[], prev: Generation[]): Generation[] {
-  const last = head.at(-1);
-  // Página incompleta: es toda la lista (lo que estaba debajo ya no existe en esta consulta).
-  if (!last || head.length < PAGE) return head;
-  const inHead = new Set(head.map((g) => g.id));
-  return [...head, ...prev.filter((g) => !inHead.has(g.id) && olderThan(g, last))];
-}
+/** Lo que trae la primera lectura y cuánto crece la ventana con cada página del scroll. */
+const PAGE = 80;
+/** Tope de la ventana (el máximo que el servidor devuelve en una lectura). */
+const MAX_WINDOW = 2000;
 
 export function useGenerations({ hidden = false, favorite = false }: { hidden?: boolean; favorite?: boolean } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  // Ventana de lectura: crece con el scroll. `read` es la última lectura aplicada: cuántas trajo y con qué ventana.
+  const [limit, setLimit] = useState(PAGE);
+  const [read, setRead] = useState({ count: 0, window: 0 });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const asked = useRef(0);
   const applied = useRef(0);
   const changedAt = useRef(0);
-  // Sube con cada invalidación: una página del scroll pedida antes de un cambio se descarta y se vuelve a pedir.
-  const epoch = useRef(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   // Cambios enviados y aún sin confirmar (en orden): se aplican encima de lo que llegue del servidor.
   const pending = useRef(new Map<number, Change>());
   const changes = useRef(0);
   const visible = useRef("");
   const latestRefresh = useRef<() => Promise<Generation[] | null>>(async () => null);
-  const itemsRef = useRef(items);
-  const moreBusy = useRef(false);
-
-  useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
 
   // Otra consulta (otro filtro): no se muestra la lista de la anterior como si fuera de esta.
   const query = `${hidden}|${favorite}`;
@@ -71,23 +51,19 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
     setShownQuery(query);
     setItems([]);
     setLoading(true);
-    setHasMore(true);
+    setLimit(PAGE);
+    setRead({ count: 0, window: 0 });
   }
-
-  const withPending = useCallback(
-    (list: Generation[]) => [...pending.current.values()].reduce((acc, apply) => apply(acc, { hidden, favorite }), list),
-    [hidden, favorite],
-  );
 
   const refresh = useCallback(async () => {
     const id = ++asked.current;
     const mine = `${hidden}|${favorite}`;
     try {
-      const { generations } = await studio.list(PAGE, hidden, favorite);
+      const { generations } = await studio.list(limit, hidden, favorite);
       if (mine !== visible.current || id <= applied.current || id <= changedAt.current) return generations;
       applied.current = id;
-      setItems((prev) => withPending(mergeHead(generations, prev)));
-      if (generations.length < PAGE) setHasMore(false);
+      setRead({ count: generations.length, window: limit });
+      setItems([...pending.current.values()].reduce((list, apply) => apply(list, { hidden, favorite }), generations));
       setError(null);
       setLoading(false);
       return generations;
@@ -98,12 +74,11 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       }
       return null;
     }
-  }, [hidden, favorite, withPending]);
+  }, [hidden, favorite, limit]);
 
   /** Lo que esté en vuelo ya no vale: la lista cambió (otra consulta o un cambio hecho aquí). */
   const invalidate = useCallback(() => {
     changedAt.current = asked.current;
-    epoch.current += 1;
   }, []);
 
   useEffect(() => {
@@ -124,36 +99,15 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
     };
   }, [refresh, invalidate, hidden, favorite]);
 
-  /** Trae la página siguiente (las anteriores a la última que se ve) y la añade al final. */
-  const loadMore = useCallback(async () => {
-    if (moreBusy.current) return;
-    const mine = `${hidden}|${favorite}`;
-    moreBusy.current = true;
-    setLoadingMore(true);
-    try {
-      // Si la lista cambió mientras llegaba (un cambio confirmado, otra consulta), la página puede ser vieja:
-      // se vuelve a pedir desde la última tarjeta vigente.
-      for (let tries = 0; tries < 3; tries++) {
-        const last = itemsRef.current.at(-1);
-        if (!last || mine !== visible.current) return;
-        const started = epoch.current;
-        const { generations } = await studio.list(PAGE, hidden, favorite, last.id);
-        if (mine !== visible.current) return;
-        if (started !== epoch.current) continue;
-        setItems((prev) => {
-          const known = new Set(prev.map((g) => g.id));
-          return [...prev, ...withPending(generations.filter((g) => !known.has(g.id)))];
-        });
-        if (generations.length < PAGE) setHasMore(false);
-        return;
-      }
-    } catch (e) {
-      if (mine === visible.current) setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      moreBusy.current = false;
-      setLoadingMore(false);
-    }
-  }, [hidden, favorite, withPending]);
+  // Hay más mientras la última lectura llenó la ventana; se está cargando mientras la ventana nueva aún no llegó.
+  const hasMore = read.window === limit && read.count >= limit && limit < MAX_WINDOW;
+  const loadingMore = read.window > 0 && read.window !== limit;
+
+  /** Amplía la ventana una página: el efecto relee con el nuevo tamaño. Solo si la ventana actual ya se llenó, así
+   * un error no encadena peticiones: se reintenta con el sondeo normal. */
+  const loadMore = useCallback(() => {
+    if (hasMore) setLimit((n) => Math.min(n + PAGE, MAX_WINDOW));
+  }, [hasMore]);
 
   /** Inserta una generación recién creada y acelera el siguiente sondeo. */
   const add = useCallback(

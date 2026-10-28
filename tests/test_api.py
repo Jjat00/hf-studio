@@ -681,7 +681,7 @@ async def test_a_library_flag_does_not_break_a_worker_writing_the_same_job(env):
         assert saved.status == "queued" and saved.hf_request_id == "req-race" and saved.favorite is True
 
 
-async def test_the_library_pages_by_cursor_without_skipping_or_repeating(env):
+async def test_the_library_reads_its_whole_window_in_order(env):
     app, http, _ = env
     ids = []
     for i in range(5):
@@ -697,24 +697,16 @@ async def test_the_library_pages_by_cursor_without_skipping_or_repeating(env):
                 update(Job).where(Job.id == ids[-1]).values(status="completed", version=Job.version + 1)
             )
             await s.commit()
-    # Dos creadas en el mismo instante: el desempate por id las separa sin perder ninguna.
+    # Dos creadas en el mismo instante: el desempate por id da un orden estable entre lecturas.
     async with app.state.sessions() as s:
         same = (await s.get(Job, ids[1])).created_at
         await s.execute(update(Job).where(Job.id == ids[2]).values(created_at=same, version=Job.version + 1))
         await s.commit()
-    first = (await http.get("/v1/generations", params={"limit": 2})).json()["generations"]
-    seen = [g["id"] for g in first]
-    while True:
-        page = (await http.get("/v1/generations", params={"limit": 2, "before": seen[-1]})).json()[
-            "generations"
-        ]
-        if not page:
-            break
-        seen += [g["id"] for g in page]
-    assert sorted(seen) == sorted(ids) and len(seen) == len(set(seen))
-    # Una nueva arriba no desplaza las páginas que siguen al cursor.
-    body = {"model": T2V, "input": {"prompt": "new"}, "confirm_unknown_cost": True, "idempotency_key": "cn"}
-    await http.post("/v1/generations", json=body)
-    after = (await http.get("/v1/generations", params={"limit": 2, "before": seen[1]})).json()["generations"]
-    assert [g["id"] for g in after] == seen[2:4]
-    assert (await http.get("/v1/generations", params={"before": "nope"})).status_code == 404
+    # La ventana de la Biblioteca crece con el scroll más allá de las 100 de antes.
+    whole = [
+        g["id"] for g in (await http.get("/v1/generations", params={"limit": 500})).json()["generations"]
+    ]
+    assert sorted(whole) == sorted(ids)
+    tied = sorted(ids[1:3], reverse=True)
+    assert [i for i in whole if i in tied] == tied
+    assert (await http.get("/v1/generations", params={"limit": 2001})).status_code == 422

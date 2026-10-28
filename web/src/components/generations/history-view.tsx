@@ -54,13 +54,13 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   // Solo cuenta lo marcado que se ve (una que se borró, cambió de lista o quedó fuera del filtro no se toca).
   const chosen = useMemo(() => shown.filter((g) => picked.has(g.id) && g.terminal).map((g) => g.id), [shown, picked]);
 
-  // Scroll infinito: al acercarse al final se trae la página siguiente. El observador se rehace con cada página para
-  // que, si el final sigue a la vista (p. ej. un filtro con pocas tarjetas), se pida otra.
+  // Scroll infinito: al acercarse al final se amplía la ventana una página. El observador se rehace con cada página
+  // para que, si el final sigue a la vista (p. ej. un filtro con pocas tarjetas), se pida otra.
   useEffect(() => {
     const el = sentinel.current;
     if (!el || !hasMore || loading || loadingMore) return;
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) void loadMore();
+      if (entries.some((e) => e.isIntersecting)) loadMore();
     }, { rootMargin: "800px 0px" });
     observer.observe(el);
     return () => observer.disconnect();
@@ -140,7 +140,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
             <div key={i} className="shimmer aspect-video rounded-2xl" />
           ))}
         </div>
-      ) : shown.length === 0 && !hasMore ? (
+      ) : shown.length === 0 && !hasMore && !loadingMore ? (
         <p className="mt-16 text-center text-fg-3">{hidden ? h.hiddenNothing : favorites ? h.favoritesNothing : h.nothing}</p>
       ) : (
         <div className="mt-6">
@@ -195,7 +195,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
           />
         </div>
       )}
-      {!loading && hasMore && (
+      {!loading && (hasMore || loadingMore) && (
         <div ref={sentinel} className="flex h-16 items-center justify-center text-sm text-fg-3" aria-live="polite">
           {loadingMore && h.loadingMore}
         </div>
