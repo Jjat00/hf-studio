@@ -191,7 +191,11 @@ export const studio = {
   list: (limit = 60, hidden = false) => call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}${hidden ? "&hidden=true" : ""}`),
   /** Oculta (o vuelve a mostrar) varias generaciones terminadas; las que siguen en curso se saltan. */
   hide: (ids: string[], hidden = true) =>
-    call<{ changed: string[]; skipped: string[] }>("/v1/generations/hide", { method: "POST", body: JSON.stringify({ ids, hidden }) }),
+    call<{ changed: string[]; skipped: string[] }>("/v1/generations/hide", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, hidden }),
+    }),
   /** Generaciones que esperan aprobación, con su total; las de una corrida de Spaces traen `space_run`. */
   approvals: () => call<{ total: number; generations: PendingApproval[] }>("/v1/approvals"),
   /** Generaciones de cualquiera de esos modelos o cuya entrada contenga alguno de esos textos (historial de una página). */
