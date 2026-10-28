@@ -335,6 +335,21 @@ export function GenerationCard({
 /** El proveedor más barato falló sin cobrar y el siguiente cuesta más: aprobar ese precio o cancelar. */
 function ApprovalPanel({ g }: { g: Generation }) {
   const { t } = useI18n();
+  const next = currentOption(g);
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
+      <AlertTriangle className="size-7 text-warning" />
+      <p className="text-sm font-semibold">{t.approval.title}</p>
+      {g.error && <p className="line-clamp-3 max-w-sm text-xs text-fg-3">{g.error}</p>}
+      {next?.reserve_usd != null && <p className="max-w-sm text-xs text-warning">{t.cost.reserve(formatUsd(next.reserve_usd))}</p>}
+      <ApprovalActions g={g} className="mt-1 justify-center" />
+    </div>
+  );
+}
+
+/** Aprobar el precio del siguiente proveedor o cancelar (en la tarjeta y en el aviso global de aprobaciones). */
+export function ApprovalActions({ g, className, onDone }: { g: Generation; className?: string; onDone?: () => void }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const next = currentOption(g);
@@ -344,6 +359,7 @@ function ApprovalPanel({ g }: { g: Generation }) {
     setError(null);
     try {
       await fn();
+      onDone?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -351,12 +367,8 @@ function ApprovalPanel({ g }: { g: Generation }) {
     }
   }
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
-      <AlertTriangle className="size-7 text-warning" />
-      <p className="text-sm font-semibold">{t.approval.title}</p>
-      {g.error && <p className="line-clamp-3 max-w-sm text-xs text-fg-3">{g.error}</p>}
-      {next?.reserve_usd != null && <p className="max-w-sm text-xs text-warning">{t.cost.reserve(formatUsd(next.reserve_usd))}</p>}
-      <div className="mt-1 flex gap-2">
+    <>
+      <div className={clsx("flex gap-2", className)}>
         <button
           type="button"
           disabled={busy || !next}
@@ -385,7 +397,7 @@ function ApprovalPanel({ g }: { g: Generation }) {
         </button>
       </div>
       {error && <p className="text-xs text-danger">{error}</p>}
-    </div>
+    </>
   );
 }
 

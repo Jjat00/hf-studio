@@ -291,6 +291,10 @@ const es = {
     unknownPrice: "precio desconocido",
     cancel: "Cancelar",
     tried: "Intentos",
+    pending: (n: number) => (n === 1 ? "1 por aprobar" : `${n} por aprobar`),
+    pendingTitle: "Esperan tu aprobación",
+    pendingHint: "El proveedor que aprobaste no pudo hacerla (sin cobrar) y la siguiente opción cuesta más. Apruébala o cancélala: mientras espera, ocupa un cupo de generación.",
+    pendingCreated: (when: string) => `Pedida ${when}`,
   },
   empty: {
     step: (n: number) => `Paso ${n}`,
@@ -1147,6 +1151,10 @@ const en: Dict = {
     unknownPrice: "unknown price",
     cancel: "Cancel",
     tried: "Attempts",
+    pending: (n) => `${n} to approve`,
+    pendingTitle: "Waiting for your approval",
+    pendingHint: "The provider you approved could not do it (no charge) and the next option costs more. Approve or cancel it: while it waits, it takes a generation slot.",
+    pendingCreated: (when) => `Requested ${when}`,
   },
   empty: {
     step: (n) => `Step ${n}`,

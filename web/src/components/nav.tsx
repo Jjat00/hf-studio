@@ -7,6 +7,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import type { Dict } from "@/lib/i18n";
 import { MEGA_MENUS, type MegaMenu, type MenuEntry } from "@/lib/menu";
+import { Approvals } from "./generations/approvals";
 import { useI18n } from "./i18n-provider";
 import { Logo } from "./logo";
 
@@ -317,6 +318,7 @@ export function Nav({ gate = false }: { gate?: boolean }) {
         <NavLinks />
       </Suspense>
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <Approvals />
         <ApiStatus />
         <LanguageToggle />
         {gate && <SignOut />}
