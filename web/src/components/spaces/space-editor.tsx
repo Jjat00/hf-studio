@@ -572,13 +572,17 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         .then((res) => (res.ok ? res.text() : Promise.reject(new Error(String(res.status)))))
         .then((text) => {
           const values = text.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, MAX_LIST_ITEMS);
-          setNodes((ns) =>
-            ns.map((n) =>
+          setNodes((ns) => {
+            // Solo si sigue vigente: la Lista conectada al mismo Assistant y esa su generación elegida. Una
+            // respuesta tardía (se desconectó, se eligió otra generación) no pisa nada (revisión 102).
+            const source = ns.find((n): n is GeneratorNode => n.id === feeder!.id && n.type === "generator");
+            if (listFeeder(edgesRef.current, list.id) !== feeder!.id || !source || selectedRun(source.data) !== jobId) return ns;
+            return ns.map((n) =>
               n.id === list.id && n.type === "list" && n.data.filled_from !== jobId
                 ? { ...n, data: { ...n.data, items: values.map((value) => ({ id: newId("i"), value, checked: true })), filled_from: jobId } }
                 : n,
-            ),
-          );
+            );
+          });
         })
         .catch(() => undefined)
         .finally(() => filling.current.delete(key));
@@ -658,20 +662,28 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     [outputOf],
   );
 
+  /** Una Lista tiene un solo Assistant que la llena: el nuevo reemplaza al anterior, y el Assistant pasa a modo
+   * lista (escribe tantos elementos) si aún no lo estaba. No busca la Lista en el lienzo: sirve también para una
+   * recién creada que aún no está en `nodesRef` (revisión 102). */
+  const feedList = useCallback(
+    (assistantId: string, listId: string) => {
+      setEdges((es) => [...es.filter((e) => e.target !== listId), { id: newId("e"), source: assistantId, target: listId, sourceHandle: "out", targetHandle: LIST_INPUT }]);
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === assistantId && n.type === "generator" && n.data.values.list_items === undefined
+            ? { ...n, data: { ...n.data, values: { ...n.data.values, list_items: DEFAULT_LIST_ITEMS } } }
+            : n,
+        ),
+      );
+    },
+    [setEdges, setNodes],
+  );
+
   const onConnect = useCallback(
     (c: Connection) => {
       const tgt = nodesRef.current.find((n) => n.id === c.target);
       if (tgt?.type === "list" && c.targetHandle === LIST_INPUT) {
-        // Una Lista tiene un solo Assistant que la llena: el nuevo reemplaza al anterior. El Assistant pasa a
-        // modo lista (escribe tantos elementos) si aún no lo estaba.
-        setEdges((es) => [...es.filter((e) => e.target !== c.target), { id: newId("e"), source: c.source, target: c.target, sourceHandle: "out", targetHandle: LIST_INPUT }]);
-        setNodes((ns) =>
-          ns.map((n) =>
-            n.id === c.source && n.type === "generator" && n.data.values.list_items === undefined
-              ? { ...n, data: { ...n.data, values: { ...n.data.values, list_items: DEFAULT_LIST_ITEMS } } }
-              : n,
-          ),
-        );
+        feedList(c.source, c.target);
         return;
       }
       if (!tgt || tgt.type !== "generator" || !c.targetHandle) return;
@@ -688,7 +700,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         return [...next, { id: newId("e"), source: c.source, target: c.target, sourceHandle: c.sourceHandle ?? "out", targetHandle: c.targetHandle }];
       });
     },
-    [setEdges, setNodes],
+    [setEdges, feedList],
   );
 
   const center = useCallback((): Menu["at"] => {
@@ -749,7 +761,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       else node = { id: nid, type: choice.type, position, data: { text: "" } };
       setNodes((ns) => [...ns.map((n) => (n.selected ? { ...n, selected: false } : n)), { ...node, selected: true }]);
       // Una Lista nueva que sale de un Assistant queda llenada por él (y el Assistant, en modo lista).
-      if (choice.type === "list" && from) onConnect({ source: from.nodeId, sourceHandle: "out", target: nid, targetHandle: LIST_INPUT });
+      if (choice.type === "list" && from) feedList(from.nodeId, nid);
       if (choice.type !== "generator") return;
       loadDetail(choice.model).then(
         (d) => {
@@ -778,7 +790,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         () => undefined,
       );
     },
-    [setNodes, setEdges, patchHistory, onConnect],
+    [setNodes, setEdges, patchHistory, feedList],
   );
 
   // «/» abre el buscador de nodos (salvo escribiendo en un campo).
