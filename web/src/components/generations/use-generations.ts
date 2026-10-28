@@ -13,6 +13,11 @@ import type { Generation } from "@/lib/types";
  * (ocultar, favoritas, borrar) se aplican al momento, se envían en orden y, hasta que el servidor los confirma, se
  * vuelven a aplicar sobre cualquier lectura; al terminar, se relee la consulta vigente.
  */
+/** Consulta de la lista: biblioteca, ocultas o favoritas. */
+type Query = { hidden: boolean; favorite: boolean };
+/** Un cambio aplicado a una lista según su consulta (quitar una estrella saca la tarjeta de Favoritas, no de Todo). */
+type Change = (prev: Generation[], query: Query) => Generation[];
+
 export function useGenerations({ hidden = false, favorite = false }: { hidden?: boolean; favorite?: boolean } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +28,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   const changedAt = useRef(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   // Cambios enviados y aún sin confirmar (en orden): se aplican encima de lo que llegue del servidor.
-  const pending = useRef(new Map<number, (prev: Generation[]) => Generation[]>());
+  const pending = useRef(new Map<number, Change>());
   const changes = useRef(0);
   const visible = useRef("");
   const latestRefresh = useRef<() => Promise<Generation[] | null>>(async () => null);
@@ -44,7 +49,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       const { generations } = await studio.list(80, hidden, favorite);
       if (mine !== visible.current || id <= applied.current || id <= changedAt.current) return generations;
       applied.current = id;
-      setItems([...pending.current.values()].reduce((list, apply) => apply(list), generations));
+      setItems([...pending.current.values()].reduce((list, apply) => apply(list, { hidden, favorite }), generations));
       setError(null);
       setLoading(false);
       return generations;
@@ -98,11 +103,11 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   /** Un cambio de la lista: se ve al momento (`optimistic`), se envía en orden tras los anteriores y, al terminar
    * (bien o mal), se descarta lo leído mientras tanto y se vuelve a leer el estado confirmado. */
   const change = useCallback(
-    <T,>(optimistic: (prev: Generation[]) => Generation[], send: () => Promise<T>): Promise<T> => {
+    <T,>(optimistic: Change, send: () => Promise<T>): Promise<T> => {
       const key = ++changes.current;
       pending.current.set(key, optimistic);
       invalidate();
-      setItems(optimistic);
+      setItems((prev) => optimistic(prev, { hidden, favorite }));
       const run = queue.current.then(send, send);
       queue.current = run.catch(() => undefined);
       const settle = () => {
@@ -114,7 +119,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       run.then(settle, settle);
       return run;
     },
-    [invalidate],
+    [invalidate, hidden, favorite],
   );
 
   /** Borra del historial una generación terminada. */
@@ -128,8 +133,12 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   /** Oculta o vuelve a mostrar varias: salen de esta lista al momento. */
   const setHidden = useCallback(
     (ids: string[], value: boolean) => {
-      const gone = new Set(ids);
-      return change((prev) => prev.filter((g) => !gone.has(g.id)), () => studio.hide(ids, value));
+      const touched = new Set(ids);
+      // Sale de la lista que ya no le corresponde (la biblioteca o las ocultas) y queda marcada en la otra.
+      return change(
+        (prev, q) => (q.hidden !== value ? prev.filter((g) => !touched.has(g.id)) : prev.map((g) => (touched.has(g.id) ? { ...g, hidden: value } : g))),
+        () => studio.hide(ids, value),
+      );
     },
     [change],
   );
@@ -139,11 +148,11 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
     (ids: string[], value: boolean) => {
       const touched = new Set(ids);
       return change(
-        (prev) => (favorite && !value ? prev.filter((g) => !touched.has(g.id)) : prev.map((g) => (touched.has(g.id) ? { ...g, favorite: value } : g))),
+        (prev, q) => (q.favorite && !value ? prev.filter((g) => !touched.has(g.id)) : prev.map((g) => (touched.has(g.id) ? { ...g, favorite: value } : g))),
         () => studio.favorite(ids, value),
       );
     },
-    [change, favorite],
+    [change],
   );
 
   return { items, loading, error, refresh, add, remove, setHidden, setFavorite };
