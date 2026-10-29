@@ -84,6 +84,17 @@ export function useCanvasEdit({
     if (runs.length !== prev.runs.length) runsById.current.set(nodeId, { runs, selected: runs.length - 1 });
   }, []);
 
+  /** Olvida generaciones borradas: deshacer o rehacer ya no las devuelve a ningún nodo. */
+  const forget = useCallback((jobIds: Set<string>) => {
+    for (const [nodeId, prev] of runsById.current) {
+      if (!prev.runs.some((r) => jobIds.has(r))) continue;
+      const chosen = prev.selected === undefined ? undefined : prev.runs[prev.selected];
+      const runs = prev.runs.filter((r) => !jobIds.has(r));
+      const keep = chosen !== undefined && !jobIds.has(chosen) ? runs.indexOf(chosen) : runs.length - 1;
+      runsById.current.set(nodeId, { runs, selected: runs.length ? Math.max(keep, 0) : undefined });
+    }
+  }, []);
+
   /** Lleva a la historia, ya, un cambio que aún no se asentó: deshacer parte del lienzo que se ve (revisión 76). */
   const flush = useCallback(() => {
     const key = keyOf(nodesRef.current, edgesRef.current);
@@ -206,5 +217,5 @@ export function useCanvasEdit({
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, copy, paste, duplicate]);
 
-  return { undo, redo, duplicate, recordRuns, patchHistory };
+  return { undo, redo, duplicate, recordRuns, forget, patchHistory };
 }

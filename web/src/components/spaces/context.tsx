@@ -26,6 +26,8 @@ export type SpaceCtx = {
   run: (nodeId: string) => void;
   /** Mezcla `patch` en los datos del nodo (texto, medio, generador o lista). */
   update: (nodeId: string, patch: Partial<TextData & NoteData & GeneratorData> & Partial<MediaData | ListData>) => void;
+  /** Borra un intento del generador: del historial y del nodo. Falla (sin tocar el nodo) si sigue en curso. */
+  removeRun: (nodeId: string, jobId: string) => Promise<void>;
   /** Cambia un ajuste del generador sobre su estado más reciente (dos cambios seguidos no se pisan). */
   setValue: (nodeId: string, key: string, value: unknown) => void;
   changeModel: (nodeId: string, model: string) => void;

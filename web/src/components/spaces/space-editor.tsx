@@ -72,6 +72,23 @@ import { GeneratorNodeView, ListNodeView, MediaNodeView, NoteNodeView, portLabel
 
 const NODE_TYPES: NodeTypes = { text: TextNodeView, media: MediaNodeView, generator: GeneratorNodeView, note: NoteNodeView, list: ListNodeView };
 const POLL_MS = 2500;
+/** Peticiones simultáneas del sondeo y cuántos intentos viejos (no elegidos ni en curso) carga en cada vuelta. */
+const POLL_BATCH = 6;
+const HISTORY_PER_TICK = 12;
+
+/** Quita de los generadores los intentos que ya no existen, sin perder el que estaba elegido. */
+function dropRuns(ns: SpaceNode[], ids: Set<string>): SpaceNode[] {
+  let changed = false;
+  const next = ns.map((n) => {
+    if (n.type !== "generator" || !n.data.runs.some((r) => ids.has(r))) return n;
+    changed = true;
+    const chosen = selectedRun(n.data);
+    const runs = n.data.runs.filter((r) => !ids.has(r));
+    const keep = chosen && !ids.has(chosen) ? runs.indexOf(chosen) : runs.length - 1;
+    return { ...n, data: { ...n.data, runs, selected: runs.length ? Math.max(keep, 0) : undefined } };
+  });
+  return changed ? next : ns;
+}
 const SAVE_DELAY_MS = 900;
 /** Cada cuánto se mira si el lienzo cambió fuera (otra pestaña o un agente por MCP). */
 const SYNC_MS = 3000;
@@ -157,7 +174,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
 
   const [nodes, setNodes, onNodesChange] = useNodesState<SpaceNode>(space.graph.nodes.map(normalizeNode));
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(space.graph.edges);
-  const { undo, redo, duplicate, recordRuns, patchHistory } = useCanvasEdit({ nodes, edges, setNodes, setEdges });
+  const { undo, redo, duplicate, recordRuns, forget, patchHistory } = useCanvasEdit({ nodes, edges, setNodes, setEdges });
   // Herramienta del lienzo, como en Magnific: seleccionar (arrastrar marca una caja), mano (arrastrar mueve la
   // vista) o tijera (clic en una conexión la corta).
   const [mode, setMode] = useState<"select" | "hand" | "cut">("select");
@@ -236,17 +253,22 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       const known = jobsRef.current;
-      const wanted = new Set<string>();
+      const skip = (i: string) => goneRef.current.has(i) || (!!known[i] && known[i].terminal);
+      // Primero lo que se ve o sigue en curso; luego, de a poco, el resto de intentos de cada generador (la
+      // cuadrícula del nodo los muestra a la vez). Los terminados se leen una sola vez.
+      const first = new Set<string>();
       for (const n of nodesRef.current) {
         if (n.type !== "generator") continue;
         const j = selectedRun(n.data);
-        if (j) wanted.add(j);
+        if (j) first.add(j);
       }
-      for (const j of Object.values(known)) if (!j.terminal) wanted.add(j.id);
-      const ids = [...wanted].filter((i) => !goneRef.current.has(i) && (!known[i] || !known[i].terminal));
-      if (ids.length) {
+      for (const j of Object.values(known)) if (!j.terminal) first.add(j.id);
+      const rest = nodesRef.current.flatMap((n) => (n.type === "generator" ? n.data.runs : [])).filter((i) => !first.has(i));
+      const ids = [...[...first].filter((i) => !skip(i)), ...[...new Set(rest)].filter((i) => !skip(i)).slice(0, HISTORY_PER_TICK)];
+      // En tandas pequeñas, publicando cada una al llegar: una petición lenta no retiene las demás.
+      for (let at = 0; at < ids.length && alive; at += POLL_BATCH) {
         const results = await Promise.all(
-          ids.map((i) =>
+          ids.slice(at, at + POLL_BATCH).map((i) =>
             studio.get(i).then(
               (g) => ({ id: i, g, lost: false }),
               (e) => ({ id: i, g: null, lost: e instanceof StudioError && e.status === 404 }),
@@ -256,8 +278,14 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
         if (!alive) return;
         const got = results.filter((r) => r.g);
         if (got.length) setJobs((prev) => ({ ...prev, ...Object.fromEntries(got.map((r) => [r.id, r.g!])) }));
-        const lost = results.filter((r) => r.lost).map((r) => r.id);
-        if (lost.length) setGone((prev) => new Set([...prev, ...lost]));
+        const lost = new Set(results.filter((r) => r.lost).map((r) => r.id));
+        if (lost.size) {
+          goneRef.current = new Set([...goneRef.current, ...lost]); // ya, sin esperar al render
+          setGone((prev) => new Set([...prev, ...lost]));
+          forget(lost);
+          // Borrada del historial (aquí o en otro lado): sale también del nodo, aunque una corrida la reinsertara.
+          setNodes((ns) => dropRuns(ns, lost));
+        }
       }
       if (alive) timer = setTimeout(tick, POLL_MS);
     };
@@ -266,7 +294,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       alive = false;
       clearTimeout(timer);
     };
-  }, []);
+  }, [setNodes, forget]);
 
   const nodeName = useCallback(
     (n: SpaceNode) => {
@@ -592,6 +620,33 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   const update = useCallback<SpaceCtx["update"]>(
     (nodeId, patch) => setNodes((ns) => ns.map((n) => (n.id === nodeId ? ({ ...n, data: { ...n.data, ...patch } } as SpaceNode) : n))),
     [setNodes],
+  );
+
+  /** Borra un intento: lo quita del historial (si ya terminó) y del nodo. Uno que ya no existe solo sale del nodo. */
+  const removeRun = useCallback<SpaceCtx["removeRun"]>(
+    async (nodeId, jobId) => {
+      try {
+        await studio.remove(jobId);
+      } catch (e) {
+        if (!(e instanceof StudioError && e.status === 404)) throw e;
+      }
+      goneRef.current = new Set([...goneRef.current, jobId]); // ya, sin esperar al render
+      setGone((prev) => new Set([...prev, jobId]));
+      forget(new Set([jobId]));
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (n.id !== nodeId || n.type !== "generator") return n;
+          const at = n.data.runs.indexOf(jobId);
+          if (at < 0) return n;
+          const runs = n.data.runs.filter((r) => r !== jobId);
+          const current = n.data.selected ?? n.data.runs.length - 1;
+          // Sigue en el mismo intento; si era el borrado, en el anterior (o el siguiente, si era el primero).
+          const next = current > at ? current - 1 : current === at ? Math.max(at - 1, 0) : current;
+          return { ...n, data: { ...n.data, runs, selected: runs.length ? Math.min(next, runs.length - 1) : undefined } };
+        }),
+      );
+    },
+    [setNodes, forget],
   );
 
   const setValue = useCallback<SpaceCtx["setValue"]>(
@@ -954,7 +1009,7 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
       const byNode = new Map<string, string[]>();
       for (const step of r.order) {
         const job = r.nodes[step]?.job_id;
-        if (!job) continue;
+        if (!job || goneRef.current.has(job)) continue;
         const [nodeId] = splitStep(step);
         byNode.set(nodeId, [...(byNode.get(nodeId) ?? []), job]);
       }
@@ -1170,8 +1225,8 @@ function Canvas({ space, models: list, onReload }: { space: Space; models: Model
   }, [nodes, edges]);
 
   const ctx = useMemo<SpaceCtx>(
-    () => ({ models, details, jobs, gone, edges, signatures, estimates, runStates, run: runNode, update, setValue, changeModel, runFrom, runNodes, runBusy, times }),
-    [models, details, jobs, gone, edges, signatures, estimates, runStates, runNode, update, setValue, changeModel, runFrom, runNodes, runBusy, times],
+    () => ({ models, details, jobs, gone, edges, signatures, estimates, runStates, run: runNode, update, removeRun, setValue, changeModel, runFrom, runNodes, runBusy, times }),
+    [models, details, jobs, gone, edges, signatures, estimates, runStates, runNode, update, removeRun, setValue, changeModel, runFrom, runNodes, runBusy, times],
   );
 
   const tools: { icon: typeof Type; label: string; onClick: () => void }[] = [

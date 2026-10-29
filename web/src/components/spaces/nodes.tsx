@@ -2,7 +2,7 @@
 
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, FileAudio, ImageIcon, ListChecks, Loader2, Maximize2, Minus, Play, Plus, StickyNote, Type, Upload, Video, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, FileAudio, ImageIcon, LayoutGrid, ListChecks, Loader2, Maximize2, Minus, Play, Plus, Square, StickyNote, Trash2, Type, Upload, Video, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
@@ -14,7 +14,7 @@ import { workflowLabel } from "@/lib/i18n/workflow";
 import { humanize, type Field } from "@/lib/schema";
 import { DERIVED_OUTPUTS, inPorts, isAssistant, isAudioNode, isTool, KIND_COLOR, kindOfUrl, LIST_INPUT, listFeeder, MAX_LIST_ITEMS, MAX_VARIANTS, newId, settingFields, validValues, type GeneratorNode, type ListItem, type ListNode, type MediaNode, type NoteNode, type PortKind, type TextNode } from "@/lib/spaces";
 import { costShort, modelLabel, outputSrc, studio, uniqueModels } from "@/lib/studio";
-import type { ModelDetail, Output } from "@/lib/types";
+import type { Generation, ModelDetail, Output } from "@/lib/types";
 import { selectedRun, useSpace } from "./context";
 
 const KIND_ICON = { text: Type, image: ImageIcon, video: Video, audio: FileAudio };
@@ -332,6 +332,76 @@ function QuickControls({ id, detail, values }: { id: string; detail: ModelDetail
   );
 }
 
+/** Borrar un intento: el primer clic pide confirmación y el segundo borra (se olvida a los 3 s). */
+function DeleteRun({ nodeId, job, images, className }: { nodeId: string; job: string; images: number; className?: string }) {
+  const { t } = useI18n();
+  const s = t.spaces;
+  const { removeRun, runStates } = useSpace();
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(timer);
+  }, [armed]);
+  const title = error ?? (images > 1 ? s.deleteRunMany(images) : s.deleteRun);
+  return (
+    <button
+      type="button"
+      aria-label={title}
+      title={title}
+      disabled={busy || !!runStates[nodeId]?.busy}
+      onClick={async (e) => {
+        e.stopPropagation();
+        if (!armed) return setArmed(true);
+        setBusy(true);
+        setError(null);
+        try {
+          await removeRun(nodeId, job);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          setBusy(false);
+          setArmed(false);
+        }
+      }}
+      className={clsx(
+        "nodrag flex items-center gap-1 rounded-lg p-1.5 text-[11px] font-semibold text-white transition-colors disabled:opacity-50",
+        armed ? "bg-danger hover:brightness-110" : "bg-black/60 hover:bg-black/80",
+        error && "ring-1 ring-danger",
+        className,
+      )}
+    >
+      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+      {armed && s.confirmDeleteRun}
+    </button>
+  );
+}
+
+/** Lo que muestra un intento sin salida: en curso, fallido o borrado. */
+function RunStatus({ job, gone, compact }: { job?: Generation; gone: boolean; compact?: boolean }) {
+  const { t } = useI18n();
+  const s = t.spaces;
+  if (job && !job.terminal)
+    return (
+      <div className="flex flex-col items-center gap-2 text-[12px] text-fg-3">
+        <Loader2 className={clsx("animate-spin text-lime", compact ? "size-5" : "size-6")} />
+        {!compact && (job.status === "awaiting_approval" ? s.awaiting : s.running)}
+        <span className="font-mono">{Math.round(job.elapsed_seconds)} s</span>
+      </div>
+    );
+  if (job)
+    return (
+      <div className="flex flex-col items-center gap-1 px-2 text-center text-[12px] text-danger">
+        <AlertTriangle className="size-5" />
+        {s.failed}
+        {job.error && <span className={clsx("text-fg-3", compact ? "line-clamp-2 text-[10px]" : "line-clamp-3")}>{job.error}</span>}
+      </div>
+    );
+  return <span className="text-[12px] text-fg-4">{gone ? "—" : "…"}</span>;
+}
+
 export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNode>) {
   const { t, locale } = useI18n();
   const s = t.spaces;
@@ -367,6 +437,20 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
   const jobId = selectedRun(data);
   const job = jobId ? jobs[jobId] : undefined;
   const out = job?.status === "completed" ? job.outputs[0] : undefined;
+  // Cuadrícula: cada imagen de cada intento a la vez (un intento puede traer varias, como Ads Studio).
+  const [grid, setGrid] = useState(false);
+  const tiles = runs.flatMap((r, i) => {
+    const j = jobs[r];
+    const outs = j?.status === "completed" ? j.outputs : [];
+    return outs.length ? outs.map((o, k) => ({ run: r, i, out: o as Output | undefined, k, images: outs.length })) : [{ run: r, i, out: undefined, k: 0, images: 0 }];
+  });
+  const canGrid = tiles.length > 1;
+  const showGrid = grid && canGrid;
+  const columns = Math.min(tiles.length, 3);
+  const extra = job?.status === "completed" ? job.outputs.length - 1 : 0;
+  useEffect(() => {
+    updateInternals(id);
+  }, [id, showGrid, updateInternals]);
   const state = runStates[id] ?? {};
   const est = estimates[id];
   const fresh = est && est.key === signatures[id] ? est.value : null;
@@ -380,7 +464,7 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
   const sameOutput = switchable ? uniqueModels(models).filter((m) => m.output === summary?.output && !isTool(m.id)) : [];
 
   return (
-    <div className="w-[320px]">
+    <div className={showGrid && columns === 3 ? "w-[480px]" : "w-[320px]"}>
       <Title icon={Icon} color={KIND_COLOR[outKind]}>
         {switchable ? (
           <button type="button" title={s.changeModel} onClick={() => setPicking(true)} className="nodrag flex min-w-0 items-center gap-1 rounded hover:text-fg">
@@ -411,41 +495,75 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
         )}
 
         <div className="relative px-3 pt-2">
-          <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl bg-surface-3">
-            {out ? (
-              <Preview out={out} />
-            ) : working ? (
-              <div className="flex flex-col items-center gap-2 text-[12px] text-fg-3">
-                <Loader2 className="size-6 animate-spin text-lime" />
-                {job?.status === "awaiting_approval" ? s.awaiting : s.running}
-                {job && <span className="font-mono">{Math.round(job.elapsed_seconds)} s</span>}
-              </div>
-            ) : job ? (
-              <div className="flex flex-col items-center gap-1 px-4 text-center text-[12px] text-danger">
-                <AlertTriangle className="size-5" />
-                {s.failed}
-                {job.error && <span className="line-clamp-3 text-fg-3">{job.error}</span>}
-              </div>
-            ) : jobId && gone.has(jobId) ? (
-              <span className="text-[12px] text-fg-4">—</span>
-            ) : (
-              <Icon className="size-8 text-fg-4" />
-            )}
-          </div>
+          {showGrid ? (
+            <div className="nowheel thin-scrollbar grid max-h-[560px] gap-1.5 overflow-y-auto rounded-xl" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+              {tiles.map((tile) => {
+                const j = jobs[tile.run];
+                return (
+                  <div
+                    key={`${tile.run}-${tile.k}`}
+                    onClick={() => update(id, { selected: tile.i })}
+                    className={clsx(
+                      "group/tile relative flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-lg bg-surface-3 ring-2 transition",
+                      tile.i === index ? "ring-lime" : "ring-transparent hover:ring-line-2",
+                    )}
+                  >
+                    {tile.out ? <Preview out={tile.out} className="object-cover" /> : <RunStatus job={j} gone={gone.has(tile.run)} compact />}
+                    {(!j || j.terminal) && (
+                      <DeleteRun nodeId={id} job={tile.run} images={tile.images} className="absolute top-1 left-1 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="group/main relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl bg-surface-3">
+              {out ? (
+                <Preview out={out} />
+              ) : working || job || (jobId && gone.has(jobId)) ? (
+                <RunStatus job={job} gone={!!jobId && gone.has(jobId)} />
+              ) : (
+                <Icon className="size-8 text-fg-4" />
+              )}
+              {extra > 0 && (
+                <button type="button" title={s.gridView} onClick={() => setGrid(true)} className="nodrag absolute bottom-1.5 right-1.5 rounded-lg bg-black/60 px-2 py-1 font-mono text-[11px] text-white hover:bg-black/80">
+                  {s.moreImages(extra)}
+                </button>
+              )}
+              {jobId && (!job || job.terminal) && (
+                <DeleteRun key={jobId} nodeId={id} job={jobId} images={job?.outputs.length ?? 0} className="absolute top-1.5 left-1.5 opacity-0 group-hover/main:opacity-100 focus-visible:opacity-100" />
+              )}
+            </div>
+          )}
           <Dot kind={outKind} type="source" id="out" top="50%" />
         </div>
 
-        {runs.length > 1 && (
+        {(runs.length > 1 || canGrid) && (
           <div className="flex items-center justify-center gap-2 pt-1.5 text-[12px] text-fg-3">
-            <button type="button" aria-label="prev" disabled={index <= 0} onClick={() => update(id, { selected: index - 1 })} className="nodrag rounded p-0.5 hover:text-fg disabled:opacity-30">
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="font-mono">
-              {index + 1}/{runs.length}
-            </span>
-            <button type="button" aria-label="next" disabled={index >= runs.length - 1} onClick={() => update(id, { selected: index + 1 })} className="nodrag rounded p-0.5 hover:text-fg disabled:opacity-30">
-              <ChevronRight className="size-4" />
-            </button>
+            {runs.length > 1 && !showGrid && (
+              <>
+                <button type="button" aria-label="prev" disabled={index <= 0} onClick={() => update(id, { selected: index - 1 })} className="nodrag rounded p-0.5 hover:text-fg disabled:opacity-30">
+                  <ChevronLeft className="size-4" />
+                </button>
+                <span className="font-mono">
+                  {index + 1}/{runs.length}
+                </span>
+                <button type="button" aria-label="next" disabled={index >= runs.length - 1} onClick={() => update(id, { selected: index + 1 })} className="nodrag rounded p-0.5 hover:text-fg disabled:opacity-30">
+                  <ChevronRight className="size-4" />
+                </button>
+              </>
+            )}
+            {canGrid && (
+              <button
+                type="button"
+                title={showGrid ? s.singleView : s.gridView}
+                onClick={() => setGrid(!showGrid)}
+                className="nodrag flex items-center gap-1 rounded px-1 py-0.5 hover:text-fg"
+              >
+                {showGrid ? <Square className="size-3.5" /> : <LayoutGrid className="size-3.5" />}
+                {showGrid ? s.singleView : s.gridView}
+              </button>
+            )}
           </div>
         )}
 
