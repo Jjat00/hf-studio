@@ -414,3 +414,21 @@ async def test_a_price_table_saved_by_an_older_parser_is_downloaded_again(tmp_pa
     assert Fake.calls == 1 and "z-image-turbo|default" in book.prices("apimart")
     await book.refresh({"apimart": Fake()})  # ya con el formato nuevo y reciente: no se descarga
     assert Fake.calls == 1
+
+
+def test_a_batch_that_fails_by_parts_keeps_its_reason():
+    """Ads Studio falla sin `error`: el motivo llega en `errors`, uno por imagen."""
+    from hf_studio.higgsfield import polled
+
+    result = {
+        "status": "failed",
+        "images": [],
+        "errors": [{"index": i, "status": "failed", "error": "Image generation failed"} for i in range(3)],
+    }
+    assert polled(result).error == "Image generation failed (3 images)"
+    mixed = {"status": "failed", "errors": [{"error": "A"}, {"error": "B"}, {"error": "A"}, {"index": 3}]}
+    assert polled(mixed).error == "A (2 images); B"
+    assert (
+        polled({"status": "failed", "error": "Own reason", "errors": [{"error": "A"}]}).error == "Own reason"
+    )
+    assert polled({"status": "failed"}).error is None

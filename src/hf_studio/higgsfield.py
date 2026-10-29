@@ -270,11 +270,24 @@ def extract_outputs(result: dict) -> list[dict]:
     return outputs
 
 
+def item_errors(result: dict) -> str | None:
+    """Motivo de un lote que falla por partes (Ads Studio): Higgsfield no da `error`, sino `errors` con uno por
+    imagen. Se resume en un texto: cada motivo distinto y en cuántas imágenes ocurrió."""
+    items = result.get("errors")
+    if not isinstance(items, list):
+        return None
+    messages = [str(e.get("error")) for e in items if isinstance(e, dict) and e.get("error")]
+    if not messages:
+        return None
+    counts = {m: messages.count(m) for m in dict.fromkeys(messages)}
+    return "; ".join(m if n == 1 else f"{m} ({n} images)" for m, n in counts.items())
+
+
 def polled(result: dict) -> Polled:
     """Normaliza una respuesta de estado de Higgsfield."""
     status = result.get("status")
     if status in TERMINAL_STATUSES:
-        error = result.get("error")
+        error = result.get("error") or item_errors(result)
         if status == "nsfw":
             error = error or "Content moderation rejected the input or output (not charged)"
         return Polled(status, extract_outputs(result), error, result)
