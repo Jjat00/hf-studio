@@ -83,26 +83,55 @@ function TextPreview({ src }: { src: string }) {
   );
 }
 
-/** Imagen o video a pantalla completa, sobre todo lo demás. Se cierra con Esc, con la X o tocando el fondo. */
-function Lightbox({ src, kind, onClose }: { src: string; kind: "image" | "video"; onClose: () => void }) {
+type Viewable = { src: string; kind: "image" | "video" };
+
+/** Imágenes o videos a pantalla completa, sobre todo lo demás. Con varios, flechas (y ← →) pasan de uno a otro.
+ * Se cierra con Esc, con la X o tocando el fondo. */
+function Lightbox({ items, start, onClose }: { items: Viewable[]; start: number; onClose: () => void }) {
   const { t } = useI18n();
+  // Se sigue la salida abierta, no su posición: el sondeo puede añadir intentos a la galería con el visor abierto.
+  const [current, setCurrent] = useState(items[start]?.src);
+  const found = items.findIndex((v) => v.src === current);
+  // Si la que estaba abierta desaparece (borrada), queda la de origen o la última que haya.
+  const i = found >= 0 ? found : Math.max(Math.min(start, items.length - 1), 0);
+  const many = items.length > 1;
+  const go = (step: number) => setCurrent(items[(i + step + items.length) % items.length].src);
+  const { src, kind } = items[i] ?? { src: "", kind: "image" };
+  const box = useRef<HTMLDivElement>(null);
+  // El foco pasa al visor: sus teclas no llegan al nodo (React Flow movería el nodo con las flechas) y vuelve al cerrar.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    const before = document.activeElement as HTMLElement | null;
+    box.current?.focus();
+    return () => before?.focus?.();
+  }, []);
+  const onKey = (e: React.KeyboardEvent) => {
+    e.stopPropagation();
+    if (e.key === "Escape") onClose();
+    else if (many && (e.key === "ArrowRight" || e.key === "ArrowLeft")) go(e.key === "ArrowRight" ? 1 : -1);
+    else return;
+    e.preventDefault();
+  };
+  const arrow = "absolute top-1/2 -translate-y-1/2 rounded-full bg-surface-2/90 p-2 text-fg-2 hover:text-fg";
   return createPortal(
     <div
+      ref={box}
       role="dialog"
       aria-modal="true"
+      tabIndex={-1}
       // Los eventos de un portal suben por el árbol de React: sin cortar aquí, el clic seleccionaría el nodo.
       onClick={(e) => {
         e.stopPropagation();
         onClose();
       }}
       onDoubleClick={(e) => e.stopPropagation()}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm sm:p-8">
+      onKeyDown={onKey}
+      className="nokey fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 outline-none backdrop-blur-sm sm:p-8">
       <div className="absolute top-3 right-3 flex items-center gap-2">
+        {many && (
+          <span className="rounded-lg bg-surface-2/90 px-2.5 py-1.5 font-mono text-sm text-fg-2">
+            {i + 1}/{items.length}
+          </span>
+        )}
         <a href={src} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex items-center gap-1.5 rounded-lg bg-surface-2/90 px-3 py-1.5 text-sm text-fg-2 hover:text-fg">
           <ExternalLink className="size-4" /> {t.spaces.openOriginal}
         </a>
@@ -111,18 +140,29 @@ function Lightbox({ src, kind, onClose }: { src: string; kind: "image" | "video"
         </button>
       </div>
       {kind === "video" ? (
-        <video src={src} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg" controls autoPlay loop playsInline />
+        <video key={src} src={src} onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg" controls autoPlay loop playsInline />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" onClick={(e) => e.stopPropagation()} className="max-h-full max-w-full rounded-lg object-contain" />
+      )}
+      {many && (
+        <>
+          <button type="button" aria-label={t.spaces.previous} title={t.spaces.previous} onClick={(e) => (e.stopPropagation(), go(-1))} className={clsx(arrow, "left-3")}>
+            <ChevronLeft className="size-6" />
+          </button>
+          <button type="button" aria-label={t.spaces.next} title={t.spaces.next} onClick={(e) => (e.stopPropagation(), go(1))} className={clsx(arrow, "right-3")}>
+            <ChevronRight className="size-6" />
+          </button>
+        </>
       )}
     </div>,
     document.body,
   );
 }
 
-/** `zoomable`: un botón (y doble clic en imágenes) abre la salida a tamaño completo. */
-export function Preview({ out, className, zoomable = true }: { out: Output; className?: string; zoomable?: boolean }) {
+/** `zoomable`: un botón (y doble clic en imágenes) abre la salida a tamaño completo. `gallery`: las demás salidas
+ * entre las que se puede pasar ya ampliada (incluye `out`). */
+export function Preview({ out, className, zoomable = true, gallery }: { out: Output; className?: string; zoomable?: boolean; gallery?: Output[] }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const src = outputSrc(out);
@@ -137,6 +177,10 @@ export function Preview({ out, className, zoomable = true }: { out: Output; clas
       <img src={src} alt="" onDoubleClick={zoomable ? () => setOpen(true) : undefined} className={clsx("size-full object-contain", className)} />
     );
   if (!zoomable) return media;
+  const items: Viewable[] = (gallery ?? [out])
+    .filter((o) => o.kind === "image" || o.kind === "video")
+    .map((o) => ({ src: outputSrc(o), kind: o.kind === "video" ? "video" : "image" }));
+  const at = Math.max(items.findIndex((v) => v.src === src), 0);
   return (
     <div className="group/preview relative flex size-full items-center justify-center">
       {media}
@@ -149,7 +193,7 @@ export function Preview({ out, className, zoomable = true }: { out: Output; clas
       >
         <Maximize2 className="size-3.5" />
       </button>
-      {open && <Lightbox src={src} kind={kind} onClose={() => setOpen(false)} />}
+      {open && <Lightbox items={items.length ? items : [{ src, kind }]} start={items.length ? at : 0} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -445,6 +489,8 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
     return outs.length ? outs.map((o, k) => ({ run: r, i, out: o as Output | undefined, k, images: outs.length })) : [{ run: r, i, out: undefined, k: 0, images: 0 }];
   });
   const canGrid = tiles.length > 1;
+  // Ampliada, una imagen deja pasar a las demás del nodo, en el orden de la cuadrícula.
+  const gallery = tiles.flatMap((tile) => (tile.out ? [tile.out] : []));
   const showGrid = grid && canGrid;
   const columns = Math.min(tiles.length, 3);
   const extra = job?.status === "completed" ? job.outputs.length - 1 : 0;
@@ -508,7 +554,7 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
                       tile.i === index ? "ring-lime" : "ring-transparent hover:ring-line-2",
                     )}
                   >
-                    {tile.out ? <Preview out={tile.out} className="object-cover" /> : <RunStatus job={j} gone={gone.has(tile.run)} compact />}
+                    {tile.out ? <Preview out={tile.out} gallery={gallery} className="object-cover" /> : <RunStatus job={j} gone={gone.has(tile.run)} compact />}
                     {(!j || j.terminal) && (
                       <DeleteRun nodeId={id} job={tile.run} images={tile.images} className="absolute top-1 left-1 opacity-0 group-hover/tile:opacity-100 focus-visible:opacity-100" />
                     )}
@@ -519,7 +565,7 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
           ) : (
             <div className="group/main relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-xl bg-surface-3">
               {out ? (
-                <Preview out={out} />
+                <Preview out={out} gallery={gallery} />
               ) : working || job || (jobId && gone.has(jobId)) ? (
                 <RunStatus job={job} gone={!!jobId && gone.has(jobId)} />
               ) : (
