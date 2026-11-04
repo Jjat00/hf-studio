@@ -3,7 +3,7 @@
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, FileAudio, ImageIcon, LayoutGrid, ListChecks, Loader2, Maximize2, Minus, Play, Plus, Square, StickyNote, Trash2, Type, Upload, Video, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
 import { ApprovalActions } from "@/components/generations/generation-card";
@@ -198,6 +198,30 @@ export function Preview({ out, className, zoomable = true, gallery }: { out: Out
   );
 }
 
+/**
+ * Textarea de un nodo. React Flow pasa los nodos a su store en un efecto, así que el nodo se vuelve a pintar un
+ * ciclo después del tecleo: con un textarea controlado por `data`, React restaura el valor viejo y luego pone el
+ * nuevo, y el cursor salta al final. El texto vive aquí mientras se escribe y solo se toma de fuera si cambia allí.
+ */
+function NodeTextarea({ value, onValue, ...rest }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange"> & { value: string; onValue: (v: string) => void }) {
+  const [text, setText] = useState(value);
+  const [outer, setOuter] = useState(value);
+  if (value !== outer) {
+    setOuter(value);
+    if (value !== text) setText(value);
+  }
+  return (
+    <textarea
+      {...rest}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        onValue(e.target.value);
+      }}
+    />
+  );
+}
+
 export function TextNodeView({ id, data, selected }: NodeProps<TextNode>) {
   const { t } = useI18n();
   const { update } = useSpace();
@@ -207,9 +231,9 @@ export function TextNodeView({ id, data, selected }: NodeProps<TextNode>) {
         {t.spaces.addText}
       </Title>
       <Card selected={selected} className="relative">
-        <textarea
+        <NodeTextarea
           value={data.text}
-          onChange={(e) => update(id, { text: e.target.value })}
+          onValue={(v) => update(id, { text: v })}
           placeholder={t.spaces.textPlaceholder}
           rows={5}
           className="nodrag nowheel thin-scrollbar w-full resize-none bg-transparent p-3.5 text-[13px] leading-relaxed outline-none placeholder:text-fg-4"
@@ -233,9 +257,9 @@ export function NoteNodeView({ id, data, selected }: NodeProps<NoteNode>) {
       <div className="flex items-center gap-1 px-2 pt-1 text-[11px] text-warning/70">
         <StickyNote className="size-3" /> {t.spaces.addNote}
       </div>
-      <textarea
+      <NodeTextarea
         value={data.text}
-        onChange={(e) => update(id, { text: e.target.value })}
+        onValue={(v) => update(id, { text: v })}
         placeholder={t.spaces.notePlaceholder}
         rows={4}
         className="nodrag nowheel w-full resize-none bg-transparent p-2 text-[13px] text-[#fdf6c3] outline-none placeholder:text-warning/40"
@@ -615,9 +639,9 @@ export function GeneratorNodeView({ id, data, selected }: NodeProps<GeneratorNod
 
         {hasPrompt && (
           <div className="px-3 pt-2">
-            <textarea
+            <NodeTextarea
               value={typeof data.values.prompt === "string" ? data.values.prompt : ""}
-              onChange={(e) => setValue(id, "prompt", e.target.value || undefined)}
+              onValue={(v) => setValue(id, "prompt", v || undefined)}
               placeholder={outKind === "video" ? s.promptVideo : outKind === "audio" ? s.promptAudio : outKind === "text" ? s.promptAssistant : s.promptImage}
               rows={3}
               className="nodrag nowheel thin-scrollbar w-full resize-none rounded-xl bg-surface-3 p-2.5 text-[13px] leading-relaxed outline-none placeholder:text-fg-4 focus:bg-surface-4"
@@ -763,9 +787,9 @@ export function ListNodeView({ id, data, selected }: NodeProps<ListNode>) {
                 className="nodrag mt-1 accent-lime"
               />
               {kind === "text" ? (
-                <textarea
+                <NodeTextarea
                   value={item.value}
-                  onChange={(e) => setItems(data.items.map((x) => (x.id === item.id ? { ...x, value: e.target.value } : x)))}
+                  onValue={(v) => setItems(data.items.map((x) => (x.id === item.id ? { ...x, value: v } : x)))}
                   placeholder={s.listItemPlaceholder}
                   rows={2}
                   className="nodrag nowheel min-w-0 flex-1 resize-none bg-transparent text-[12px] leading-snug outline-none placeholder:text-fg-4"
