@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import shutil
@@ -51,6 +52,18 @@ class FakeElevenLabs:
             return httpx.Response(200, json={"voices": [
                 {"voice_id": "lib1", "name": "Ghoul", "public_owner_id": "owner1", "gender": "male"}
             ], "has_more": False})  # fmt: skip
+        if path == "/v1/voices/add":
+            return httpx.Response(200, json={"voice_id": "clone1", "requires_verification": False})
+        if path == "/v1/text-to-voice/design":
+            audio = base64.b64encode(self.voice_wav).decode()
+            return httpx.Response(200, json={"text": json.loads(request.content)["text"], "previews": [
+                {"audio_base_64": audio, "generated_voice_id": f"gen{i}", "media_type": "audio/mpeg",
+                 "duration_secs": 3.0, "language": "es"} for i in (1, 2, 3)
+            ]})  # fmt: skip
+        if path == "/v1/text-to-voice":
+            return httpx.Response(200, json={"voice_id": "designed1", "name": "Narrador"})
+        if request.method == "DELETE" and path.startswith("/v1/voices/"):
+            return httpx.Response(200, json={"status": "ok"})
         if path == "/v1/voices/add/owner1/lib1":
             return httpx.Response(200, json={"voice_id": "added1"})
         if path == "/v1/history":
@@ -414,3 +427,78 @@ async def test_listing_sounds_registers_finished_audio_jobs_missing_from_the_lib
     assert (await http.get("/v1/sounds")).json()["sounds"][0]["title"] == "door creaking slowly"
     async with app.state.sessions() as s:
         assert await s.scalar(select(func.count()).select_from(Sound)) == 1
+
+
+async def test_clone_voice_needs_consent_and_enough_voice(voice_env, tmp_path):
+    _, http, fake, src = voice_env
+    ffmpeg("-f", "lavfi", "-i", "sine=frequency=300:duration=12", str(tmp_path / "mia.wav"))
+    sample = {"files": ("mia.wav", (tmp_path / "mia.wav").read_bytes(), "audio/wav")}
+    no = await http.post("/v1/voice/clone", data={"name": "Mi voz"}, files=sample)
+    assert no.status_code == 422 and no.json()["error"]["code"] == "consent_required"
+    assert not [c for c in fake.calls if c.url.path == "/v1/voices/add"]
+
+    # Una muestra de video de 6 s no alcanza los 10 s; con el audio de 12 s sí.
+    short = await http.post(
+        "/v1/voice/clone", data={"name": "Mi voz", "consent": "true", "source_generation_ids": [src]}
+    )
+    assert short.json()["error"]["code"] == "samples_too_short"
+    ok = await http.post(
+        "/v1/voice/clone",
+        data={"name": "Mi voz", "consent": "true", "source_generation_ids": [src]},
+        files=sample,
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["voice_id"] == "clone1" and ok.json()["sample_seconds"] == pytest.approx(18, abs=0.3)
+    sent = [c for c in fake.calls if c.url.path == "/v1/voices/add"][-1].content
+    assert sent.count(b'name="files"') == 2 and b'{"language": "es"}' in sent and b"Mi voz" in sent
+
+
+async def test_clone_voice_rejects_files_that_are_not_media(voice_env):
+    _, http, _, _ = voice_env
+    r = await http.post(
+        "/v1/voice/clone",
+        data={"name": "X", "consent": "true"},
+        files={"files": ("a.wav", b"#EXTM3U\nhttps://evil/x.ts\n" * 4, "audio/wav")},
+    )
+    assert r.json()["error"]["code"] == "unsupported_media"
+
+
+async def test_design_voice_quote_samples_and_save(voice_env):
+    _, http, fake, _ = voice_env
+    body = {"description": "Hombre de 50 años, acento colombiano paisa, voz grave y cálida"}
+    no_quote = await http.post("/v1/voice/design", json=body)
+    assert no_quote.json()["error"]["code"] == "quote_invalid"
+
+    est = (await http.post("/v1/voice/design/estimate", json=body)).json()
+    assert est["text"].startswith("Hola") and est["usd"] == round(len(est["text"]) / 1000 * 0.10, 6)
+    done = (await http.post("/v1/voice/design", json={**body, "voice_quote": est["voice_quote"]})).json()
+    assert [p["generated_voice_id"] for p in done["previews"]] == ["gen1", "gen2", "gen3"]
+    assert "audio_base_64" not in done["previews"][0]
+    sent = json.loads(next(c for c in fake.calls if c.url.path == "/v1/text-to-voice/design").content)
+    assert sent["voice_description"] == body["description"] and sent["model_id"] == "eleven_ttv_v3"
+    preview = await http.get(done["previews"][1]["preview_url"])
+    assert preview.status_code == 200 and preview.content == fake.voice_wav
+
+    # La cotización es de un solo uso y solo se guardan muestras propias.
+    again = await http.post("/v1/voice/design", json={**body, "voice_quote": est["voice_quote"]})
+    assert again.json()["error"]["code"] == "quote_invalid"
+    save = {"generated_voice_id": "gen2", "name": "Narrador", "description": body["description"]}
+    saved = await http.post("/v1/voice/design/save", json=save)
+    assert saved.status_code == 201 and saved.json()["voice_id"] == "designed1"
+    other = await http.post("/v1/voice/design/save", json={**save, "generated_voice_id": "ajena"})
+    assert other.status_code == 404
+
+
+async def test_design_voice_in_another_language_needs_text(voice_env):
+    _, http, _, _ = voice_env
+    r = await http.post(
+        "/v1/voice/design/estimate", json={"description": "A deep calm narrator voice", "language": "fr"}
+    )
+    assert r.status_code == 422
+
+
+async def test_delete_voice(voice_env):
+    _, http, fake, _ = voice_env
+    assert (await http.delete("/v1/voice/voices/clone1")).json() == {"deleted": "clone1"}
+    assert fake.calls[-1].method == "DELETE" and fake.calls[-1].url.path == "/v1/voices/clone1"
+    assert (await http.delete("/v1/voice/voices/a.b")).status_code == 422

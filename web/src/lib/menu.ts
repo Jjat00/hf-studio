@@ -109,7 +109,7 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Efectos de sonido", "Sound Effects"), description: l("Cualquier sonido descrito con palabras", "Any sound described in words"), href: "/audio?tab=sound-effects", icon: Volume2 },
       { title: l("Música", "Music"), description: l("Pistas originales a partir de un prompt", "Original tracks from a prompt"), href: "/audio?tab=music", icon: Music },
       { title: l("Aislar voz", "Voice Isolator"), description: l("Limpia la voz de ruido y música", "Clean speech from noise and music"), href: "/audio?tab=voice-isolator", icon: Waves },
-      { title: l("Voces gratis", "Free voices"), description: l("Voces en español sin costo", "Spanish voices at no cost"), href: "/voices", icon: Users },
+      { title: l("Voces", "Voices"), description: l("Gratis en español, tu cuenta y crear voces", "Free Spanish voices, your account and voice creation"), href: "/voices", icon: Users },
       { title: l("Sonoteca", "Sound library"), description: l("Tus sonidos ordenados y reutilizables", "Your sounds, sorted and reusable"), href: "/sounds", icon: Layers },
     ],
     models: [

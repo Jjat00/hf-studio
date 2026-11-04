@@ -35,6 +35,10 @@ TOOLS = {
     "compose_music": SPEND,
     "isolate_voice": SPEND,
     "elevenlabs_account": READ_EXT,
+    "clone_voice": (False, False, False, True),  # gratis, pero crea una voz en la cuenta
+    "design_voice": SPEND,
+    "save_voice": (False, False, False, True),
+    "delete_voice": (False, True, True, True),
     "list_sounds": (False, False, True, False),  # registra en la sonoteca los audios que falten
     "label_sound": (False, True, True, False),
     "import_elevenlabs_history": (False, False, True, True),
@@ -81,7 +85,7 @@ def test_every_tool_declares_all_four_hints(name):
 
 def test_tools_that_spend_credits_say_so_in_the_title():
     for name in ("generate", "generate_batch", "run_preset", "change_voice", "text_to_speech",
-                 "sound_effect", "compose_music", "isolate_voice", "run_space", "approve_space_run"):  # fmt: skip
+                 "sound_effect", "compose_music", "isolate_voice", "design_voice", "run_space", "approve_space_run"):  # fmt: skip
         assert "spends credits" in _listed()[name].title
 
 
@@ -131,6 +135,9 @@ READS = [
     (lambda: mcp_server.list_elements(), "GET", "/v1/elements", None),
     (lambda: mcp_server.use_output("g1", 1), "POST", "/v1/generations/g1/outputs/1/use", None),
     (lambda: mcp_server.delete_element("el_1"), "DELETE", "/v1/elements/el_1", None),
+    (lambda: mcp_server.delete_voice("v1"), "DELETE", "/v1/voice/voices/v1", None),
+    (lambda: mcp_server.save_voice("gen1", "Narrador", "Voz grave y cálida de narrador"), "POST",
+     "/v1/voice/design/save", None),
 ]  # fmt: skip
 
 
@@ -367,3 +374,21 @@ def test_a_flow_run_ties_its_inputs_to_the_quote(space_calls):
         mcp_server.run_space("s1", quote["quote_id"], version=7, inputs={"t": "un lobo"})
     mcp_server.run_space("s1", quote["quote_id"], version=7, inputs={"t": "un zorro"})
     assert space_calls[-1][2]["json"]["inputs"] == {"t": "un zorro"}
+
+
+def test_clone_voice_sends_local_samples_and_consent(calls, tmp_path):
+    (tmp_path / "yo.m4a").write_bytes(b"audio")
+    mcp_server.clone_voice(
+        "Mi voz", consent=True, sample_paths=[str(tmp_path / "yo.m4a")], source_generation_ids=["g1"]
+    )
+    method, path, kw = calls[-1]
+    assert (method, path) == ("POST", "/v1/voice/clone")
+    assert kw["data"]["consent"] == "true" and kw["data"]["language"] == "es"
+    assert kw["data"]["source_generation_ids"] == ["g1"] and kw["files"][0][1][0] == "yo.m4a"
+
+
+def test_design_voice_quotes_before_spending(calls):
+    quote = mcp_server.design_voice("Mujer joven, acento colombiano, cálida y pausada")
+    assert calls[-1][1] == "/v1/voice/design/estimate" and quote["quote_id"]
+    with pytest.raises(ToolError):
+        mcp_server.design_voice("Otra descripción distinta de la cotizada", quote_id=quote["quote_id"])

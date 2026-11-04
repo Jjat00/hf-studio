@@ -154,6 +154,10 @@ from .voice import (
 from .voice import (
     estimate as voice_estimate,
 )
+from .voice_creation import DESIGN_MODEL, DesignVoiceIn, SaveVoiceIn, design_estimate, preview_path
+from .voice_creation import clone as clone_voice
+from .voice_creation import design as design_voice
+from .voice_creation import save as save_designed_voice
 from .worker import LOCAL_MODELS, Worker
 
 log = logging.getLogger("hf_studio.api")
@@ -2747,6 +2751,144 @@ def create_app(
                               "content_type": "audio/mpeg", "index": 0}]  # fmt: skip
                 await register_sound(s, job, Path(settings.storage_dir))
             await s.commit()
+
+    # --- Crear voces (ElevenLabs): clonar con muestras y diseñar con una descripción -------------
+
+    @app.post("/v1/voice/clone", tags=["voz"], status_code=201)
+    async def voice_clone(
+        request: Request,
+        session: Session,
+        owner: Owner,
+        name: Annotated[str, Form(min_length=1, max_length=100)],
+        consent: Annotated[
+            bool, Form(description="La persona dueña de la voz es quien clona o dio su permiso")
+        ] = False,
+        files: Annotated[list[UploadFile] | None, File(description="Muestras de audio o video")] = None,
+        source_generation_ids: Annotated[list[str] | None, Form()] = None,
+        source_urls: Annotated[list[str] | None, Form(description="URLs de /v1/uploads")] = None,
+        description: Annotated[str | None, Form(max_length=1000)] = None,
+        language: Annotated[str, Form(pattern=r"^[a-z]{2}$")] = "es",
+        remove_background_noise: Annotated[bool, Form()] = False,
+    ) -> dict:
+        """Clonación instantánea: crea en la cuenta de ElevenLabs una voz con las muestras (1 a 2 minutos de voz
+        limpia es lo ideal). No gasta créditos; ocupa un espacio de voces del plan."""
+        if not request.app.state.eleven.configured:
+            raise VoiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
+        if not consent:
+            raise ServiceError(
+                422, "consent_required",
+                "Confirm that the voice is yours or that its owner allowed cloning it (consent=true)",
+            )  # fmt: skip
+        with tempfile.TemporaryDirectory(prefix="hfs-clone-in-") as tmp:
+            sources: list[str] = []
+            for i, upload in enumerate(files or []):
+                path = Path(tmp) / f"upload-{i}"
+                size = 0
+                with path.open("wb") as fh:
+                    while chunk := await upload.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > settings.max_upload_bytes:
+                            raise ServiceError(
+                                413,
+                                "too_large",
+                                f"Maximum {settings.max_upload_bytes // (1024 * 1024)} MB per sample",
+                            )
+                        fh.write(chunk)
+                if size:
+                    sources.append(str(path))
+            for gid in source_generation_ids or []:
+                sources.append(
+                    await audio_source(request, session, owner, IsolateIn(source_generation_id=gid))
+                )
+            for url in source_urls or []:
+                sources.append(await audio_source(request, session, owner, IsolateIn(source_url=url)))
+            return await clone_voice(
+                request.app.state.eleven,
+                sources,
+                name.strip(),
+                description,
+                language,
+                remove_background_noise,
+            )
+
+    @app.post("/v1/voice/design/estimate", tags=["voz"])
+    async def voice_design_estimate(body: DesignVoiceIn, request: Request, owner: Owner) -> dict:
+        """Costo de diseñar una voz (tres muestras; cobra el texto una vez), con un voice_quote de un solo uso."""
+        est = design_estimate(body)
+        quotes: dict = request.app.state.voice_quotes
+        now = time.monotonic()
+        for qid in [q for q, v in quotes.items() if v["expires"] < now]:
+            del quotes[qid]
+        qid = "dq_" + uuid.uuid4().hex
+        digest = input_hash(DESIGN_MODEL, body.model_dump(exclude_none=True, exclude={"voice_quote"}))
+        quotes[qid] = {"owner": owner.id, "digest": digest, "seconds": est["units"],
+                       "expires": now + VOICE_QUOTE_TTL, "used": False}  # fmt: skip
+        return {**est, "text": body.preview_text, "voice_quote": qid}
+
+    @app.post("/v1/voice/design", tags=["voz"])
+    async def voice_design(body: DesignVoiceIn, request: Request, owner: Owner) -> dict:
+        """Genera tres muestras de la voz descrita (gasta créditos). Escúchalas en /v1/voice/previews/{id} y
+        guarda la elegida con /v1/voice/design/save."""
+        if not request.app.state.eleven.configured:
+            raise VoiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
+        digest = input_hash(DESIGN_MODEL, body.model_dump(exclude_none=True, exclude={"voice_quote"}))
+        quote = request.app.state.voice_quotes.get(body.voice_quote or "")
+        if (
+            not quote
+            or quote["owner"] != owner.id
+            or quote["digest"] != digest
+            or quote["used"]
+            or quote["expires"] < time.monotonic()
+        ):
+            raise ServiceError(
+                409,
+                "quote_invalid",
+                "Missing, expired, used or mismatched voice_quote. Quote first (POST /v1/voice/design/estimate)",
+            )
+        quote["used"] = True
+        try:
+            async with request.app.state.voice_slots:
+                result = await design_voice(
+                    request.app.state.eleven, body, Path(settings.storage_dir), owner.id
+                )
+        except VoiceError as exc:
+            if exc.code in ("elevenlabs_network", "elevenlabs_rate_limit"):
+                quote["used"] = False  # no llegó a cobrarse: la misma cotización sirve para reintentar
+            raise
+        est = design_estimate(body)
+        return {
+            **result,
+            "cost_usd": est["usd"],
+            "previews": [
+                {**p, "preview_url": f"/v1/voice/previews/{p['generated_voice_id']}"}
+                for p in result["previews"]
+            ],
+        }
+
+    @app.get("/v1/voice/previews/{generated_voice_id}", tags=["voz"])
+    async def voice_preview(generated_voice_id: str, owner: Owner) -> FileResponse:
+        """MP3 de una muestra de diseño de voz de este cliente."""
+        path = preview_path(Path(settings.storage_dir), owner.id, generated_voice_id)
+        if not path:
+            raise ServiceError(404, "not_found", "Voice sample not found")
+        return FileResponse(
+            path, media_type="audio/mpeg", filename=path.name, content_disposition_type="inline"
+        )
+
+    @app.post("/v1/voice/design/save", tags=["voz"], status_code=201)
+    async def voice_design_save(body: SaveVoiceIn, request: Request, owner: Owner) -> dict:
+        """Guarda en la cuenta la muestra elegida como voz nueva. No gasta créditos."""
+        if not preview_path(Path(settings.storage_dir), owner.id, body.generated_voice_id):
+            raise ServiceError(404, "not_found", "Design that voice first: the sample is not one of yours")
+        return await save_designed_voice(request.app.state.eleven, body)
+
+    @app.delete("/v1/voice/voices/{voice_id}", tags=["voz"])
+    async def voice_delete(voice_id: str, request: Request, _: Owner) -> dict:
+        """Borra de la cuenta de ElevenLabs una voz clonada o diseñada y libera su espacio. No se puede deshacer."""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", voice_id):
+            raise ServiceError(422, "invalid_voice", "Invalid voice_id")
+        await request.app.state.eleven.delete_voice(voice_id)
+        return {"deleted": voice_id}
 
     # --- Sonoteca ------------------------------------------------------------------------------
 

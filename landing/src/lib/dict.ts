@@ -21,7 +21,7 @@ const es = {
   stats: [
     { value: "247", label: "modelos de video e imagen" },
     { value: "3", label: "proveedores, el más barato primero" },
-    { value: "42", label: "herramientas MCP" },
+    { value: "46", label: "herramientas MCP" },
     { value: "0", label: "suscripciones" },
   ],
   tour: {
@@ -213,7 +213,7 @@ const en: Dict = {
   stats: [
     { value: "247", label: "video and image models" },
     { value: "3", label: "providers, cheapest first" },
-    { value: "42", label: "MCP tools" },
+    { value: "46", label: "MCP tools" },
     { value: "0", label: "subscriptions" },
   ],
   tour: {

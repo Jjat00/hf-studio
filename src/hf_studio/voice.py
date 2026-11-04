@@ -12,6 +12,7 @@ lo toca: no queda en `pending` y no tiene `next_check_at`.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import tempfile
 from pathlib import Path
@@ -157,6 +158,7 @@ class ElevenLabsClient:
                 "description": v.get("description"),
                 "labels": v.get("labels") or {},
                 "library": False,
+                "category": v.get("category"),
             }
             for v in data.get("voices", [])
         ]
@@ -226,6 +228,34 @@ class ElevenLabsClient:
 
     async def history_audio(self, history_item_id: str) -> bytes:
         return (await self._request("GET", f"/v1/history/{history_item_id}/audio")).content
+
+    async def clone_voice(
+        self,
+        name: str,
+        samples: list[tuple[str, bytes]],
+        description: str | None,
+        labels: dict,
+        remove_background_noise: bool,
+    ) -> dict:
+        """Clonación instantánea: crea en la cuenta una voz a partir de las muestras (MP3)."""
+        data = {
+            "name": name,
+            "labels": json.dumps(labels),
+            "remove_background_noise": "true" if remove_background_noise else "false",
+            **({"description": description} if description else {}),
+        }
+        files = [("files", (fname, audio, "audio/mpeg")) for fname, audio in samples]
+        return (await self._request("POST", "/v1/voices/add", data=data, files=files)).json()
+
+    async def design_voice(self, body: dict) -> dict:
+        """Muestras de una voz descrita con texto (Voice Design); cada una trae su generated_voice_id."""
+        return (await self._request("POST", "/v1/text-to-voice/design", json=body)).json()
+
+    async def save_designed_voice(self, body: dict) -> dict:
+        return (await self._request("POST", "/v1/text-to-voice", json=body)).json()
+
+    async def delete_voice(self, voice_id: str) -> None:
+        await self._request("DELETE", f"/v1/voices/{voice_id}")
 
     async def isolate(self, audio: bytes) -> bytes:
         response = await self._request(

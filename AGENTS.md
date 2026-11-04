@@ -66,7 +66,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 
 - Map: `api.py` (REST routes), `service.py` (generation logic), `worker.py` (queue and polling),
   `higgsfield.py` (Higgsfield client), `elements.py` (Kling 3.0 elements: local images, refreshed URLs), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
-  provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `free_voices.py`
+  provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `voice_creation.py` (clone a voice from samples or design one from a description, all through the ElevenLabs API), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `store/` (models that only APIMart and KIE sell, `store: true`: one module per family with `MODELS`, its
   routes and price; the router never offers them to Higgsfield), `catalog.json` (91 model schemas,

@@ -56,6 +56,10 @@ dice y su ritmo, con efecto opcional (deep, monster, ghost). Primero sin quote_i
 luego con el quote_id tras el OK del usuario; el resultado es una generación más (get_generation).
 Más audio de ElevenLabs con el mismo patrón (sin quote_id cotiza; con él, lanza): text_to_speech,
 sound_effect, compose_music e isolate_voice. elevenlabs_account muestra el plan y los créditos que quedan.
+Crear voces: clone_voice clona una voz con muestras de audio o video (gratis, ocupa un espacio; solo con el
+permiso de quien es dueño de la voz: consent=True cuando el usuario lo confirme). design_voice crea tres
+muestras desde una descripción (cotiza sin quote_id; cobra el texto de muestra) y save_voice guarda la
+elegida. delete_voice borra una voz de la cuenta (pide confirmación). Para español, usa language="es".
 Al generar audio, pasa title, category (voice, scream, laugh, creature, ambience, impact, foley, transition,
 music, other) y tags para que quede bien ordenado en la sonoteca. Antes de generar un sonido, busca en
 list_sounds si ya existe uno que sirva: reutilizarlo es gratis.
@@ -488,6 +492,123 @@ def isolate_voice(
     return _call(
         "POST", "/v1/audio/voice-isolator", json={**body, "audio_quote": audio_quote}, headers=headers
     )
+
+
+@mcp.tool(
+    title="Clone voice",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def clone_voice(
+    name: str,
+    consent: bool = False,
+    sample_paths: list[str] | None = None,
+    source_generation_ids: list[str] | None = None,
+    source_urls: list[str] | None = None,
+    description: str | None = None,
+    language: str = "es",
+    remove_background_noise: bool = False,
+) -> dict:
+    """Clona una voz en la cuenta de ElevenLabs (clonación instantánea) con muestras de audio o video:
+    sample_paths (archivos locales: mp3, wav, m4a, mp4, webm, ogg…), source_generation_ids (videos o audios de
+    la biblioteca) o source_urls (de upload_media). Lo ideal es 1 a 2 minutos de voz limpia de una sola
+    persona, sin música; mínimo 10 s. language (ISO, por defecto es) queda como etiqueta de la voz.
+    remove_background_noise solo si las muestras tienen ruido (en audio limpio empeora el clon).
+    consent=True solo si el usuario confirma que la voz es suya o que su dueño le dio permiso de clonarla.
+    No gasta créditos, pero ocupa un espacio de voces del plan; devuelve voice_id, que ya sirve en
+    text_to_speech (mejor con eleven_v4 o eleven_multilingual_v2 y language_code="es") y change_voice.
+    Tras un error, revisa list_voices antes de reintentar para no crear la voz dos veces."""
+    data = {
+        "name": name,
+        "consent": "true" if consent else "false",
+        "language": language,
+        "remove_background_noise": "true" if remove_background_noise else "false",
+        **({"description": description} if description else {}),
+        **({"source_generation_ids": source_generation_ids} if source_generation_ids else {}),
+        **({"source_urls": source_urls} if source_urls else {}),
+    }
+    files = []
+    for path in sample_paths or []:
+        file = _local_path(path)
+        if not file.is_file():
+            raise ToolError(f"No existe el archivo {file}")
+        files.append(("files", (file.name, file.read_bytes(), "application/octet-stream")))
+    return _call("POST", "/v1/voice/clone", data=data, files=files or None)
+
+
+@mcp.tool(
+    title="Design voice (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def design_voice(
+    description: str,
+    language: str = "es",
+    text: str | None = None,
+    model_id: str = "eleven_ttv_v3",
+    guidance_scale: float | None = None,
+    seed: int | None = None,
+    should_enhance: bool = False,
+    dest_dir: str = ".",
+    quote_id: str | None = None,
+) -> dict:
+    """Diseña una voz nueva a partir de una descripción (ElevenLabs Voice Design): devuelve tres muestras.
+    description (20 a 1000 caracteres; mejor en inglés o español detallado): edad, género, acento, tono,
+    ritmo y emoción, p. ej. "mujer de 30 años, acento colombiano, cálida y pausada". language (es por
+    defecto) fija el idioma del texto de muestra; text propio (100 a 1000 caracteres) para otro idioma o
+    para oírla con tu guion. Cobra los caracteres del texto una sola vez: sin quote_id devuelve el costo;
+    con el OK del usuario, llama igual con ese quote_id. Las muestras se descargan a dest_dir para que el
+    usuario las escuche; guarda la elegida con save_voice (gratis) o descarta todas."""
+    body = {"description": description, "language": language, "text": text, "model_id": model_id,
+            "guidance_scale": guidance_scale, "seed": seed, "should_enhance": should_enhance}  # fmt: skip
+    body = {k: v for k, v in body.items() if v is not None}
+    payload = {"voice_design": body}
+    if not quote_id:
+        estimate = _call("POST", "/v1/voice/design/estimate", json=body)
+        return {**estimate, "quote_id": _issue_quote(payload, estimate)}
+    _redeem_quote(payload, quote_id, None, False)
+    with _quotes_lock:
+        voice_quote = _quotes[quote_id]["estimate"].get("voice_quote")
+        _quotes.pop(quote_id, None)  # un solo uso: la API ya no aceptaría su voice_quote
+    result = _call("POST", "/v1/voice/design", json={**body, "voice_quote": voice_quote})
+    dest = _local_path(dest_dir)
+    dest.mkdir(parents=True, exist_ok=True)
+    with _client() as http:
+        for i, preview in enumerate(result.get("previews", []), 1):
+            response = http.get(preview["preview_url"])
+            response.raise_for_status()
+            target = dest / f"voz-{i}-{preview['generated_voice_id']}.mp3"
+            target.write_bytes(response.content)
+            preview["file"] = str(target.resolve())
+    return result
+
+
+@mcp.tool(
+    title="Save designed voice",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def save_voice(generated_voice_id: str, name: str, description: str, language: str = "es") -> dict:
+    """Guarda en la cuenta de ElevenLabs la muestra elegida de design_voice como voz nueva (gratis; ocupa un
+    espacio de voces). description: la misma con que se diseñó. Devuelve voice_id para text_to_speech."""
+    body = {"generated_voice_id": generated_voice_id, "name": name, "description": description,
+            "language": language}  # fmt: skip
+    return _call("POST", "/v1/voice/design/save", json=body)
+
+
+@mcp.tool(
+    title="Delete voice",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True
+    ),
+)
+def delete_voice(voice_id: str) -> dict:
+    """Borra de la cuenta de ElevenLabs una voz clonada o diseñada y libera su espacio. No se puede deshacer:
+    pide confirmación al usuario con el nombre de la voz antes de llamar."""
+    return _call("DELETE", f"/v1/voice/voices/{voice_id}")
 
 
 @mcp.tool(

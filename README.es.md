@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-42%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+[![MCP](https://img.shields.io/badge/MCP-46%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
 **Español** · [English](README.md) · [Web y ejemplos](https://hf-studio.jato.run)
 
@@ -270,7 +270,7 @@ se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se det
 mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
 `HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-Herramientas (42). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Herramientas (46). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
@@ -280,7 +280,7 @@ Herramientas (42). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destru
 | Seguimiento | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
 | Proveedores | `providers_status` |
 | Presets | `list_presets`, `run_preset`, `save_preset` |
-| Voz (ElevenLabs) | `list_voices`, `change_voice` |
+| Voz (ElevenLabs) | `list_voices`, `change_voice`, `clone_voice`, `design_voice`, `save_voice`, `delete_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sonoteca | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 | Reutilizar y elementos | `use_output`, `list_elements`, `create_element`, `delete_element` |
@@ -366,6 +366,9 @@ Todas las rutas `/v1` requieren `Authorization: Bearer hfs_…`.
 | GET | `/v1/voice/status` | ¿ElevenLabs configurado?, plan y créditos que quedan |
 | GET | `/v1/voice/voices?search=&library=` | Voces de la cuenta o de la biblioteca pública |
 | POST | `/v1/voice/estimate` · `/v1/voice/changes` | Cambio de voz en un tramo: cotiza (`voice_quote`) y lanza con ella |
+| POST | `/v1/voice/clone` | Clonación instantánea (multipart `name`, `consent=true`, `files` de audio o video, `source_generation_ids` o `source_urls`); gratis, ocupa un espacio de voces |
+| POST | `/v1/voice/design/estimate` · `/v1/voice/design` · `/v1/voice/design/save` | Voz desde una descripción: cotiza, crea 3 muestras (`GET /v1/voice/previews/{id}`) y guarda la elegida |
+| DELETE | `/v1/voice/voices/{voice_id}` | Borra de la cuenta una voz clonada o diseñada |
 | GET/PATCH | `/v1/sounds?category=&q=` · `/v1/sounds/{id}` | Sonoteca con recuento por categoría; corregir título, categoría y etiquetas |
 | GET/POST/DELETE | `/v1/elements` · `/v1/elements/{id}` | Elementos de Kling 3.0: listar, crear (multipart `name`, `description`, 2 a 4 `files` o `image_urls` propias) y borrar |
 | POST | `/v1/sounds/import-elevenlabs` | Trae a la sonoteca las voces del historial de ElevenLabs (gratis) |

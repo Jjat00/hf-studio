@@ -1,15 +1,18 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, Copy, Loader2, Pause, Play, Search } from "lucide-react";
+import { Check, Copy, Loader2, Pause, Play, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { Chip } from "@/components/studio/controls";
+import { VoiceCreate } from "@/components/voices/voice-create";
 import { studio } from "@/lib/studio";
 import type { FreeVoice, Voice, VoiceStatus } from "@/lib/types";
 
-type Tab = "free" | "account" | "library";
-const TABS: Tab[] = ["free", "account", "library"];
+type Tab = "free" | "account" | "library" | "create";
+const TABS: Tab[] = ["free", "account", "library", "create"];
+/** Voces que la persona creó (clonadas o diseñadas): se pueden borrar para liberar su espacio. */
+const OWN_CATEGORIES = new Set(["cloned", "generated"]);
 const SPEEDS = ["-10%", "+0%", "+10%", "+20%"];
 const ACCENTS = ["colombian", "latin american", "mexican", "venezuelan", "caribbean", ""];
 const MAX_TEXT = 300;
@@ -65,6 +68,16 @@ export function VoiceGallery() {
     }, 350);
     return () => clearTimeout(handle);
   }, [tab, status, accent, libGender, search]);
+
+  async function removeVoice(x: Voice) {
+    if (!window.confirm(v.deleteConfirm(x.name))) return;
+    try {
+      await studio.deleteVoice(x.voice_id);
+      setAccount((all) => (all ?? []).filter((y) => y.voice_id !== x.voice_id));
+    } catch (e) {
+      setPlayError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   function stop() {
     audio.current?.pause();
@@ -202,12 +215,15 @@ export function VoiceGallery() {
                 loading={loading === x.voice_id}
                 disabled={!x.preview_url}
                 onPlay={() => play(x.voice_id, x.preview_url)}
+                onDelete={OWN_CATEGORIES.has(x.category ?? "") ? () => void removeVoice(x) : undefined}
                 labels={v}
               />
             )}
           />
         </section>
       )}
+
+      {tab === "create" && status?.configured && <VoiceCreate onCreated={() => setAccount(null)} />}
 
       {tab === "library" && status?.configured && (
         <section className="mt-6 flex flex-col gap-4">
@@ -276,6 +292,7 @@ function VoiceRow({
   loading,
   disabled,
   onPlay,
+  onDelete,
   labels,
 }: {
   card: Card;
@@ -283,7 +300,8 @@ function VoiceRow({
   loading: boolean;
   disabled: boolean;
   onPlay: () => void;
-  labels: { play: string; stop: string; copyId: string; copied: string; free: string; paid: string };
+  onDelete?: () => void;
+  labels: { play: string; stop: string; copyId: string; copied: string; free: string; paid: string; deleteVoice: string };
 }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -337,6 +355,17 @@ function VoiceRow({
       >
         {copied ? <Check className="size-4 text-lime" /> : <Copy className="size-4" />}
       </button>
+      {onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`${labels.deleteVoice}: ${card.name}`}
+          title={labels.deleteVoice}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-fg-3 hover:text-danger"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      )}
     </li>
   );
 }

@@ -164,6 +164,23 @@ export type Voice = {
   description: string | null;
   labels: Record<string, string>;
   library: boolean;
+  /** Solo voces de la cuenta: premade, cloned, generated o professional. */
+  category?: string | null;
+};
+
+export type VoiceDesignBody = {
+  description: string;
+  language: string;
+  text?: string;
+  model_id?: "eleven_ttv_v3" | "eleven_multilingual_ttv_v2";
+};
+
+/** Una de las tres muestras de un diseño de voz; se guarda con su `generated_voice_id`. */
+export type VoicePreview = {
+  generated_voice_id: string;
+  duration_secs: number | null;
+  language: string | null;
+  preview_url: string;
 };
 
 /** Voz gratis de edge-tts (voces neuronales de Microsoft Edge). */

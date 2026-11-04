@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-42%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
+[![MCP](https://img.shields.io/badge/MCP-46%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
 [Español](README.es.md) · **English** · [Website and examples](https://hf-studio.jato.run)
 
@@ -270,7 +270,7 @@ touched. If the agent already has `hf-studio`, `connect` stops: remove it first 
 server is `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with `HF_STUDIO_URL=http://127.0.0.1:8787`
 and `HF_STUDIO_TOKEN=hfs_…` in its environment.
 
-Tools (42). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Tools (46). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`), and the ones that spend credits say so in their title, so clients can warn you before calling them.
 
 | Group | Tools |
@@ -280,7 +280,7 @@ Tools (42). Every tool declares all four MCP hints (`readOnlyHint`, `destructive
 | Tracking | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
 | Providers | `providers_status` |
 | Presets | `list_presets`, `run_preset`, `save_preset` |
-| Voice (ElevenLabs) | `list_voices`, `change_voice` |
+| Voice (ElevenLabs) | `list_voices`, `change_voice`, `clone_voice`, `design_voice`, `save_voice`, `delete_voice` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sound library | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 | Reuse and elements | `use_output`, `list_elements`, `create_element`, `delete_element` |
@@ -357,6 +357,9 @@ Every `/v1` route requires `Authorization: Bearer hfs_…`. Interactive docs at 
 | GET | `/v1/voice/status` | ElevenLabs configured?, plan and remaining credits |
 | GET | `/v1/voice/voices?search=&library=` | Account voices or the public library |
 | POST | `/v1/voice/estimate` · `/v1/voice/changes` | Voice change on a segment: quote (`voice_quote`) and run with it |
+| POST | `/v1/voice/clone` | Instant voice clone (multipart `name`, `consent=true`, audio or video `files`, `source_generation_ids` or `source_urls`); free, takes a voice slot |
+| POST | `/v1/voice/design/estimate` · `/v1/voice/design` · `/v1/voice/design/save` | Voice from a description: quote, make 3 samples (`GET /v1/voice/previews/{id}`) and save the chosen one |
+| DELETE | `/v1/voice/voices/{voice_id}` | Delete a cloned or designed voice from the account |
 | GET/PATCH | `/v1/sounds?category=&q=` · `/v1/sounds/{id}` | Sound library with counts per category; fix title, category and tags |
 | GET/POST/DELETE | `/v1/elements` · `/v1/elements/{id}` | Kling 3.0 elements: list, create (multipart `name`, `description`, 2–4 `files` or own `image_urls`) and delete |
 | POST | `/v1/sounds/import-elevenlabs` | Imports the voices in your ElevenLabs history (free) |

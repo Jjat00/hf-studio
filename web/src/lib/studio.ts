@@ -1,6 +1,6 @@
 import type { Flow, FlowSummary, RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
 import type { LiveCategory } from "./influencer-data";
-import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, ModelStyle, Usage, Voice, VoiceChangeBody, VoiceStatus } from "./types";
+import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, ModelStyle, Usage, Voice, VoiceChangeBody, VoiceDesignBody, VoicePreview, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -156,6 +156,41 @@ export const studio = {
     call<{ voices: Voice[] }>(
       `/v1/voice/voices?library=${library}&limit=40${search ? `&search=${encodeURIComponent(search)}` : ""}`,
     ),
+  /** Clonación instantánea con muestras de audio o video (archivos o grabaciones). Gratis; ocupa un espacio. */
+  cloneVoice: (opts: { name: string; files: File[]; language: string; description?: string; removeNoise: boolean; consent: boolean }) => {
+    const form = new FormData();
+    form.append("name", opts.name);
+    form.append("language", opts.language);
+    form.append("consent", String(opts.consent));
+    form.append("remove_background_noise", String(opts.removeNoise));
+    if (opts.description) form.append("description", opts.description);
+    for (const f of opts.files) form.append("files", f);
+    return call<{ voice_id: string; name: string; requires_verification: boolean; sample_seconds: number }>(
+      "/v1/voice/clone",
+      { method: "POST", body: form },
+    );
+  },
+  designEstimate: (body: VoiceDesignBody) =>
+    call<Estimate & { units: number; text: string; voice_quote: string }>("/v1/voice/design/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  designVoice: (body: VoiceDesignBody & { voice_quote: string }) =>
+    call<{ previews: VoicePreview[]; text: string; cost_usd: number }>("/v1/voice/design", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** URL de una muestra de diseño (`preview_url` relativo a la API). */
+  previewUrl: (path: string) => BASE + path,
+  saveVoice: (body: { generated_voice_id: string; name: string; description: string; language: string }) =>
+    call<{ voice_id: string; name: string }>("/v1/voice/design/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteVoice: (id: string) => call<{ deleted: string }>(`/v1/voice/voices/${id}`, { method: "DELETE" }),
   voiceEstimate: (body: VoiceChangeBody) =>
     call<Estimate & { seconds: number; start: number; end: number; voice_quote: string }>("/v1/voice/estimate", {
       method: "POST",
