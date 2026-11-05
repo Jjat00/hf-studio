@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HF Studio</title>
+<style>
+  /* Tarjeta de generación de HF Studio (MCP Apps). Toma los colores y fuentes del cliente si los manda. */
+  :root {
+    --bg: var(--color-background-primary, #ffffff);
+    --bg2: var(--color-background-secondary, #f4f4f2);
+    --fg: var(--color-text-primary, #1a1a19);
+    --fg2: var(--color-text-secondary, #6b6b66);
+    --line: var(--color-border-primary, #e3e3df);
+    --ok: var(--color-text-success, #2f7d4f);
+    --bad: var(--color-text-danger, #b3361e);
+    --warn: var(--color-text-warning, #9a6400);
+    --accent: #d97757;
+    --radius: var(--border-radius-lg, 12px);
+    --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: var(--color-background-primary, #262624);
+    --bg2: var(--color-background-secondary, #30302e);
+    --fg: var(--color-text-primary, #f2f1ed);
+    --fg2: var(--color-text-secondary, #a8a7a0);
+    --line: var(--color-border-primary, #3d3d3a);
+    --ok: var(--color-text-success, #7cc59a);
+    --bad: var(--color-text-danger, #f08a72);
+    --warn: var(--color-text-warning, #e6b45c);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; color: var(--fg); font: 14px/1.45 var(--font); }
+  body { padding: 2px; }
+  .stack { display: grid; gap: 10px; }
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 0; flex-wrap: wrap; }
+  .model { font-weight: 600; font-size: 14px; margin-right: auto; overflow-wrap: anywhere; }
+  .chip { font-size: 12px; color: var(--fg2); background: var(--bg2); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+  .prompt { color: var(--fg2); font-size: 13px; padding: 6px 14px 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .status { display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; font-size: 13px; color: var(--fg2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg2); flex: none; }
+  .running .dot { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .done .dot { background: var(--ok); }
+  .failed .dot { background: var(--bad); }
+  .waiting .dot { background: var(--warn); }
+  .elapsed { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .bar { height: 3px; background: var(--bg2); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 35%; background: var(--accent); animation: slide 1.6s ease-in-out infinite; }
+  .media { display: grid; gap: 6px; padding: 0 14px 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); }
+  .media.one { grid-template-columns: 1fr; }
+  .media > div { background: var(--bg2); border-radius: 8px; overflow: hidden; min-height: 60px; display: grid; place-items: center; }
+  .media img, .media video { display: block; width: 100%; height: auto; max-height: 520px; object-fit: contain; background: #000; }
+  .media img { background: transparent; }
+  .media audio { width: 100%; padding: 10px; }
+  .note { font-size: 12px; color: var(--fg2); padding: 14px; text-align: center; }
+  .error { color: var(--bad); font-size: 13px; padding: 0 14px 12px; overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 6px; padding: 0 14px 12px; flex-wrap: wrap; }
+  button { font: inherit; font-size: 12px; color: var(--fg); background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--fg2); }
+  .quote .price { font-size: 22px; font-weight: 600; padding: 4px 14px 0; font-variant-numeric: tabular-nums; }
+  .quote ul { margin: 6px 0 0; padding: 0 14px 0 30px; color: var(--fg2); font-size: 13px; }
+  .empty { color: var(--fg2); font-size: 13px; padding: 12px 14px; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(290%); } }
+  @media (prefers-reduced-motion: reduce) { .running .dot, .bar i { animation: none; } }
+</style>
+</head>
+<body>
+<div id="root" class="stack"><div class="card"><div class="empty">Preparando…</div></div></div>
+<script>
+(() => {
+  "use strict";
+  const STUDIO_WEB = "__HF_STUDIO_WEB__";
+  const PROTOCOL = "2026-01-26";
+  const POLL_SECONDS = 25;
+  const root = document.getElementById("root");
+
+  // --- Puente MCP Apps (JSON-RPC por postMessage con el cliente) ---------------------------------
+  let seq = 0, hostCaps = {}, stopped = false;
+  const pending = new Map();
+  const post = (msg) => window.parent.postMessage(msg, "*");
+  const notify = (method, params) => post({ jsonrpc: "2.0", method, params: params || {} });
+  function request(method, params, timeoutMs = 180000) {
+    const id = ++seq;
+    post({ jsonrpc: "2.0", id, method, params: params || {} });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error("Sin respuesta del cliente")); }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
+    });
+  }
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const m = event.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.id !== undefined && m.method === undefined) {
+      const p = pending.get(m.id);
+      if (!p) return;
+      pending.delete(m.id); clearTimeout(p.timer);
+      m.error ? p.reject(new Error(m.error.message || "Error")) : p.resolve(m.result);
+      return;
+    }
+    if (m.id !== undefined) {  // petición del cliente
+      if (m.method === "ui/resource-teardown") stopped = true;
+      const known = m.method === "ui/resource-teardown" || m.method === "ping";
+      post(known ? { jsonrpc: "2.0", id: m.id, result: {} }
+                 : { jsonrpc: "2.0", id: m.id, error: { code: -32601, message: "Method not found" } });
+      return;
+    }
+    if (m.method === "ui/notifications/tool-result") onResult(m.params || {});
+    else if (m.method === "ui/notifications/tool-input") onInput(m.params || {});
+    else if (m.method === "ui/notifications/host-context-changed") applyContext(m.params || {});
+    else if (m.method === "ui/notifications/tool-cancelled") showNote("La llamada se canceló.");
+  });
+
+  function applyContext(ctx) {
+    if (ctx.theme) document.documentElement.dataset.theme = ctx.theme;
+    const vars = ctx.styles && ctx.styles.variables;
+    if (vars) for (const [k, v] of Object.entries(vars)) if (v) document.documentElement.style.setProperty(k, v);
+    const fonts = ctx.styles && ctx.styles.css && ctx.styles.css.fonts;
+    if (fonts && !document.getElementById("host-fonts")) {
+      const s = document.createElement("style"); s.id = "host-fonts"; s.textContent = fonts; document.head.appendChild(s);
+    }
+  }
+
+  let lastHeight = 0;
+  new ResizeObserver(() => {
+    const h = Math.ceil(document.documentElement.getBoundingClientRect().height) + 4;
+    if (h !== lastHeight) { lastHeight = h; notify("ui/notifications/size-changed", { height: h }); }
+  }).observe(document.documentElement);
+
+  async function callTool(name, args) {
+    const result = await request("tools/call", { name, arguments: args });
+    const data = parse(result);
+    if (result && result.isError) throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+    return data;
+  }
+  function parse(result) {
+    if (!result) return null;
+    if (result.structuredContent) return result.structuredContent;
+    const text = (result.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+    try { return JSON.parse(text); } catch { return text; }
+  }
+  function openLink(url) {
+    request("ui/open-link", { url }).catch(() => window.open(url, "_blank", "noopener"));
+  }
+
+  // --- Datos ----------------------------------------------------------------------------------------
+  const TERMINAL = new Set(["completed", "failed", "cancelled", "canceled", "nsfw", "expired", "rejected"]);
+  const jobs = new Map();  // id → generación
+  let toolArgs = null, polling = false, reported = false;
+
+  function onInput(params) { toolArgs = params.arguments || null; }
+
+  function onResult(params) {
+    const data = parse(params);
+    if (params.isError) return showError(typeof data === "string" ? data : JSON.stringify(data));
+    const list = data && Array.isArray(data.generations) ? data.generations
+      : data && data.id && data.status ? [data] : null;
+    if (list) {
+      for (const j of list) jobs.set(j.id, j);
+      render();
+      poll();
+    } else if (data && typeof data === "object" && ("quote_id" in data || "estimate" in data || "total" in data)) {
+      renderQuote(data);
+    } else {
+      showNote(typeof data === "string" ? data : "Listo.");
+    }
+  }
+
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    let failures = 0;
+    while (!stopped) {
+      const open = [...jobs.values()].filter((j) => !TERMINAL.has(j.status)).map((j) => j.id);
+      if (!open.length) break;
+      try {
+        const data = open.length === 1
+          ? await callTool("get_generation", { generation_id: open[0], wait_seconds: POLL_SECONDS })
+          : await callTool("wait_generations", { generation_ids: open, wait_seconds: POLL_SECONDS });
+        for (const j of (data.generations || [data])) if (j && j.id) jobs.set(j.id, j);
+        failures = 0;
+        render();
+      } catch (err) {
+        failures += 1;
+        if (failures >= 6) { render("No se pudo seguir el estado aquí. Pídele a Claude que la consulte."); break; }
+        await sleep(Math.min(30000, 3000 * failures));
+      }
+    }
+    polling = false;
+    reportDone();
+  }
+
+  function reportDone() {
+    const all = [...jobs.values()];
+    if (reported || stopped || !all.length || all.some((j) => !TERMINAL.has(j.status))) return;
+    reported = true;
+    if (!hostCaps.updateModelContext) return;
+    const lines = all.map((j) => `${j.id} (${j.model}): ${j.status}${j.outputs && j.outputs.length ? `, ${j.outputs.length} salida(s)` : ""}${j.error ? `, error: ${j.error}` : ""}`);
+    request("ui/update-model-context", { content: [{ type: "text", text: "Generaciones de HF Studio terminadas:\n" + lines.join("\n") }] }).catch(() => {});
+  }
+
+  // --- Render ---------------------------------------------------------------------------------------
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const usd = (v, kind) => v == null ? null : `${kind === "approx" ? "≈ " : ""}${Number(v).toLocaleString("es", { minimumFractionDigits: 2, maximumFractionDigits: v < 0.1 ? 3 : 2 })} USD`;
+  const shortModel = (id) => { const parts = String(id || "").split("/"); return parts.length > 2 ? parts.slice(1).join(" / ") : String(id || "Generación"); };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const mediaCache = new Map();  // `${id}:${i}` → nodo ya montado (no recargar el video en cada sondeo)
+
+  const STATE_TEXT = {
+    pending: "En cola", queued: "En cola", in_progress: "Generando", submitted: "Generando",
+    awaiting_approval: "Espera tu aprobación", completed: "Lista", failed: "Falló", cancelled: "Cancelada",
+    canceled: "Cancelada", nsfw: "Bloqueada por contenido", expired: "Caducó",
+  };
+  function stateClass(s) {
+    if (s === "completed") return "done";
+    if (s === "awaiting_approval") return "waiting";
+    if (TERMINAL.has(s)) return "failed";
+    return "running";
+  }
+
+  function render(extraNote) {
+    root.replaceChildren(...[...jobs.values()].map(card));
+    if (extraNote) root.appendChild(el("div", "note", extraNote));
+  }
+
+  function card(j) {
+    const c = el("div", "card " + stateClass(j.status));
+    c.dataset.id = j.id;
+    if (!TERMINAL.has(j.status) && j.status !== "awaiting_approval") {
+      const bar = el("div", "bar"); bar.appendChild(el("i")); c.appendChild(bar);  // franja de carga arriba
+    }
+    const head = el("div", "head");
+    head.appendChild(el("div", "model", shortModel(j.model)));
+    if (j.provider) head.appendChild(el("span", "chip", j.provider));
+    const price = usd(j.cost_usd, j.cost_kind);
+    if (price) head.appendChild(el("span", "chip", price));
+    c.appendChild(head);
+    const input = j.input || {};
+    const prompt = input.prompt || input.text || input.description;
+    if (prompt) c.appendChild(el("div", "prompt", prompt));
+
+    const status = el("div", "status");
+    status.appendChild(el("span", "dot"));
+    status.appendChild(el("span", null, STATE_TEXT[j.status] || j.stage || j.status));
+    if (j.elapsed_seconds != null) status.appendChild(el("span", "elapsed", clock(j.elapsed_seconds)));
+    c.appendChild(status);
+
+    if (j.status === "awaiting_approval") {
+      const p = usd(j.cost_usd, j.cost_kind);
+      c.appendChild(el("div", "error", `El proveedor cambió o subió el precio${p ? ` (ahora ${p})` : ""}. Dile a Claude si lo apruebas.`));
+    }
+    if (j.error && j.status !== "completed") c.appendChild(el("div", "error", j.error));
+
+    const outs = j.status === "completed" ? (j.outputs || []) : [];
+    if (outs.length) {
+      const grid = el("div", "media" + (outs.length === 1 ? " one" : ""));
+      outs.forEach((o, i) => grid.appendChild(mediaNode(j.id, o, i)));
+      c.appendChild(grid);
+    }
+
+    const actions = el("div", "actions");
+    const open = el("button", null, "Abrir en HF Studio");
+    open.onclick = () => openLink(`${STUDIO_WEB}/history/${encodeURIComponent(j.id)}`);
+    actions.appendChild(open);
+    const remote = outs.find((o) => /^https?:/.test(o.url || ""));
+    if (remote) { const b = el("button", null, "Abrir original"); b.onclick = () => openLink(remote.url); actions.appendChild(b); }
+    c.appendChild(actions);
+    return c;
+  }
+
+  function clock(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  function mediaNode(id, out, index) {
+    const key = `${id}:${index}`;
+    if (mediaCache.has(key)) return mediaCache.get(key);
+    const box = el("div");
+    const kind = out.kind || "image";
+    const make = () => {
+      if (kind === "video") { const v = el("video"); v.controls = true; v.playsInline = true; v.loop = true; v.preload = "metadata"; return v; }
+      if (kind === "audio") { const a = el("audio"); a.controls = true; a.preload = "metadata"; return a; }
+      const img = el("img"); img.alt = "Resultado"; img.decoding = "async"; return img;
+    };
+    const node = make();
+    box.appendChild(node);
+    let triedPreview = false;
+    const fallback = async () => {
+      if (triedPreview) return;
+      triedPreview = true;
+      try {
+        const data = await callTool("generation_preview", { generation_id: id, index });
+        const src = toSrc(data, kind);
+        node.onerror = () => box.replaceChildren(el("div", "note", "No se pudo mostrar aquí. Ábrelo en HF Studio."));
+        node.src = src;
+      } catch (err) {
+        box.replaceChildren(el("div", "note", (err && err.message) || "No se pudo mostrar aquí. Ábrelo en HF Studio."));
+      }
+    };
+    node.onerror = fallback;
+    if (/^https?:/.test(out.url || "")) node.src = out.url; else fallback();
+    mediaCache.set(key, box);
+    return box;
+  }
+
+  function toSrc(data, kind) {
+    const bin = atob(data.data_base64);
+    if (kind === "image") return `data:${data.mime_type};base64,${data.data_base64}`;
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: data.mime_type }));
+  }
+
+  function renderQuote(q) {
+    const total = q.total || q.estimate || q;
+    const c = el("div", "card quote");
+    const head = el("div", "head");
+    head.appendChild(el("div", "model", toolArgs && (toolArgs.model_id || toolArgs.slug) ? `Cotización · ${shortModel(toolArgs.model_id || toolArgs.slug)}` : "Cotización"));
+    if (total.provider) head.appendChild(el("span", "chip", total.provider));
+    c.appendChild(head);
+    const price = usd(total.usd, total.kind);
+    c.appendChild(el("div", "price", price || "Precio por confirmar"));
+    if (Array.isArray(q.items) && q.items.length) {
+      const ul = el("ul");
+      for (const it of q.items) ul.appendChild(el("li", null, `${shortModel(it.model)} ×${it.count || 1}${it.estimate && it.estimate.usd != null ? ` · ${usd(it.estimate.usd, it.estimate.kind)}` : ""}`));
+      c.appendChild(ul);
+    }
+    const status = el("div", "status waiting");
+    status.appendChild(el("span", "dot"));
+    status.appendChild(el("span", null, total.complete === false ? "Falta información para el precio exacto" : "Aún no se gasta nada: confírmale a Claude para lanzarla"));
+    c.appendChild(status);
+    root.replaceChildren(c);
+  }
+
+  function showError(text) {
+    const c = el("div", "card failed");
+    c.appendChild(el("div", "status", null)).append(el("span", "dot"), el("span", null, "Error"));
+    c.appendChild(el("div", "error", text));
+    root.replaceChildren(c);
+  }
+  function showNote(text) {
+    const c = el("div", "card"); c.appendChild(el("div", "empty", text)); root.replaceChildren(c);
+  }
+
+  // Reloj local entre sondeos para que el tiempo transcurrido avance.
+  setInterval(() => {
+    for (const j of jobs.values()) {
+      if (TERMINAL.has(j.status) || j.status === "awaiting_approval" || j.elapsed_seconds == null) continue;
+      j.elapsed_seconds += 1;
+      const e = root.querySelector(`.card[data-id="${CSS.escape(j.id)}"] .elapsed`);
+      if (e) e.textContent = clock(j.elapsed_seconds);
+    }
+  }, 1000);
+
+  // --- Arranque -------------------------------------------------------------------------------------
+  request("ui/initialize", {
+    protocolVersion: PROTOCOL,
+    appInfo: { name: "hf-studio-generation", version: "1.0.0" },
+    appCapabilities: {},
+  }, 15000).then((res) => {
+    hostCaps = (res && res.hostCapabilities) || {};
+    applyContext((res && res.hostContext) || {});
+    notify("ui/notifications/initialized");
+  }).catch(() => notify("ui/notifications/initialized"));
+})();
+</script>
+</body>
+</html>

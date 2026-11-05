@@ -1,6 +1,7 @@
 """Contrato del MCP: cada herramienta declara sus pistas y llama a la ruta correcta de la API."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
@@ -57,7 +58,23 @@ TOOLS = {
     "get_space_run": READ,
     "approve_space_run": SPEND,
     "cancel_space_run": (False, True, True, False),
+    "show_generations": READ,
+    "generation_preview": READ_EXT,  # lee la copia local o la URL del proveedor para la tarjeta
+    "favorite_generations": (False, False, True, False),
+    "hide_generations": (False, False, True, False),
+    "delete_generation": (False, True, True, False),
+    "list_approvals": READ,
+    "list_uploads": READ,
+    "get_usage": READ,
+    "list_free_voices": READ_EXT,  # lee el catálogo de voces de Microsoft Edge
+    "free_text_to_speech": (False, True, True, True),  # sintetiza con Edge y escribe el MP3
+    "delete_preset": (False, True, True, False),
+    "delete_space": (False, True, True, False),
 }
+
+# Herramientas que abren la tarjeta de generación (MCP Apps) en los clientes con widgets.
+UI_TOOLS = {"generate", "generate_batch", "run_preset", "approve_fallback", "text_to_speech", "sound_effect",
+            "compose_music", "isolate_voice", "change_voice", "show_generations"}  # fmt: skip
 
 
 def _listed():
@@ -138,6 +155,15 @@ READS = [
     (lambda: mcp_server.delete_voice("v1"), "DELETE", "/v1/voice/voices/v1", None),
     (lambda: mcp_server.save_voice("gen1", "Narrador", "Voz grave y cálida de narrador"), "POST",
      "/v1/voice/design/save", None),
+    (lambda: mcp_server.show_generations(["a", "b"]), "GET", "/v1/generations", {"ids": "a,b", "wait": 0, "limit": 100}),
+    (lambda: mcp_server.favorite_generations(["a"]), "POST", "/v1/generations/favorite", None),
+    (lambda: mcp_server.hide_generations(["a"], False), "POST", "/v1/generations/hide", None),
+    (lambda: mcp_server.delete_generation("g1"), "DELETE", "/v1/generations/g1", None),
+    (lambda: mcp_server.list_approvals(500), "GET", "/v1/approvals", {"limit": 100}),
+    (lambda: mcp_server.list_uploads(10), "GET", "/v1/uploads", {"limit": 10}),
+    (lambda: mcp_server.list_free_voices("en"), "GET", "/v1/voice/free-voices", {"lang": "en"}),
+    (lambda: mcp_server.delete_preset("mi-receta"), "DELETE", "/v1/presets/mi-receta", None),
+    (lambda: mcp_server.delete_space("sp1"), "DELETE", "/v1/spaces/sp1", None),
 ]  # fmt: skip
 
 
@@ -147,6 +173,80 @@ def test_simple_tools_hit_their_route(calls, run, method, path, params):
     assert calls[-1][:2] == (method, path)
     if params is not None:
         assert calls[-1][2]["params"] == params
+
+
+def test_launch_tools_open_the_generation_card():
+    tools = _listed()
+    for name, tool in tools.items():
+        ui = (tool.meta or {}).get("ui", {})
+        if name in UI_TOOLS:
+            assert ui == {"resourceUri": mcp_server.GENERATION_UI}, name
+            assert (
+                tool.meta["ui/resourceUri"] == mcp_server.GENERATION_UI
+            )  # forma antigua, por compatibilidad
+        else:
+            assert "resourceUri" not in ui, name
+    # La vista previa es solo para la tarjeta: el modelo no la ve en los clientes con widgets.
+    assert tools["generation_preview"].meta == {"ui": {"visibility": ["app"]}}
+
+
+def test_generation_card_is_an_mcp_app_resource():
+    resources = {str(r.uri): r for r in asyncio.run(mcp_server.mcp.list_resources())}
+    card = resources[mcp_server.GENERATION_UI]
+    assert card.mime_type == "text/html;profile=mcp-app"
+    assert card.meta["ui"]["csp"]["resourceDomains"] == mcp_server.MEDIA_DOMAINS
+    html = next(iter(asyncio.run(mcp_server.mcp.read_resource(mcp_server.GENERATION_UI)))).content
+    assert "__HF_STUDIO_WEB__" not in html and "ui/initialize" in html and "generation_preview" in html
+
+
+def test_show_generations_needs_ids(calls):
+    with pytest.raises(ToolError, match="generation_id"):
+        mcp_server.show_generations([])
+
+
+def test_get_usage_sends_the_local_offset(calls):
+    mcp_server.get_usage(7)
+    method, path, kw = calls[-1]
+    assert (method, path) == ("GET", "/v1/usage")
+    assert kw["params"]["days"] == 7 and isinstance(kw["params"]["utc_offset"], int)
+
+
+def test_generation_preview_returns_the_local_copy(monkeypatch):
+    import httpx
+
+    job = {"status": "completed", "outputs": [{"kind": "image", "url": "https://cdn/x.png",
+                                               "file_url": "/v1/generations/g1/files/0.png"}]}  # fmt: skip
+    monkeypatch.setattr(mcp_server, "_call", lambda *a, **k: job)
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(200, content=b"\x89PNG", headers={"content-type": "image/png"})
+
+    monkeypatch.setattr(mcp_server, "_client", lambda: httpx.Client(base_url="http://studio",
+                                                                     transport=httpx.MockTransport(handler)))  # fmt: skip
+    out = mcp_server.generation_preview("g1", 0)
+    assert seen == ["/v1/generations/g1/files/0.png"]
+    assert out == {"mime_type": "image/png", "bytes": 4, "data_base64": "iVBORw=="}
+    monkeypatch.setattr(mcp_server, "PREVIEW_MAX_BYTES", 2)
+    with pytest.raises(ToolError, match="muy grande"):
+        mcp_server.generation_preview("g1", 0)
+    with pytest.raises(ToolError, match="no existe"):
+        mcp_server.generation_preview("g1", 3)
+
+
+def test_free_text_to_speech_saves_the_mp3(monkeypatch, tmp_path):
+    import httpx
+
+    def handler(request):
+        assert request.url.path == "/v1/voice/free-sample"
+        assert request.url.params["voice"] == "es-CO-SalomeNeural"
+        return httpx.Response(200, content=b"ID3mp3", headers={"content-type": "audio/mpeg"})
+
+    monkeypatch.setattr(mcp_server, "_client", lambda: httpx.Client(base_url="http://studio",
+                                                                     transport=httpx.MockTransport(handler)))  # fmt: skip
+    out = mcp_server.free_text_to_speech("Hola", "es-CO-SalomeNeural", dest_dir=str(tmp_path))
+    assert out["bytes"] == 6 and Path(out["file"]).read_bytes() == b"ID3mp3"
 
 
 def test_label_sound_only_sends_what_changes(calls):

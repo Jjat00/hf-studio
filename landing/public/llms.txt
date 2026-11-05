@@ -40,18 +40,20 @@ Manual MCP config (any stdio client): command `uv run --directory /absolute/path
 - Genjutsu Restyle (`higgsfield/genjutsu/restyle/v1.0`) restyles a video and keeps its motion and audio: pick the style with `list_styles` and pass its id in `preset_id` (styles change without notice). Ads Studio (`higgsfield/ads-studio/v1.0`) makes 1 to 8 ad images from a brief and product photos (`batch_size` = number of images).
 - Spaces (node canvases): `create_space` / `update_space` build one (nodes: text, media, list, note or generator with any catalog model, including the free tools `hf-studio/frame`, `hf-studio/combine`, `hf-studio/mix`, the ElevenLabs audio nodes and the Claude `claude/assistant`; edges go to input fields by their `input_schema` key). `estimate_space_run` quotes every step and the total with a `quote_id`; after the user's OK, `run_space` runs it on the server under that budget (retrying with the same `quote_id` returns the same run). A paused run (`awaiting_approval`) needs the user's OK on `pause.needed_total_usd` before `approve_space_run`. A published flow runs with `inputs`.
 
-## Tools (42)
+## Tools (58)
 
 - Models: `find_models`, `get_model`, `recommend_models`, `list_styles` (current styles for Genjutsu Restyle; free), `list_model_options` (current traits for AI Influencer; free)
-- Generate: `upload_media`, `estimate_cost`, `generate`, `generate_batch`
-- Tracking: `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback`, `use_output` (reuse a finished output as input of another run; free)
+- Generate: `upload_media`, `list_uploads`, `estimate_cost`, `generate`, `generate_batch`
+- Tracking: `get_generation`, `wait_generations`, `show_generations` (a self-updating card with the result in clients that render MCP Apps, like Claude Desktop), `list_generations`, `list_approvals`, `cancel_generation`, `download_outputs`, `approve_fallback`, `use_output` (reuse a finished output as input of another run; free), `generation_preview` (used only by the card)
+- Library: `favorite_generations`, `hide_generations`, `delete_generation`
 - Kling 3.0 elements: `list_elements`, `create_element`, `delete_element`
-- Providers: `providers_status`
-- Presets: `list_presets`, `run_preset`, `save_preset`
-- Voice (ElevenLabs): `list_voices`, `change_voice`
+- Providers and spend: `providers_status`, `get_usage`
+- Presets: `list_presets`, `run_preset`, `save_preset`, `delete_preset`
+- Voice (ElevenLabs): `list_voices`, `change_voice`, `clone_voice`, `design_voice`, `save_voice`, `delete_voice`
+- Free voices (edge-tts, no credits): `list_free_voices`, `free_text_to_speech`
 - Audio (ElevenLabs): `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account`
 - Sound library: `list_sounds`, `label_sound`, `import_elevenlabs_history`
-- Spaces: `list_spaces`, `get_space`, `create_space`, `update_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run`
+- Spaces: `list_spaces`, `get_space`, `create_space`, `update_space`, `delete_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run`
 
 ## Safety notes
 

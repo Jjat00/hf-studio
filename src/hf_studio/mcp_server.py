@@ -6,6 +6,7 @@ HF_STUDIO_URL y HF_STUDIO_TOKEN (una clave `hfs_…` creada con `hf-studio creat
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import mimetypes
@@ -19,6 +20,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
+from mcp.server.apps import Apps, ResourceCsp
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -45,6 +47,10 @@ reference-to-video, image-references, video-edit, video-extend, motion-transfer,
 4) estimate_cost; 5) generate con su quote_id; 6) get_generation con wait_seconds hasta terminal=true;
 7) download_outputs. La generación es asíncrona y cobra créditos: ANTES de generar, cotiza (estimate_cost,
 o dry_run en lotes y presets), dile al usuario el costo y espera su OK (kind exact = créditos y USD;
+REGLA FIJA: después de cotizar, termina tu turno con el costo y pregunta; lanza solo cuando el usuario responda
+que sí en un mensaje nuevo. Pedir «crea» o «genera» no es aceptar el precio, y que el cliente tenga las
+herramientas aprobadas sin preguntar tampoco. Única excepción: que el usuario haya dado en esta conversación
+un tope explícito («sin preguntar hasta 1 USD») y el costo quepa en él;
 approx = USD aproximado; formula/unavailable = falta subir medios o pasar input_video_seconds). Generar
 exige el quote_id de esa cotización (un solo uso, 15 min; si reintentas tras un error, reutiliza la
 misma idempotency_key); con precio incompleto, además confirm_unknown_cost=True solo si el
@@ -94,9 +100,54 @@ estimate_space_run (precio de cada paso y total, con quote_id) → dile al usuar
 run_space con ese quote_id (si falla de forma ambigua, repítelo con el mismo quote_id: devuelve la misma
 corrida) → get_space_run hasta que termine. Si la corrida queda en awaiting_approval (un
 paso no cabe en el tope, no tiene precio o su respaldo cuesta más), dile el motivo y el nuevo total
-(pause.needed_total_usd) y, con su OK, approve_space_run; cancel_space_run la detiene."""
+(pause.needed_total_usd) y, con su OK, approve_space_run; cancel_space_run la detiene.
+Tarjeta en el chat: en los clientes con widgets (Claude Desktop), generate, generate_batch, run_preset,
+approve_fallback y las herramientas de audio abren una tarjeta que sigue el estado sola y muestra el video,
+la imagen o el audio al terminar; si el usuario solo quiere verlo, no hace falta que sondees ni que
+descargues. No llames show_generations con generaciones que ya tienen tarjeta en esta conversación (las que
+lanzaste aquí): saldría repetida. Úsala solo para generaciones de antes o de otra conversación.
+Biblioteca: favorite_generations, hide_generations (quita de la vista sin borrar) y delete_generation (borra,
+confirma antes); list_approvals muestra lo que espera aprobación; list_uploads, lo ya subido; get_usage, el
+gasto por día, proveedor y modelo. Voces gratis (sin créditos): list_free_voices y free_text_to_speech
+(hasta 300 caracteres). delete_preset y delete_space borran (confirma antes)."""
 
-mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS)
+# Tarjeta de generación (MCP Apps): en los clientes que muestran widgets (Claude Desktop, claude.ai) las
+# herramientas que lanzan generaciones abren esta tarjeta en el chat; sigue el estado sola (get_generation /
+# wait_generations desde la tarjeta) y muestra el video, la imagen o el audio al terminar. Los clientes sin
+# widgets (Claude Code, Codex) reciben el mismo JSON de siempre.
+GENERATION_UI = "ui://hf-studio/generation.html"
+# Forma actual (`ui.resourceUri`) y la antigua (`ui/resourceUri`), que algunos clientes aún leen.
+UI_META = {"ui": {"resourceUri": GENERATION_UI}, "ui/resourceUri": GENERATION_UI}
+# Dominios de los que la tarjeta puede cargar medios directamente (CDN de Higgsfield, APIMart y KIE). Si una
+# URL no carga (caducó o su dominio no está aquí), la tarjeta pide la copia local con generation_preview.
+MEDIA_DOMAINS = [
+    "https://*.cloudfront.net",
+    "https://*.higgsfield.ai",
+    "https://getapib.org",
+    "https://*.getapib.org",
+    "https://*.aiquickdraw.com",
+    "https://*.apimart.ai",
+    "https://*.kie.ai",
+]
+
+
+def _widget_html() -> str:
+    html = (Path(__file__).parent / "mcp_ui" / "generation.html").read_text(encoding="utf-8")
+    web = os.environ.get("HF_STUDIO_WEB_URL", "http://localhost:3000").rstrip("/")
+    return html.replace("__HF_STUDIO_WEB__", json.dumps(web)[1:-1])
+
+
+apps = Apps()
+apps.add_html_resource(
+    GENERATION_UI,
+    _widget_html(),
+    name="generation",
+    title="Generación de HF Studio",
+    description="Estado y resultado de una generación de HF Studio",
+    csp=ResourceCsp(resource_domains=MEDIA_DOMAINS),
+    prefers_border=False,
+)
+mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS, extensions=[apps])
 # Cada herramienta declara las cuatro pistas para que el cliente avise antes de invocarla: solo lectura
 # (catálogo, biblioteca, estados), gasta créditos (siempre tras una cotización que vio el usuario, título
 # «spends credits»), o modifica algo (cancelar, etiquetar, escribir archivos). estimate_cost cuenta como
@@ -233,6 +284,7 @@ def estimate_cost(
 
 @mcp.tool(
     title="Generate (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -251,8 +303,9 @@ def generate(
 ) -> dict:
     """Encola una generación en el proveedor más barato de la cotización (o en `provider`, el mismo que
     se pasó a estimate_cost) y devuelve el trabajo (id, status, provider). No espera: usa get_generation.
-    Requiere el quote_id de estimate_cost con los mismos model_id, input e input_*_seconds (el
-    usuario debe haber visto ese costo). Si reintentas tras un fallo de red, pasa la misma idempotency_key.
+    Requiere el quote_id de estimate_cost con los mismos model_id, input e input_*_seconds. Llámala solo
+    después de que el usuario vio ese costo y dijo que sí en un mensaje nuevo (no en el mismo turno en que
+    cotizaste), salvo que haya dado un tope explícito en el que quepa. Si reintentas tras un fallo de red, pasa la misma idempotency_key.
     Al editar un video (entrada video_url), generate_audio=false da un video MUDO, no conserva el sonido
     original; para conservarlo pasa keep_source_audio=true (gratis: HF Studio le pone el audio del
     video de origen al resultado). Lee studio_notes en get_model."""
@@ -307,6 +360,7 @@ def _uploaded_url(path: str) -> str:
 
 @mcp.tool(
     title="Change voice (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -376,6 +430,7 @@ def _audio(service: str, body: dict, quote_id: str | None, idempotency_key: str 
 
 @mcp.tool(
     title="Text to speech (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -410,6 +465,7 @@ def text_to_speech(
 
 @mcp.tool(
     title="Sound effect (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -435,6 +491,7 @@ def sound_effect(
 
 @mcp.tool(
     title="Compose music (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -458,6 +515,7 @@ def compose_music(
 
 @mcp.tool(
     title="Isolate voice (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -753,6 +811,7 @@ def list_generations(status: str | None = None, limit: int = 20) -> dict:
 
 @mcp.tool(
     title="Approve fallback provider (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -933,6 +992,7 @@ def _authorize(
 
 @mcp.tool(
     title="Generate batch (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -1010,6 +1070,7 @@ def list_presets() -> dict:
 
 @mcp.tool(
     title="Run preset (spends credits)",
+    meta=UI_META,
     annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
     ),
@@ -1267,6 +1328,220 @@ def approve_space_run(
 def cancel_space_run(space_id: str, run_id: str) -> dict:
     """Detiene una corrida: no envía más pasos y cancela los que aún no cuestan; lo terminado se conserva."""
     return _call("POST", f"/v1/spaces/{space_id}/runs/{run_id}/cancel")
+
+
+# --- Tarjeta de generación (MCP Apps) ------------------------------------------------------------
+
+PREVIEW_MAX_BYTES = 20 * 1024 * 1024  # lo que la tarjeta recibe en base64 si la URL del medio no carga
+
+
+@mcp.tool(
+    title="Show generations",
+    meta=UI_META,
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def show_generations(generation_ids: list[str]) -> dict:
+    """Muestra generaciones ya lanzadas en una tarjeta del chat (en los clientes con widgets, como Claude
+    Desktop): su estado, que se actualiza solo, y al terminar el video, la imagen o el audio. Úsala cuando el
+    usuario quiera ver resultados de antes o de otra conversación. No la llames para lo que lanzaste en esta
+    conversación con generate, generate_batch, run_preset o el audio: su tarjeta ya lo muestra y saldría
+    repetido. No espera; devuelve el estado actual."""
+    if not generation_ids:
+        raise ToolError("Pasa al menos un generation_id")
+    params = {"ids": ",".join(generation_ids[:20]), "wait": 0, "limit": 100}
+    return _call("GET", "/v1/generations", params=params)
+
+
+def _fetch_capped(http: httpx.Client, url: str) -> tuple[bytes, str]:
+    """Descarga hasta PREVIEW_MAX_BYTES; más grande, falla sin cargarlo entero en memoria."""
+    with http.stream("GET", url, follow_redirects=True) as response:
+        response.raise_for_status()
+        size = int(response.headers.get("content-length") or 0)
+        if size > PREVIEW_MAX_BYTES:
+            raise ToolError("El archivo es muy grande para mostrarlo en el chat; ábrelo en HF Studio")
+        chunks, total = [], 0
+        for chunk in response.iter_bytes():
+            total += len(chunk)
+            if total > PREVIEW_MAX_BYTES:
+                raise ToolError("El archivo es muy grande para mostrarlo en el chat; ábrelo en HF Studio")
+            chunks.append(chunk)
+        return b"".join(chunks), response.headers.get("content-type", "").split(";")[0]
+
+
+@mcp.tool(
+    title="Generation preview (widget only)",
+    meta={"ui": {"visibility": ["app"]}},
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
+def generation_preview(generation_id: str, index: int = 0) -> dict:
+    """Uso interno de la tarjeta de generación: devuelve una salida en base64 (máx. 20 MB) cuando su URL no
+    carga en el chat. No la uses para descargar: para eso está download_outputs."""
+    job = _call("GET", f"/v1/generations/{generation_id}")
+    outputs = job.get("outputs") or []
+    if job.get("status") != "completed" or not 0 <= index < len(outputs):
+        raise ToolError("Esa salida no existe o la generación no ha terminado")
+    out = outputs[index]
+    try:
+        with _client() as http:
+            # La copia local primero (no caduca); si no hay, la URL del proveedor.
+            if out.get("file_url") or not str(out.get("url", "")).startswith("http"):
+                data, mime = _fetch_capped(http, out.get("file_url") or out["url"])
+            else:
+                with httpx.Client(timeout=150) as remote:
+                    data, mime = _fetch_capped(remote, out["url"])
+    except httpx.HTTPError as exc:
+        raise ToolError(f"No se pudo leer la salida: {exc}") from exc
+    if not mime or mime == "application/octet-stream":
+        guessed = mimetypes.guess_type(str(out.get("file_url") or out.get("url") or ""))[0]
+        mime = guessed or {"video": "video/mp4", "audio": "audio/mpeg"}.get(out.get("kind"), "image/png")
+    return {"mime_type": mime, "bytes": len(data), "data_base64": base64.b64encode(data).decode()}
+
+
+# --- Biblioteca: favoritas, ocultas, borrar y aprobaciones pendientes --------------------------------
+
+
+@mcp.tool(
+    title="Favorite generations",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def favorite_generations(generation_ids: list[str], favorite: bool = True) -> dict:
+    """Marca (o desmarca con favorite=False) generaciones como favoritas en la biblioteca de HF Studio."""
+    return _call("POST", "/v1/generations/favorite", json={"ids": generation_ids, "favorite": favorite})
+
+
+@mcp.tool(
+    title="Hide generations",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def hide_generations(generation_ids: list[str], hidden: bool = True) -> dict:
+    """Oculta (o vuelve a mostrar con hidden=False) generaciones terminadas del historial y los listados.
+    Siguen accesibles por su id; no borra nada."""
+    return _call("POST", "/v1/generations/hide", json={"ids": generation_ids, "hidden": hidden})
+
+
+@mcp.tool(
+    title="Delete generation",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    ),
+)
+def delete_generation(generation_id: str) -> dict:
+    """Borra una generación terminada del historial y su copia local (y su sonido de la sonoteca). No se
+    puede deshacer: confirma con el usuario antes. Si solo quiere quitarla de la vista, usa hide_generations."""
+    return _call("DELETE", f"/v1/generations/{generation_id}")
+
+
+@mcp.tool(
+    title="List pending approvals",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def list_approvals(limit: int = 50) -> dict:
+    """Generaciones que esperan la aprobación del usuario (cambió el precio, la retención o el proveedor). Las
+    de una corrida de Spaces traen space_run: se aprueban con approve_space_run, no con approve_fallback."""
+    return _call("GET", "/v1/approvals", params={"limit": max(1, min(limit, 100))})
+
+
+@mcp.tool(
+    title="List uploads",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def list_uploads(limit: int = 50) -> dict:
+    """Archivos que ya subiste con upload_media (o desde la app), con su URL pública para reutilizarlos."""
+    return _call("GET", "/v1/uploads", params={"limit": max(1, min(limit, 200))})
+
+
+@mcp.tool(
+    title="Usage and spend",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def get_usage(days: int = 30) -> dict:
+    """Gasto de las generaciones terminadas por día, proveedor y modelo en los últimos `days` días (0 = todo
+    el historial), como la página /usage. Es el precio cotizado, no el cobro conciliado con el proveedor."""
+    offset = (time.localtime().tm_gmtoff or 0) // 60
+    return _call("GET", "/v1/usage", params={"days": max(0, min(days, 3650)), "utc_offset": offset})
+
+
+# --- Voces gratis (edge-tts) ------------------------------------------------------------------------
+
+
+@mcp.tool(
+    title="List free voices",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+    ),
+)
+def list_free_voices(lang: str = "es") -> dict:
+    """Voces neuronales gratis (Microsoft Edge, sin clave ni créditos) de un idioma; Colombia primero en
+    español. Su voice_id sirve en free_text_to_speech."""
+    return _call("GET", "/v1/voice/free-voices", params={"lang": lang})
+
+
+@mcp.tool(
+    title="Free text to speech",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True
+    ),
+)
+def free_text_to_speech(text: str, voice_id: str, rate: str = "+0%", dest_dir: str = ".") -> dict:
+    """Locución gratis con una voz de list_free_voices (hasta 300 caracteres; rate de -20% a +30%). Guarda
+    el MP3 en dest_dir y devuelve su ruta. No gasta créditos; para voces de ElevenLabs usa text_to_speech."""
+    params = {"voice": voice_id, "text": text, "rate": rate}
+    try:
+        with _client() as http:
+            response = http.get("/v1/voice/free-sample", params=params)
+    except httpx.TransportError as exc:
+        raise ToolError(f"HF Studio no responde ({exc}); ¿está corriendo `hf-studio serve`?") from exc
+    if not response.is_success:
+        try:
+            error = response.json().get("error") or response.json()
+        except ValueError:
+            error = response.text
+        raise ToolError(f"HTTP {response.status_code}: {error}")
+    dest = _local_path(dest_dir).expanduser()
+    dest.mkdir(parents=True, exist_ok=True)
+    key = hashlib.sha256(f"{voice_id}|{rate}|{text}".encode()).hexdigest()[:10]
+    target = dest / f"{voice_id}-{key}.mp3"
+    target.write_bytes(response.content)
+    return {"file": str(target.resolve()), "bytes": len(response.content), "voice_id": voice_id}
+
+
+# --- Borrar presets y Spaces -------------------------------------------------------------------------
+
+
+@mcp.tool(
+    title="Delete preset",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    ),
+)
+def delete_preset(slug: str) -> dict:
+    """Borra un preset propio (los incluidos de fábrica no se borran). Confirma con el usuario antes."""
+    return _call("DELETE", f"/v1/presets/{slug}")
+
+
+@mcp.tool(
+    title="Delete space",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+    ),
+)
+def delete_space(space_id: str) -> dict:
+    """Borra un lienzo de Spaces y sus corridas; sus generaciones siguen en el historial. Confirma antes."""
+    return _call("DELETE", f"/v1/spaces/{space_id}")
 
 
 def main() -> None:

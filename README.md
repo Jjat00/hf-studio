@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-46%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
+[![MCP](https://img.shields.io/badge/MCP-58%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
 [Español](README.es.md) · **English** · [Website and examples](https://hf-studio.jato.run)
 
@@ -270,21 +270,31 @@ touched. If the agent already has `hf-studio`, `connect` stops: remove it first 
 server is `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with `HF_STUDIO_URL=http://127.0.0.1:8787`
 and `HF_STUDIO_TOKEN=hfs_…` in its environment.
 
-Tools (46). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Tools (58). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`), and the ones that spend credits say so in their title, so clients can warn you before calling them.
 
 | Group | Tools |
 | --- | --- |
 | Models | `find_models`, `get_model`, `recommend_models`, `list_styles`, `list_model_options` |
-| Generate | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
-| Tracking | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
-| Providers | `providers_status` |
-| Presets | `list_presets`, `run_preset`, `save_preset` |
+| Generate | `upload_media`, `list_uploads`, `estimate_cost`, `generate`, `generate_batch` |
+| Tracking | `get_generation`, `wait_generations`, `show_generations`, `list_generations`, `list_approvals`, `cancel_generation`, `download_outputs`, `approve_fallback` |
+| Library | `favorite_generations`, `hide_generations`, `delete_generation` |
+| Providers and spend | `providers_status`, `get_usage` |
+| Presets | `list_presets`, `run_preset`, `save_preset`, `delete_preset` |
 | Voice (ElevenLabs) | `list_voices`, `change_voice`, `clone_voice`, `design_voice`, `save_voice`, `delete_voice` |
+| Free voices (edge-tts) | `list_free_voices`, `free_text_to_speech` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sound library | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 | Reuse and elements | `use_output`, `list_elements`, `create_element`, `delete_element` |
-| Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
+| Chat card (MCP Apps) | `generation_preview` (used only by the card, hidden from the model) |
+| Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `delete_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
+
+**Results inside the chat.** In clients that render MCP Apps (Claude Desktop, claude.ai), `generate`,
+`generate_batch`, `run_preset`, `approve_fallback`, the ElevenLabs audio tools and `show_generations` open a card in
+the conversation: it follows the generation on its own and plays the video, image or audio when it finishes. Clients
+without widgets (Claude Code, Codex) get the same JSON as always. The card loads media from the provider's CDN and, if
+that URL fails or expired, asks the server for the local copy (up to 20 MB). Set `HF_STUDIO_WEB_URL` if the UI is not
+on `http://localhost:3000` (the card's "Open in HF Studio" button points there).
 
 **No MCP tool generates without quoting that same request first.** `estimate_cost`, and `generate_batch` or
 `run_preset` with `dry_run=True`, return the cost and a `quote_id`. `generate`, and batches and presets with

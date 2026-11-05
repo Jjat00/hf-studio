@@ -54,6 +54,8 @@ owner's credits.
 - Spaces (node canvases): `create_space` / `update_space` build one; `estimate_space_run` quotes every step and the
   total (with a `quote_id`), and after the user's OK `run_space` runs it on the server under that budget. A run that
   pauses (`awaiting_approval`) needs the user's OK on `pause.needed_total_usd` before `approve_space_run`.
+- In clients that render MCP Apps (Claude Desktop), the tools that start a generation and `show_generations` open
+  a card in the chat that follows it and shows the result; the user does not need you to poll just to see it.
 - The server instructions (in `src/hf_studio/mcp_server.py`, `INSTRUCTIONS`) are the source of truth.
 
 ## Work on the code
@@ -68,7 +70,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   `higgsfield.py` (Higgsfield client), `elements.py` (Kling 3.0 elements: local images, refreshed URLs), `providers/` (provider contract in `base.py`, APIMart and KIE adapters; add a
   provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `voice_creation.py` (clone a voice from samples or design one from a description, all through the ElevenLabs API), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
-  (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `setup.py` (first run and `connect`), `launcher.py` (`start`), `store/` (models that only APIMart and KIE sell, `store: true`: one module per family with `MODELS`, its
+  (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `mcp_ui/generation.html` (MCP Apps chat card, plain HTML and JS that talks to the host over postMessage), `setup.py` (first run and `connect`), `launcher.py` (`start`), `store/` (models that only APIMart and KIE sell, `store: true`: one module per family with `MODELS`, its
   routes and price; the router never offers them to Higgsfield), `catalog.json` (91 model schemas,
   regenerated with `hf-studio sync-catalog`; entries whose `docs_url` is on open.higgsfield.ai are hand-written and kept), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
