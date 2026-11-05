@@ -75,7 +75,13 @@ class FakeElevenLabs:
             return httpx.Response(200, content=self.voice_wav, headers={"content-type": "audio/mpeg"})
         if path == "/v1/user/subscription":
             return httpx.Response(
-                200, json={"tier": "starter", "character_count": 1000, "character_limit": 30000}
+                200,
+                json={
+                    "tier": "starter",
+                    "character_count": 1000,
+                    "character_limit": 30000,
+                    "can_use_instant_voice_cloning": True,
+                },
             )
         if path.startswith(("/v1/speech-to-speech/", "/v1/text-to-speech/")) or path in (
             "/v1/sound-generation",
@@ -156,7 +162,8 @@ async def test_voice_change_end_to_end_with_library_voice(voice_env):
 
 async def test_voice_lists_and_status(voice_env):
     _, http, _, _ = voice_env
-    assert (await http.get("/v1/voice/status")).json()["credits_left"] == 29000
+    status = (await http.get("/v1/voice/status")).json()
+    assert status["credits_left"] == 29000 and status["can_clone"] is True
     mine = (await http.get("/v1/voice/voices")).json()["voices"]
     lib = (await http.get("/v1/voice/voices", params={"library": True, "search": "ghoul"})).json()["voices"]
     assert mine[0]["voice_id"] == "v_demon" and lib[0]["public_owner_id"] == "owner1"

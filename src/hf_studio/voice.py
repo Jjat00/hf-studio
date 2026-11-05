@@ -168,6 +168,8 @@ class ElevenLabsClient:
         used, limit = data.get("character_count"), data.get("character_limit")
         return {
             "tier": data.get("tier"),
+            # El plan gratis no trae clonación instantánea: la UI lo avisa antes de que suban muestras.
+            "can_clone": data.get("can_use_instant_voice_cloning"),
             "credits_used": used,
             "credits_limit": limit,
             "credits_left": limit - used if isinstance(used, int) and isinstance(limit, int) else None,

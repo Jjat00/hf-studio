@@ -18,7 +18,7 @@ const secondary = "flex h-9 items-center gap-2 rounded-xl bg-glass px-3 text-sm 
 type Sample = { id: string; file: File; url: string; seconds: number | null };
 
 /** Crear una voz en la cuenta de ElevenLabs: clonarla con audio o diseñarla con una descripción. */
-export function VoiceCreate({ onCreated }: { onCreated: () => void }) {
+export function VoiceCreate({ canClone, onCreated }: { canClone?: boolean | null; onCreated: () => void }) {
   const { t } = useI18n();
   const c = t.voices.create;
   const [mode, setMode] = useState<Mode>("clone");
@@ -29,7 +29,7 @@ export function VoiceCreate({ onCreated }: { onCreated: () => void }) {
           <Chip key={m} active={mode === m} onClick={() => setMode(m)}>{c.modes[m]}</Chip>
         ))}
       </div>
-      {mode === "clone" ? <CloneForm onCreated={onCreated} /> : <DesignForm onCreated={onCreated} />}
+      {mode === "clone" ? <CloneForm blocked={canClone === false} onCreated={onCreated} /> : <DesignForm onCreated={onCreated} />}
     </section>
   );
 }
@@ -61,7 +61,7 @@ function audioSeconds(file: File): Promise<number | null> {
   });
 }
 
-function CloneForm({ onCreated }: { onCreated: () => void }) {
+function CloneForm({ blocked, onCreated }: { blocked: boolean; onCreated: () => void }) {
   const c = useI18n().t.voices.create;
   const [name, setName] = useState("");
   const [language, setLanguage] = useState("es");
@@ -133,7 +133,9 @@ function CloneForm({ onCreated }: { onCreated: () => void }) {
       setSamples([]);
       onCreated();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // ElevenLabs responde en inglés que el plan no incluye clonar: se dice en el idioma de la UI.
+      setError(/instant voice cloning/i.test(msg) ? c.noClonePlan : msg);
     } finally {
       setBusy(false);
     }
@@ -201,12 +203,18 @@ function CloneForm({ onCreated }: { onCreated: () => void }) {
         {c.consent}
       </label>
       <div>
-        <button type="button" className={primary} disabled={busy || recording || !name.trim() || !samples.length || !consent} onClick={() => void submit()}>
+        <button type="button" className={primary} disabled={blocked || busy || recording || !name.trim() || !samples.length || !consent} onClick={() => void submit()}>
           {busy && <Loader2 className="size-4 animate-spin" />}
           {busy ? c.cloning : c.clone}
         </button>
       </div>
-      {error && <p className="text-sm text-danger">{error}</p>}
+      {(blocked || error === c.noClonePlan) && (
+        <p className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-fg-2">
+          {c.noClonePlan}{" "}
+          <a href="https://elevenlabs.io/pricing" target="_blank" rel="noreferrer" className="text-lime hover:underline">{c.seePlans}</a>
+        </p>
+      )}
+      {error && error !== c.noClonePlan && <p className="text-sm text-danger">{error}</p>}
       {done && (
         <p className="text-sm text-lime">
           {c.cloned(done.name)} {done.verify && c.verify}

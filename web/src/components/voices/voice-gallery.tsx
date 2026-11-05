@@ -223,7 +223,7 @@ export function VoiceGallery() {
         </section>
       )}
 
-      {tab === "create" && status?.configured && <VoiceCreate onCreated={() => setAccount(null)} />}
+      {tab === "create" && status?.configured && <VoiceCreate canClone={status.can_clone} onCreated={() => setAccount(null)} />}
 
       {tab === "library" && status?.configured && (
         <section className="mt-6 flex flex-col gap-4">

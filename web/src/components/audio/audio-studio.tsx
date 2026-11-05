@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, AudioLines, Loader2, Video } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioPlayer } from "@/components/generations/generation-card";
@@ -31,17 +31,19 @@ const TTS_MAX: Record<string, number> = {
   eleven_flash_v2_5: 40000,
 };
 const LANGUAGES = ["es", "en", "pt", "fr", "it", "de"];
-type Source = { generationId?: string; url: string; label: string };
+type Source = { generationId?: string; url: string; label: string; kind?: "video" | "audio"; date?: string };
 
 function sourceOf(g: Generation): Source | null {
   const out = g.outputs.find((o) => o.kind === "video" || o.kind === "audio");
   if (g.status !== "completed" || !out) return null;
-  const label = typeof g.input.prompt === "string" ? g.input.prompt : typeof g.input.text === "string" ? g.input.text : g.model;
-  return { generationId: g.id, url: outputSrc(out), label };
+  const raw = typeof g.input.prompt === "string" ? g.input.prompt : typeof g.input.text === "string" ? g.input.text : "";
+  // Las etiquetas de entonación ([curious, engaging explainer]) no dicen qué es: fuera de la etiqueta.
+  const label = raw.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim() || g.model;
+  return { generationId: g.id, url: outputSrc(out), label, kind: out.kind === "video" ? "video" : "audio", date: g.created_at };
 }
 
 export function AudioStudio() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const a = t.audio;
   const router = useRouter();
   const params = useSearchParams();
@@ -302,8 +304,15 @@ export function AudioStudio() {
                   <div className="thin-scrollbar flex max-h-64 flex-col gap-1 overflow-y-auto">
                     {sources.map(([g, s]) => (
                       <button key={g.id} type="button" onClick={() => setSource(s)}
-                              className="truncate rounded-lg bg-surface-3 px-3 py-2 text-left text-sm hover:bg-white/5">
-                        {s!.label}
+                              className="flex shrink-0 items-center gap-2.5 rounded-lg bg-surface-3 px-3 py-2 text-left hover:bg-white/5">
+                        {s!.kind === "video" ? <Video className="size-4 shrink-0 text-fg-3" /> : <AudioLines className="size-4 shrink-0 text-fg-3" />}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm">{s!.label}</span>
+                          <span className="block truncate text-xs text-fg-4">
+                            {s!.kind === "video" ? t.history.filters.video : t.history.filters.audio}
+                            {s!.date && ` · ${new Date(s!.date).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })}`}
+                          </span>
+                        </span>
                       </button>
                     ))}  {/* prettier-ignore */}
                   </div>

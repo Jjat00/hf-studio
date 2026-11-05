@@ -197,6 +197,7 @@ export type FreeVoice = {
 export type VoiceStatus = {
   configured: boolean;
   tier?: string | null;
+  can_clone?: boolean | null;
   credits_left?: number | null;
   credits_limit?: number | null;
 };
