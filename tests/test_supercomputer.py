@@ -3,6 +3,7 @@ propuestas cotizadas sin generar nada; el usuario genera desde la propuesta y el
 
 from __future__ import annotations
 
+import itertools
 import json
 
 import httpx
@@ -12,7 +13,7 @@ from sqlalchemy import func, select
 
 from hf_studio.api import create_app
 from hf_studio.config import Settings
-from hf_studio.db import ApiClient, Job, Upload, hash_token
+from hf_studio.db import ApiClient, Element, Job, Upload, hash_token
 from hf_studio.supercomputer import visible_messages
 
 from .test_routing import FIXTURES, T2V, VIDEO, Fakes
@@ -146,6 +147,66 @@ async def test_the_agent_searches_reads_and_proposes_without_generating(env):
 
     again = (await http.get(f"/v1/chats/{chat['id']}")).json()
     assert again["messages"] == done["messages"]
+
+
+async def test_the_agent_lists_saved_elements_to_cite_them(env):
+    app, http, claude = env
+    async with app.state.sessions() as s:
+        ui = await s.scalar(select(ApiClient))
+        s.add(Element(id="el_000000000001", created_by=ui.id, name="zorro", description="Zorro rojo de peluche", images=[{"file": "a.png"}, {"file": "b.png"}]))  # fmt: skip
+        await s.commit()
+    claude.script = [([tool("list_elements", {})], "tool_use")]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "usa mi zorro")
+    assert [e["name"] for e in events if e["type"] == "tool"] == ["list_elements"]
+    listed = json.loads(claude.requests[1]["messages"][-1]["content"][0]["content"])
+    assert listed["elements"][0] == {
+        "id": "el_000000000001", "name": "zorro", "mention": "@zorro", "description": "Zorro rojo de peluche", "images": 2,
+    }  # fmt: skip
+    assert "list_elements" in {t["name"] for t in claude.requests[0]["tools"]}
+    assert "# References" in str(claude.requests[0]["system"])
+
+
+async def test_questions_come_one_at_a_time_with_clickable_options(env):
+    _, http, claude = env
+    ask = {
+        "question": "¿Qué formato?",
+        "options": [{"label": "Historia 9:16", "detail": "Recomendado"}, {"label": "Feed 4:5"}],
+    }
+    claude.script = [([{"type": "text", "text": "Buena foto. "}, tool("ask_user", ask)], "tool_use")]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "mejora la imagen")
+    assert len(claude.requests) == 1  # la vuelta termina en la pregunta, sin otra llamada a Claude
+    question = next(e["question"] for e in events if e["type"] == "question")
+    assert question["question"] == "¿Qué formato?" and [o["label"] for o in question["options"]] == [
+        "Historia 9:16",
+        "Feed 4:5",
+    ]
+    parts = events[-1]["chat"]["messages"][1]["parts"]
+    assert [p["type"] for p in parts] == ["text", "question"]
+
+    events = await send(http, chat["id"], "Historia 9:16")
+    last = claude.requests[1]["messages"][-1]
+    assert (
+        last["role"] == "user" and last["content"][0]["type"] == "tool_result"
+    )  # respuesta y resultado juntos
+    assert last["content"][-1] == {"type": "text", "text": "Historia 9:16"}
+    roles = [m["role"] for m in claude.requests[1]["messages"]]
+    assert all(a != b for a, b in itertools.pairwise(roles))  # nunca dos mensajes seguidos del mismo rol
+    shown = events[-1]["chat"]["messages"]
+    assert [m["role"] for m in shown] == ["user", "assistant", "user", "assistant"]
+    assert shown[2] == {"role": "user", "text": "Historia 9:16", "attachments": []}
+
+
+async def test_a_bad_question_goes_back_to_claude(env):
+    _, http, claude = env
+    claude.script = [
+        ([tool("ask_user", {"question": "¿Formato?", "options": [{"label": "Solo una"}]})], "tool_use")
+    ]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "hola")
+    assert not [e for e in events if e["type"] == "question"] and len(claude.requests) == 2
+    assert claude.requests[1]["messages"][-1]["content"][0]["is_error"]
 
 
 async def test_an_invalid_proposal_goes_back_to_claude_as_an_error(env):

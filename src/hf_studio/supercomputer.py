@@ -39,12 +39,21 @@ prompt that gets a great result on the right model.
 # How a conversation goes
 1. Understand the idea. Each user turn starts with a <studio_mode> tag:
    - `ask`: collaborate before writing. If the request leaves decisions open that change the result (subject, \
-setting, mood, action, format, duration, references), ask at most 3 short, concrete questions, each with 2-3 \
-suggested options, or offer a plain-language description of the scene for them to react to. Do not propose a \
-generation until they agree on the scene or ask you to go ahead.
+setting, mood, action, format, duration, references), ask about them ONE AT A TIME with the `ask_user` tool: \
+one short question with 2-4 short options the user can click (put your recommendation first and say so in its \
+detail); they can also type their own answer. Never list several questions or numbered options in your text. \
+A sentence of context before the question is fine. After `ask_user`, stop: the answer arrives as the next \
+message, and then you ask the next question or move on. Ask only what matters (usually 1-3 questions in total); \
+if the user says to decide, decide. Do not propose a generation until the open decisions are settled or they \
+ask you to go ahead.
+     For a video, unless they already attached references or said they don't want any, one of your questions \
+is whether to include a character (or product): call `list_elements` first and offer their saved elements by \
+name as options, plus "use an image of mine" (attach it or pick it from history) and "a new character you \
+describe" or "no character".
    - `auto`: make the creative decisions yourself, tell them in one or two sentences what you chose, and propose \
 right away.
-2. Pick the model. Use `find_models` (it returns real prices), then `get_model` to read the exact input schema, \
+2. Pick the model. If the user names a model, put its name in the `find_models` task (for example "gemini \
+omni 1.2"): named models come first. Use `find_models` (it returns real prices), then `get_model` to read the exact input schema, \
 limits (prompt maxLength, durations, aspect ratios, resolutions, audio support) and notes before writing for it. \
 Prefer what the user asked for; otherwise balance quality and price and say why in one line.
 3. Propose. Call `propose_generation` with the full prompt and settings. It validates the input against the \
@@ -54,6 +63,18 @@ in your text; summarise what it contains in a few lines.
 4. Iterate. When the user asks for changes, propose a revised version. Updates about their generations (status, \
 output URLs) arrive inside <studio_update> tags; an output URL can be reused as an input (for example the image \
 of a character as `image_url` / start frame of a video).
+
+# References
+The user can attach images or videos (from their device or their history); each arrives as a line \
+"Attached image (name): URL", numbered in the order they come, and you see the images themselves. They are \
+references: decide what each one is for (a character or product to keep, the first or last frame, a location, \
+a style or palette, a motion or camera to imitate, a clip to edit) and, in `ask` mode, ask when it is not clear. \
+Then pick a model that takes that kind of input (capabilities such as image-to-video, first-last-frame, \
+reference-to-video, image-references, edit, video-edit, motion-transfer), pass the exact URLs in the matching \
+fields of its schema, and refer to them in the prompt by role and order ("the woman from image 1 wears the \
+jacket from image 2"). Never invent or alter a URL. The user's saved elements (recurring characters, products \
+or places) come from `list_elements`: on Kling 3.0 models put their ids in the `elements` field and cite each \
+as @name in the prompt; on other models, describe them instead.
 
 You never generate anything yourself and you never say a generation has started: only the user's click on a \
 proposal does that, after they see the price. Never invent model ids, fields or prices: use the tools.
@@ -150,7 +171,58 @@ TOOLS: list[dict] = [
     },
 ]
 
-TOOL_LABELS = {"find_models": "searching", "get_model": "reading", "propose_generation": "proposing"}
+TOOLS.append(
+    {
+        "name": "list_elements",
+        "description": (
+            "List the user's saved elements: recurring characters, products or places with a name, a description "
+            "and reference images. Free. Kling 3.0 models take their ids in the `elements` field and the prompt "
+            "cites each as @name."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    }
+)
+
+TOOLS.append(
+    {
+        "name": "ask_user",
+        "description": (
+            "Ask the user ONE question with 2-4 clickable options (they can also type something else). The "
+            "question appears in the chat and your turn ends; their answer is their next message. Use it for each "
+            "open creative decision, one at a time."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Short question in the user's language"},
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string", "description": "What the user clicks (a few words)"},
+                            "detail": {"type": "string", "description": "Optional one-line explanation"},
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["question", "options"],
+            "additionalProperties": False,
+        },
+    }
+)
+
+TOOL_LABELS = {
+    "ask_user": "asking",
+    "find_models": "searching",
+    "get_model": "reading",
+    "propose_generation": "proposing",
+    "list_elements": "reading",
+}
 
 
 @dataclass
@@ -161,6 +233,7 @@ class Toolbox:
     get_model: Callable[[str], Awaitable[dict]]
     # Devuelve (resultado para Claude, propuesta para guardar o None si no pasó la validación).
     propose: Callable[[str, dict, str], Awaitable[tuple[dict, dict | None]]]
+    list_elements: Callable[[], Awaitable[dict]] | None = None
 
 
 @dataclass
@@ -249,8 +322,17 @@ async def run_turn(
                 continue
             return
         results = []
+        asked = False
         for use in uses:
-            result, proposal = await call_tool(tools, use.name, use.input)
+            if use.name == "ask_user":
+                question, error = parse_question(use.input)
+                result = {"error": error} if error else {"shown": True, "note": QUESTION_NOTE}
+                proposal = None
+                if question:
+                    asked = True
+                    yield {"type": "question", "question": {**question, "id": use.id}}
+            else:
+                result, proposal = await call_tool(tools, use.name, use.input)
             if proposal:
                 proposal = {**proposal, "tool_use_id": use.id}
                 turn.proposals.append(proposal)
@@ -263,7 +345,41 @@ async def run_turn(
         # respuesta (la API rechazaría la siguiente vuelta).
         turn.messages.append({"role": "assistant", "content": content})
         turn.messages.append({"role": "user", "content": results})
+        if asked:  # la pregunta queda en pantalla: la vuelta termina hasta que el usuario responda
+            return
     turn.error = "Stopped after too many steps; send another message to continue"
+
+
+QUESTION_NOTE = "Shown to the user with clickable options. Stop now; their answer is their next message."
+
+
+def parse_question(args: Any) -> tuple[dict | None, str | None]:
+    """Pregunta de `ask_user` validada: texto y de 2 a 4 opciones con etiqueta (y detalle opcional)."""
+    if (
+        not isinstance(args, dict)
+        or not isinstance(args.get("question"), str)
+        or not args["question"].strip()
+    ):
+        return None, "`question` is required"
+    options = []
+    for o in args.get("options") or []:
+        label = o.get("label") if isinstance(o, dict) else o
+        if isinstance(label, str) and label.strip():
+            detail = o.get("detail") if isinstance(o, dict) and isinstance(o.get("detail"), str) else None
+            options.append(
+                {"label": label.strip()[:80], **({"detail": detail.strip()[:200]} if detail else {})}
+            )
+    if not 2 <= len(options) <= 4:
+        return None, "Give 2 to 4 options, each with a `label`"
+    return {"question": args["question"].strip()[:300], "options": options}, None
+
+
+def with_user_turn(messages: list[dict], user_msg: dict) -> list[dict]:
+    """Añade el mensaje del usuario. Si el chat termina en los resultados de una vuelta que paró en una
+    pregunta (`ask_user`), van en el mismo mensaje: la API no admite dos mensajes de usuario seguidos."""
+    if messages and messages[-1]["role"] == "user":
+        return [*messages[:-1], {"role": "user", "content": [*messages[-1]["content"], *user_msg["content"]]}]
+    return [*messages, user_msg]
 
 
 async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | None]:
@@ -287,6 +403,10 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
             if not isinstance(model_id, str) or not isinstance(arguments, dict):
                 return {"error": "`model_id` and `input` are required"}, None
             return await tools.propose(model_id, arguments, str(title or "")[:120])
+        if name == "list_elements":
+            if tools.list_elements is None:
+                return {"elements": []}, None
+            return await tools.list_elements(), None
     except Exception as exc:  # noqa: BLE001 - el agente ve el error y decide
         return {"error": str(exc)[:500]}, None
     return {"error": f"Unknown tool {name}"}, None
@@ -324,6 +444,10 @@ def visible_messages(messages: list[dict], proposals: dict[str, dict]) -> list[d
                 b.get("type") == "tool_use" and b.get("name") == "propose_generation" and b["id"] in proposals
             ):
                 parts.append({"type": "proposal", "proposal": proposals[b["id"]]})
+            elif b.get("type") == "tool_use" and b.get("name") == "ask_user":
+                question, _ = parse_question(b.get("input"))
+                if question:
+                    parts.append({"type": "question", "question": {**question, "id": b["id"]}})
         if not parts:
             continue
         if out and out[-1]["role"] == "assistant":  # varias rondas de una vuelta: un solo mensaje

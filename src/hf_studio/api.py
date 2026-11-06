@@ -2030,7 +2030,23 @@ def create_app(
                         "title": title, "input": arguments, "estimate": brief, "job_id": None}  # fmt: skip
             return {"ok": True, "price": brief, "note": "Shown to the user with a Generate button"}, proposal
 
-        return sc.Toolbox(find_models=find_models, get_model=get_model_info, propose=propose)
+        async def list_elements() -> dict:
+            async with app.state.sessions() as s:
+                rows = await s.scalars(
+                    select(Element)
+                    .where(Element.deleted_at.is_(None))
+                    .order_by(Element.created_at.desc())
+                    .limit(50)
+                )
+                return {"elements": [
+                    {"id": e.id, "name": e.name, "mention": f"@{e.name}", "description": e.description,
+                     "images": len(e.images)}
+                    for e in rows
+                ]}  # fmt: skip
+
+        return sc.Toolbox(
+            find_models=find_models, get_model=get_model_info, propose=propose, list_elements=list_elements
+        )
 
     @app.post("/v1/chats/{chat_id}/messages", tags=["supercomputer"])
     async def send_chat_message(
@@ -2062,7 +2078,7 @@ def create_app(
         model = body.model or chat.model
         user_msg = {"role": "user", "content": sc.user_content(
             body.text, body.mode, [a.model_dump() for a in body.attachments], updates)}  # fmt: skip
-        history = [*chat.messages, user_msg]
+        history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
         chat_key, owner_id = chat.id, owner.id
         busy.add(chat_key)

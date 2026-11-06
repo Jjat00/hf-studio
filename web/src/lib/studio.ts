@@ -502,7 +502,11 @@ export type ChatProposal = {
   estimate: { usd: number | null; kind: string | null; provider: string | null; reserve_usd: number | null; missing: string[] | null };
   job_id: string | null;
 };
-export type ChatPart = { type: "text"; text: string } | { type: "proposal"; proposal: ChatProposal };
+export type ChatQuestion = { id: string; question: string; options: { label: string; detail?: string }[] };
+export type ChatPart =
+  | { type: "text"; text: string }
+  | { type: "proposal"; proposal: ChatProposal }
+  | { type: "question"; question: ChatQuestion };
 export type ChatMessage = { role: "user"; text: string; attachments: string[] } | { role: "assistant"; parts: ChatPart[] };
 export type Chat = ChatSummary & { messages: ChatMessage[] };
 export type ChatMode = "ask" | "auto";
@@ -517,6 +521,7 @@ export type ChatEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string; label: "searching" | "reading" | "proposing" | string }
   | { type: "proposal"; proposal: ChatProposal }
+  | { type: "question"; question: ChatQuestion }
   | { type: "usage"; cost_usd: number }
   | { type: "error"; message: string }
   | { type: "done"; chat: Chat };

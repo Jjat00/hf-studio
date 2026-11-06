@@ -1,11 +1,12 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, Copy, ExternalLink, Film, ImageIcon, Loader2, Sparkles } from "lucide-react";
+import { Check, Copy, ExternalLink, Film, ImageIcon, Loader2, Maximize2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApprovalActions, StatusPill } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
+import { Lightbox } from "@/components/lightbox";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { costShort, modelLabel, outputSrc, studio, StudioError, type ChatProposal, type Estimate } from "@/lib/studio";
 import type { Generation } from "@/lib/types";
@@ -52,6 +53,7 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [viewing, setViewing] = useState<number | null>(null);
   const key = useRef<string>("");
 
   const prompt = typeof proposal.input.prompt === "string" ? proposal.input.prompt : "";
@@ -132,7 +134,8 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   }
 
   const price = costShort(estimate);
-  const outputs = job?.status === "completed" ? job.outputs : [];
+  const outputs = (job?.status === "completed" ? job.outputs : []).filter((o) => o.kind === "video" || o.kind === "image");
+  const viewable = outputs.map((o) => ({ src: outputSrc(o), kind: o.kind === "video" ? ("video" as const) : ("image" as const) }));
 
   return (
     <div className="overflow-hidden rounded-2xl border border-line-2 bg-surface-2">
@@ -174,16 +177,28 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
 
         {outputs.length > 0 && (
           <div className="grid gap-2 sm:grid-cols-2">
-            {outputs.map((o, i) =>
-              o.kind === "video" ? (
-                <video key={i} src={outputSrc(o)} controls playsInline className="w-full rounded-xl bg-black" />
-              ) : o.kind === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img key={i} src={outputSrc(o)} alt={proposal.title} className="w-full rounded-xl" />
-              ) : null,
-            )}
+            {outputs.map((o, i) => (
+              <div key={i} className="group/out relative">
+                {o.kind === "video" ? (
+                  <video src={outputSrc(o)} controls playsInline className="w-full rounded-xl bg-black" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={outputSrc(o)} alt={proposal.title} onClick={() => setViewing(i)} className="w-full cursor-zoom-in rounded-xl" />
+                )}
+                <button
+                  type="button"
+                  aria-label={s.enlarge}
+                  title={s.enlarge}
+                  onClick={() => setViewing(i)}
+                  className="absolute top-2 right-2 rounded-lg bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover/out:opacity-100 hover:bg-black/80 focus-visible:opacity-100"
+                >
+                  <Maximize2 className="size-4" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
+        {viewing !== null && viewable[viewing] && <Lightbox items={viewable} start={viewing} onClose={() => setViewing(null)} />}
         {job?.status === "awaiting_approval" && <ApprovalActions g={job} />}
         {job?.terminal && job.status !== "completed" && job.error && <p className="text-sm text-danger">{job.error}</p>}
         {error && <p className="text-sm text-warning">{error}</p>}

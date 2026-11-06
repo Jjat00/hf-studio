@@ -1,11 +1,13 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowUp, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { Lightbox, type Viewable } from "@/components/lightbox";
 import { Logo } from "@/components/logo";
+import { CreationsPicker } from "@/components/studio/creations-picker";
 import {
   formatUsd,
   studio,
@@ -14,6 +16,7 @@ import {
   type ChatMessage,
   type ChatMode,
   type ChatPart,
+  type ChatQuestion,
   type ChatSummary,
 } from "@/lib/studio";
 import { ProposalCard } from "./proposal-card";
@@ -73,12 +76,66 @@ function Markdown({ text }: { text: string }) {
   );
 }
 
-function Parts({ chatId, parts }: { chatId: string; parts: ChatPart[] }) {
+/** Pregunta del agente con respuestas en las que se hace clic, o una propia. Solo la última se puede responder. */
+function QuestionCard({ q, onAnswer }: { q: ChatQuestion; onAnswer?: (text: string) => void }) {
+  const { t } = useI18n();
+  const s = t.supercomputer;
+  const [other, setOther] = useState<string | null>(null);
+  const active = Boolean(onAnswer);
+  return (
+    <div className={clsx("rounded-2xl border p-4", active ? "border-lime/40 bg-surface-2" : "border-line bg-surface-2/50")}>
+      <p className="text-[15px] font-semibold text-fg">{q.question}</p>
+      <div className="mt-3 flex flex-col gap-2">
+        {q.options.map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            disabled={!active}
+            onClick={() => onAnswer?.(o.label)}
+            className="rounded-xl border border-line-2 bg-surface-3 px-3 py-2 text-left transition enabled:hover:border-lime/60 enabled:hover:bg-surface-4 disabled:opacity-60"
+          >
+            <span className="text-sm font-medium text-fg">{o.label}</span>
+            {o.detail && <span className="block text-xs text-fg-3">{o.detail}</span>}
+          </button>
+        ))}
+        {active &&
+          (other === null ? (
+            <button type="button" onClick={() => setOther("")} className="rounded-xl border border-dashed border-line-2 px-3 py-2 text-left text-sm text-fg-3 hover:text-fg">
+              {s.other}
+            </button>
+          ) : (
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (other.trim()) onAnswer?.(other.trim());
+              }}
+            >
+              <input
+                autoFocus
+                value={other}
+                onChange={(e) => setOther(e.target.value)}
+                placeholder={s.otherPlaceholder}
+                className="h-10 min-w-0 flex-1 rounded-xl border border-line-2 bg-surface-3 px-3 text-sm text-fg outline-none focus:border-lime/60"
+              />
+              <button type="submit" disabled={!other.trim()} className="h-10 rounded-xl bg-lime px-3 text-sm font-semibold text-ink disabled:opacity-40">
+                {s.answer}
+              </button>
+            </form>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function Parts({ chatId, parts, onAnswer }: { chatId: string; parts: ChatPart[]; onAnswer?: (text: string) => void }) {
   return (
     <div className="space-y-4">
       {parts.map((p, i) =>
         p.type === "text" ? (
           <Markdown key={i} text={p.text} />
+        ) : p.type === "question" ? (
+          <QuestionCard key={p.question.id} q={p.question} onAnswer={i === parts.length - 1 ? onAnswer : undefined} />
         ) : (
           <ProposalCard key={p.proposal.tool_use_id} chatId={chatId} proposal={p.proposal} />
         ),
@@ -87,21 +144,37 @@ function Parts({ chatId, parts }: { chatId: string; parts: ChatPart[] }) {
   );
 }
 
+const isVideo = (url: string, contentType?: string) =>
+  contentType ? contentType.startsWith("video/") : /\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
+
+/** Miniatura de una referencia; al tocarla se abre en grande. */
+function Thumb({ url, video, className, onOpen }: { url: string; video: boolean; className?: string; onOpen: () => void }) {
+  return (
+    <button type="button" onClick={onOpen} className={clsx("relative shrink-0 overflow-hidden rounded-lg bg-surface-4 hover:ring-2 hover:ring-lime/50", className)}>
+      {video ? (
+        <video src={url} className="size-full object-cover" muted playsInline preload="metadata" />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="size-full object-cover" />
+      )}
+      {video && <Film className="absolute right-1 bottom-1 size-3.5 text-white drop-shadow" />}
+    </button>
+  );
+}
+
 function UserBubble({ m }: { m: Extract<ChatMessage, { role: "user" }> }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const items: Viewable[] = m.attachments.map((url) => ({ src: url, kind: isVideo(url) ? "video" : "image" }));
   return (
     <div className="flex flex-col items-end gap-2">
       {m.attachments.length > 0 && (
         <div className="flex flex-wrap justify-end gap-2">
-          {m.attachments.map((url) =>
-            /\.(mp4|mov|webm)(\?|$)/i.test(url) ? (
-              <video key={url} src={url} className="h-20 rounded-lg" muted />
-            ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={url} src={url} alt="" className="h-20 rounded-lg object-cover" />
-            ),
-          )}
+          {items.map((it, i) => (
+            <Thumb key={it.src} url={it.src} video={it.kind === "video"} className="h-20 w-28" onOpen={() => setOpen(i)} />
+          ))}
         </div>
       )}
+      {open !== null && <Lightbox items={items} start={open} onClose={() => setOpen(null)} />}
       <p className="max-w-[85%] rounded-2xl rounded-br-md bg-surface-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-fg">{m.text}</p>
     </div>
   );
@@ -134,6 +207,9 @@ export function Supercomputer() {
   const abort = useRef<AbortController | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const file = useRef<HTMLInputElement>(null);
+  const [historyMenu, setHistoryMenu] = useState(false);
+  const [picking, setPicking] = useState<"image" | "video" | null>(null);
+  const [viewing, setViewing] = useState<number | null>(null);
   const streaming = draft !== null;
   // Sin ?c= en la URL (chat nuevo) no se muestra ni se reutiliza el chat anterior.
   const current = chatParam && chat?.id === chatParam ? chat : null;
@@ -200,6 +276,7 @@ export function Supercomputer() {
       }
       if (e.type === "tool") return { ...d, status: s.tools[e.label as keyof typeof s.tools] ?? s.thinking };
       if (e.type === "proposal") return { parts: [...d.parts, { type: "proposal", proposal: e.proposal }], status: null };
+      if (e.type === "question") return { parts: [...d.parts, { type: "question", question: e.question }], status: null };
       return d;
     });
     if (e.type === "usage") setCost(e.cost_usd);
@@ -266,15 +343,40 @@ export function Supercomputer() {
     <div className="rounded-2xl border border-line-2 bg-surface-2 p-3 shadow-xl focus-within:border-lime/40">
       {attachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
-          {attachments.map((a) => (
-            <span key={a.url} className="flex items-center gap-1.5 rounded-lg bg-surface-4 py-1 pr-1 pl-2 text-xs text-fg-2">
-              {a.filename}
-              <button type="button" onClick={() => setAttachments((p) => p.filter((x) => x.url !== a.url))} className="rounded p-0.5 hover:bg-surface-5">
+          {attachments.map((a, i) => (
+            <span key={a.url} className="relative" title={a.filename}>
+              <Thumb url={a.url} video={isVideo(a.url, a.content_type)} className="size-14" onOpen={() => setViewing(i)} />
+              <button
+                type="button"
+                aria-label={s.removeAttachment}
+                onClick={() => setAttachments((p) => p.filter((x) => x.url !== a.url))}
+                className="absolute -top-1.5 -right-1.5 rounded-full bg-surface-1 p-0.5 text-fg-2 shadow ring-1 ring-line hover:text-fg"
+              >
                 <X className="size-3" />
               </button>
             </span>
           ))}
         </div>
+      )}
+      {viewing !== null && attachments[viewing] && (
+        <Lightbox
+          items={attachments.map((a) => ({ src: a.url, kind: isVideo(a.url, a.content_type) ? "video" : "image" }))}
+          start={viewing}
+          onClose={() => setViewing(null)}
+        />
+      )}
+      {picking && (
+        <CreationsPicker
+          kind={picking}
+          onPick={(url) =>
+            setAttachments((prev) =>
+              prev.length >= 6 || prev.some((a) => a.url === url)
+                ? prev
+                : [...prev, { url, content_type: picking === "video" ? "video/mp4" : "image/png", filename: picking === "video" ? s.historyVideo : s.historyImage }],
+            )
+          }
+          onClose={() => setPicking(null)}
+        />
       )}
       <textarea
         value={text}
@@ -302,6 +404,37 @@ export function Supercomputer() {
         >
           {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
         </button>
+        <div className="relative">
+          <button
+            type="button"
+            title={s.fromHistory}
+            aria-label={s.fromHistory}
+            aria-expanded={historyMenu}
+            onClick={() => setHistoryMenu((o) => !o)}
+            disabled={attachments.length >= 6}
+            className="flex size-8 items-center justify-center rounded-full bg-surface-4 text-fg-2 hover:text-fg disabled:opacity-50"
+          >
+            <History className="size-4" />
+          </button>
+          {historyMenu && (
+            <div className="absolute bottom-10 left-0 z-20 w-44 overflow-hidden rounded-xl border border-line-2 bg-surface-2 py-1 shadow-xl">
+              {(["image", "video"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    setHistoryMenu(false);
+                    setPicking(k);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-fg-2 hover:bg-surface-4 hover:text-fg"
+                >
+                  {k === "image" ? <ImageIcon className="size-4" /> : <Film className="size-4" />}
+                  {k === "image" ? s.historyImage : s.historyVideo}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="flex rounded-lg bg-surface-4 p-0.5 text-xs font-medium">
           {(["ask", "auto"] as const).map((m) => (
             <button
@@ -413,7 +546,16 @@ export function Supercomputer() {
             <div className="thin-scrollbar flex-1 overflow-y-auto">
               <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
                 {messages.map((m, i) =>
-                  m.role === "user" ? <UserBubble key={i} m={m} /> : <Parts key={i} chatId={current!.id} parts={m.parts} />,
+                  m.role === "user" ? (
+                    <UserBubble key={i} m={m} />
+                  ) : (
+                    <Parts
+                      key={i}
+                      chatId={current!.id}
+                      parts={m.parts}
+                      onAnswer={i === messages.length - 1 && !pending && !streaming ? (answer) => void send(answer) : undefined}
+                    />
+                  ),
                 )}
                 {pending?.role === "user" && <UserBubble m={pending} />}
                 {draft && chat && (
