@@ -2006,6 +2006,22 @@ def create_app(
             return skill_files.parse_skill_md(body.skill_md)
         return skill_files.check(body.slug or "", body.description or "", body.body or "")
 
+    async def seed_skills(session: AsyncSession, owner: ApiClient) -> None:
+        """Instala una vez las skills que trae HF Studio (las que el usuario ya tenga o haya borrado no se tocan)."""
+        pending, marker = skill_files.unseeded(settings.storage_dir)
+        if not pending:
+            return
+        builtin = skill_files.builtin()
+        existing = set(await session.scalars(select(Skill.slug).where(Skill.slug.in_(pending))))
+        for slug in pending:
+            if slug not in existing:
+                description, text_, files = builtin[slug]
+                session.add(
+                    Skill(slug=slug, description=description, body=text_, files=files, created_by=owner.id)
+                )
+        await session.commit()
+        skill_files.mark_seeded(marker, pending)
+
     async def get_skill_or_404(session: AsyncSession, slug: str) -> Skill:
         skill = await session.scalar(select(Skill).where(Skill.slug == slug))
         if skill is None:
@@ -2013,8 +2029,9 @@ def create_app(
         return skill
 
     @app.get("/v1/skills", tags=["supercomputer"])
-    async def list_skills(session: Session, _: Owner, full: bool = False) -> dict:
+    async def list_skills(session: Session, owner: Owner, full: bool = False) -> dict:
         """Skills de Supercomputer (se llaman con /slug en el chat). Sin `full`, solo nombre y descripción."""
+        await seed_skills(session, owner)
         rows = await session.scalars(select(Skill).order_by(Skill.slug))
         return {"skills": [s.out(full) for s in rows]}
 
@@ -2223,6 +2240,7 @@ def create_app(
         updates, proposals = await generation_updates(session, chat.proposals)
         model = body.model or chat.model
         now, timezone = sc.studio_time(body.timezone)
+        await seed_skills(session, owner)
         known = set(await session.scalars(select(Skill.slug)))
         called = skill_files.invoked(body.text, known)
         bodies = {r.slug: (r.body, sorted(r.files or {}))

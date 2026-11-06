@@ -103,3 +103,14 @@ async def test_reference_files_are_read_on_demand(env):  # noqa: F811
     assert "- references/master.md" in block  # la lista de archivos va con la skill, no su contenido
     result = json.loads(claude.requests[1]["messages"][-1]["content"][0]["content"])
     assert result["content"] == "Plantilla 1"
+
+
+async def test_builtin_skills_are_installed_once(env):  # noqa: F811
+    _, http, _ = env
+    listed = [s["slug"] for s in (await http.get("/v1/skills")).json()["skills"]]
+    assert "character-sheet" in listed
+    sheet = (await http.get("/v1/skills/character-sheet")).json()
+    assert "sin la cabeza" in sheet["description"] and "16:9" in sheet["body"]
+    await http.delete("/v1/skills/character-sheet")
+    listed = [s["slug"] for s in (await http.get("/v1/skills")).json()["skills"]]
+    assert "character-sheet" not in listed  # borrada por el usuario: no vuelve

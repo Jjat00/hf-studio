@@ -7,7 +7,9 @@ el agente las carga solo con la herramienta `use_skill` cuando su descripción e
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 import yaml
 
@@ -108,3 +110,40 @@ def skill_block(slug: str, body: str, files: list[str] | None = None) -> str:
         )
         listing += "\n".join(f"- {f}" for f in files)
     return f'<skill name="{slug}">\n{body}{listing}\n</skill>'
+
+
+BUILTIN_DIR = Path(__file__).with_name("builtin_skills")
+
+
+def builtin() -> dict[str, tuple[str, str, dict[str, str]]]:
+    """Skills que trae HF Studio: `{slug: (descripción, cuerpo, archivos)}` desde builtin_skills/<carpeta>/."""
+    found: dict[str, tuple[str, str, dict[str, str]]] = {}
+    for main in sorted(BUILTIN_DIR.glob("*/SKILL.md")):
+        slug, description, body = parse_skill_md(main.read_text())
+        files = {
+            str(f.relative_to(main.parent)): f.read_text()
+            for f in sorted(main.parent.rglob("*"))
+            if f.is_file() and f != main and f.suffix in FILE_TYPES
+        }
+        found[slug] = (description, body, check_files(files))
+    return found
+
+
+def unseeded(storage_dir: Path) -> tuple[list[str], Path]:
+    """Skills incluidas que esta instalación aún no recibió. Se instalan una sola vez: si el usuario borra una, no
+    vuelve al reiniciar (la lista de las ya instaladas vive en `storage_dir/skills_seeded.json`)."""
+    marker = Path(storage_dir) / "skills_seeded.json"
+    try:
+        done = set(json.loads(marker.read_text()))
+    except (OSError, ValueError):
+        done = set()
+    return [slug for slug in builtin() if slug not in done], marker
+
+
+def mark_seeded(marker: Path, slugs: list[str]) -> None:
+    try:
+        done = set(json.loads(marker.read_text()))
+    except (OSError, ValueError):
+        done = set()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps(sorted(done | set(slugs))))
