@@ -1,15 +1,15 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, Copy, ExternalLink, Film, ImageIcon, Loader2, Maximize2, Sparkles } from "lucide-react";
+import { AlertTriangle, Check, Copy, ExternalLink, Film, ImageIcon, Loader2, Maximize2, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { FinalizeDraft } from "@/components/generations/finalize-draft";
 import { ApprovalActions, StatusPill } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
-import { FinalizeDraft } from "@/components/generations/finalize-draft";
-import { Lightbox } from "@/components/lightbox";
+import { Lightbox, type Viewable } from "@/components/lightbox";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
-import { costShort, modelLabel, outputSrc, studio, StudioError, type ChatProposal, type Estimate } from "@/lib/studio";
+import { costShort, formatUsd, modelLabel, outputSrc, studio, StudioError, type ChatProposal, type Estimate } from "@/lib/studio";
 import type { Generation } from "@/lib/types";
 
 /** Valor corto de un ajuste: las URLs se muestran por su nombre de archivo. */
@@ -39,59 +39,16 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/**
- * Propuesta del agente: modelo, prompt y ajustes con su precio vigente. Solo el clic del usuario genera, con el
- * precio que ve como tope (si sube, la API responde cost_changed y se recotiza). La generación queda anotada en
- * el chat para que el agente sepa cómo terminó, y su resultado se ve aquí mismo.
- */
-export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: ChatProposal }) {
-  const { t } = useI18n();
-  const s = t.supercomputer;
-  const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const [quoting, setQuoting] = useState(true);
-  const [jobId, setJobId] = useState<string | null>(proposal.job_id);
-  const [job, setJob] = useState<Generation | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [viewing, setViewing] = useState<number | null>(null);
-  const [finalId, setFinalId] = useState<string | null>(null);
-  const key = useRef<string>("");
-
-  const prompt = typeof proposal.input.prompt === "string" ? proposal.input.prompt : "";
-  const settings = Object.entries(proposal.input).filter(([k]) => k !== "prompt");
-  const { name } = modelLabel(proposal.model_title);
-
-  async function quote() {
-    setQuoting(true);
-    try {
-      setEstimate(await studio.estimate(proposal.model, proposal.input));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setQuoting(false);
-    }
-  }
-
-  // Precio vigente al abrir la tarjeta (el de la propuesta pudo cambiar desde que el agente la cotizó).
+/** Sigue una generación hasta que termina (la API espera hasta 20 s por lectura) y avisa de cada cambio. */
+function useJob(jobId: string, onUpdate: (g: Generation) => void) {
   useEffect(() => {
-    if (proposal.job_id) return;
-    studio.estimate(proposal.model, proposal.input).then(
-      (e) => setEstimate(e),
-      (e) => setError(e instanceof Error ? e.message : String(e)),
-    ).finally(() => setQuoting(false));
-  }, [proposal]);
-
-  // Sigue la generación hasta que termina (la API espera hasta 20 s por lectura).
-  useEffect(() => {
-    if (!jobId) return;
     let alive = true;
     (async () => {
       while (alive) {
         try {
           const g = await studio.get(jobId, 20);
           if (!alive) return;
-          setJob(g);
+          onUpdate(g);
           if (g.terminal) return;
         } catch {
           await new Promise((r) => setTimeout(r, 4000));
@@ -101,7 +58,127 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
     return () => {
       alive = false;
     };
-  }, [jobId]);
+  }, [jobId, onUpdate]);
+}
+
+/** Una casilla de la cuadrícula: cargando hasta que su generación termina; luego el resultado, ampliable. */
+function Tile({
+  jobId,
+  job,
+  label,
+  aspect,
+  video,
+  onUpdate,
+  onOpen,
+}: {
+  jobId: string;
+  job: Generation | undefined;
+  label: string;
+  aspect: string;
+  video: boolean;
+  onUpdate: (g: Generation) => void;
+  onOpen: () => void;
+}) {
+  const { t } = useI18n();
+  useJob(jobId, onUpdate);
+  const out = job?.status === "completed" ? job.outputs.find((o) => o.kind === "video" || o.kind === "image") : undefined;
+  return (
+    <div className="space-y-1.5">
+      <div className="group/out relative overflow-hidden rounded-xl bg-surface-3" style={{ aspectRatio: aspect }}>
+        {out ? (
+          <>
+            {out.kind === "video" ? (
+              <video src={outputSrc(out)} controls playsInline className="size-full bg-black object-contain" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={outputSrc(out)} alt={label} onClick={onOpen} className="size-full cursor-zoom-in object-cover" />
+            )}
+            <button
+              type="button"
+              aria-label={t.supercomputer.enlarge}
+              title={t.supercomputer.enlarge}
+              onClick={onOpen}
+              className="absolute top-2 right-2 rounded-lg bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover/out:opacity-100 hover:bg-black/80 focus-visible:opacity-100"
+            >
+              <Maximize2 className="size-4" />
+            </button>
+          </>
+        ) : job?.terminal ? (
+          <div className="flex size-full flex-col items-center justify-center gap-1.5 p-3 text-center text-xs text-danger">
+            <AlertTriangle className="size-5" />
+            <span className="line-clamp-3">{job.error || job.status}</span>
+          </div>
+        ) : (
+          <div className="shimmer flex size-full flex-col items-center justify-center gap-2 text-fg-3">
+            {video ? <Film className="size-5" /> : <ImageIcon className="size-5" />}
+            <Loader2 className="size-4 animate-spin text-lime" />
+          </div>
+        )}
+        <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white">{label}</span>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        {job ? <StatusPill g={job} /> : <span />}
+        <Link href={`/history/${jobId}`} title={t.supercomputer.openDetail} className="text-fg-3 hover:text-fg">
+          <ExternalLink className="size-3.5" />
+        </Link>
+      </div>
+      {job?.status === "awaiting_approval" && <ApprovalActions g={job} />}
+      {job && <FinalizeDraft g={job} variant="icon" />}
+    </div>
+  );
+}
+
+/**
+ * Propuesta del agente: modelo, prompt y ajustes con su precio vigente. Con variaciones, una sola tarjeta con el
+ * precio total que lanza todas las generaciones a la vez y las muestra en una cuadrícula a medida que terminan.
+ * Solo el clic del usuario genera, con el precio que ve como tope (si sube, la API responde cost_changed y se
+ * recotiza). Cada generación queda anotada en el chat para que el agente sepa cómo terminó.
+ */
+export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: ChatProposal }) {
+  const { t } = useI18n();
+  const s = t.supercomputer;
+  const inputs = proposal.inputs?.length ? proposal.inputs : [proposal.input];
+  const count = inputs.length;
+  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const [quoting, setQuoting] = useState(true);
+  const [jobIds, setJobIds] = useState<string[]>(proposal.job_ids?.length ? proposal.job_ids : proposal.job_id ? [proposal.job_id] : []);
+  const [jobs, setJobs] = useState<Record<string, Generation>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [viewing, setViewing] = useState<number | null>(null);
+  const key = useRef<string>("");
+
+  const prompt = typeof proposal.input.prompt === "string" ? proposal.input.prompt : "";
+  const settings = Object.entries(proposal.input).filter(([k]) => k !== "prompt" && !(count > 1 && k === "seed"));
+  const { name } = modelLabel(proposal.model_title);
+  const ratio = typeof proposal.input.aspect_ratio === "string" && /^\d+:\d+$/.test(proposal.input.aspect_ratio) ? proposal.input.aspect_ratio.replace(":", " / ") : proposal.output === "video" ? "16 / 9" : "1 / 1";
+  const pending = count - jobIds.length;
+
+  const onUpdate = useCallback((g: Generation) => setJobs((prev) => ({ ...prev, [g.id]: g })), []);
+
+  async function quote() {
+    setQuoting(true);
+    try {
+      setEstimate(await studio.estimate(proposal.model, inputs[0]));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQuoting(false);
+    }
+  }
+
+  // Precio vigente de una generación al abrir la tarjeta (el total es ese precio por el número de variaciones).
+  useEffect(() => {
+    if (proposal.job_ids?.length === count || (count === 1 && proposal.job_id)) return;
+    studio
+      .estimate(proposal.model, (proposal.inputs?.length ? proposal.inputs : [proposal.input])[0])
+      .then(
+        (e) => setEstimate(e),
+        (e) => setError(e instanceof Error ? e.message : String(e)),
+      )
+      .finally(() => setQuoting(false));
+  }, [proposal, count]);
 
   async function generate() {
     if (!estimate) return;
@@ -111,19 +188,23 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
     setError(null);
     key.current ||= crypto.randomUUID();
     try {
-      const g = await studio.generate(
-        proposal.model,
-        proposal.input,
-        key.current,
-        false,
-        known ? estimate.usd : null,
-        {},
-        estimate.reserve_usd ?? null,
-        !known,
-      );
-      await studio.linkProposal(chatId, proposal.tool_use_id, g.id).catch(() => {});
-      setJob(g);
-      setJobId(g.id);
+      // Las que faltan, en orden; cada una con su propia clave (un reintento no duplica ninguna).
+      for (let i = jobIds.length; i < count; i++) {
+        const g = await studio.generate(
+          proposal.model,
+          inputs[i],
+          `${key.current}-${i}`,
+          false,
+          known ? estimate.usd : null,
+          {},
+          estimate.reserve_usd ?? null,
+          !known,
+          count > 1,
+        );
+        await studio.linkProposal(chatId, proposal.tool_use_id, g.id).catch(() => {});
+        onUpdate(g);
+        setJobIds((prev) => (prev.includes(g.id) ? prev : [...prev, g.id]));
+      }
     } catch (e) {
       if (e instanceof StudioError && (e.code === "cost_changed" || e.code === "reserve_not_approved")) {
         setError(s.priceChanged);
@@ -135,9 +216,22 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
     }
   }
 
-  const price = costShort(estimate);
-  const outputs = (job?.status === "completed" ? job.outputs : []).filter((o) => o.kind === "video" || o.kind === "image");
-  const viewable = outputs.map((o) => ({ src: outputSrc(o), kind: o.kind === "video" ? ("video" as const) : ("image" as const) }));
+  const unit = estimate?.usd ?? null;
+  const unitText = costShort(estimate);
+  const price = count > 1 && unit != null && unitText ? s.totalPrice(count, unitText, formatUsd(unit * count)) : unitText;
+  const buttonPrice = count > 1 && unit != null ? formatUsd(unit * count) : unitText;
+  const done = jobIds.filter((id) => jobs[id]?.terminal).length;
+  const viewable: Viewable[] = jobIds
+    .map((id) => jobs[id]?.status === "completed" ? jobs[id].outputs.find((o) => o.kind === "video" || o.kind === "image") : undefined)
+    .filter((o) => o !== undefined)
+    .map((o) => ({ src: outputSrc(o), kind: o.kind === "video" ? "video" : "image" }));
+
+  function openJob(id: string) {
+    const g = jobs[id];
+    const out = g?.outputs.find((o) => o.kind === "video" || o.kind === "image");
+    const at = out ? viewable.findIndex((v) => v.src === outputSrc(out)) : -1;
+    if (at >= 0) setViewing(at);
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border border-line-2 bg-surface-2">
@@ -147,9 +241,12 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-semibold text-fg">{proposal.title || s.proposal}</p>
-          <p className="truncate text-xs text-fg-3">{name}</p>
+          <p className="truncate text-xs text-fg-3">
+            {name}
+            {count > 1 && <span className="text-lime"> · {s.variations(count)}</span>}
+          </p>
         </div>
-        {job && <StatusPill g={job} />}
+        {count === 1 && jobIds[0] && jobs[jobIds[0]] && <StatusPill g={jobs[jobIds[0]]} />}
       </div>
 
       <div className="space-y-3 px-4 py-3">
@@ -177,50 +274,39 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
           </div>
         )}
 
-        {outputs.length > 0 && (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {outputs.map((o, i) => (
-              <div key={i} className="group/out relative">
-                {o.kind === "video" ? (
-                  <video src={outputSrc(o)} controls playsInline className="w-full rounded-xl bg-black" />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={outputSrc(o)} alt={proposal.title} onClick={() => setViewing(i)} className="w-full cursor-zoom-in rounded-xl" />
-                )}
-                <button
-                  type="button"
-                  aria-label={s.enlarge}
-                  title={s.enlarge}
-                  onClick={() => setViewing(i)}
-                  className="absolute top-2 right-2 rounded-lg bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover/out:opacity-100 hover:bg-black/80 focus-visible:opacity-100"
-                >
-                  <Maximize2 className="size-4" />
-                </button>
-              </div>
+        {jobIds.length > 0 && (
+          <div className={clsx("grid gap-3", count === 1 ? "grid-cols-1" : count === 2 || count === 4 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3")}>
+            {jobIds.map((id, i) => (
+              <Tile
+                key={id}
+                jobId={id}
+                job={jobs[id]}
+                label={count > 1 ? `${i + 1}/${count}` : s.variation(1)}
+                aspect={ratio}
+                video={proposal.output === "video"}
+                onUpdate={onUpdate}
+                onOpen={() => openJob(id)}
+              />
             ))}
           </div>
         )}
         {viewing !== null && viewable[viewing] && <Lightbox items={viewable} start={viewing} onClose={() => setViewing(null)} />}
-        {job?.status === "awaiting_approval" && <ApprovalActions g={job} />}
-        {job && !finalId && <FinalizeDraft g={job} onStarted={(j) => setFinalId(j.id)} />}
-        {finalId && (
-          <Link href={`/history/${finalId}`} className="flex items-center gap-1.5 text-sm font-medium text-lime hover:underline">
-            <Sparkles className="size-4" /> {t.generation.draft.started}
-          </Link>
-        )}
-        {job?.terminal && job.status !== "completed" && job.error && <p className="text-sm text-danger">{job.error}</p>}
         {error && <p className="text-sm text-warning">{error}</p>}
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-3">
-        {jobId ? (
-          <Link href={`/history/${jobId}`} className="flex items-center gap-1.5 text-sm text-fg-3 hover:text-fg">
-            <ExternalLink className="size-3.5" /> {s.openDetail}
-          </Link>
+        {jobIds.length > 0 ? (
+          count > 1 ? (
+            <span className="text-sm text-fg-3">{s.progress(done, count)}</span>
+          ) : (
+            <Link href={`/history/${jobIds[0]}`} className="flex items-center gap-1.5 text-sm text-fg-3 hover:text-fg">
+              <ExternalLink className="size-3.5" /> {s.openDetail}
+            </Link>
+          )
         ) : (
           <span className="text-sm text-fg-3">{quoting ? <Loader2 className="size-4 animate-spin" /> : (price ?? t.cost.unavailable)}</span>
         )}
-        {!jobId ? (
+        {pending > 0 ? (
           <button
             type="button"
             onClick={generate}
@@ -228,11 +314,11 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
             className="flex h-9 items-center gap-1.5 rounded-xl bg-lime px-3.5 text-sm font-semibold text-ink transition hover:brightness-105 disabled:opacity-50"
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-            {s.generate}
-            {price && <span className="font-normal opacity-80">· {price}</span>}
+            {jobIds.length > 0 ? s.launchRest(pending) : s.generate}
+            {buttonPrice && jobIds.length === 0 && <span className="font-normal opacity-80">· {buttonPrice}</span>}
           </button>
         ) : (
-          !job?.terminal && (
+          done < count && (
             <span className="flex items-center gap-1.5 text-sm text-lime">
               <Loader2 className="size-4 animate-spin" /> {s.generating}
             </span>

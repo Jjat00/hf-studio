@@ -364,3 +364,47 @@ def test_web_searches_are_charged_and_sources_are_shown():
     parts = shown[1]["parts"]
     assert [p["type"] for p in parts] == ["text", "sources"] and parts[0]["text"] == "Esta semana salió X."
     assert parts[-1]["sources"] == [{"url": "https://news.test/a", "title": "A"}]
+
+
+async def test_n_variations_are_one_proposal_with_the_total_price(env):
+    _, http, claude = env
+    claude.script = [([tool("propose_generation", {**PROPOSAL, "variations": 3})], "tool_use")]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "dame 3 variaciones")
+    proposals = [e["proposal"] for e in events if e["type"] == "proposal"]
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["variations"] == 3 and len(p["inputs"]) == 3
+    assert p["estimate"]["usd"] == round(p["estimate"]["unit_usd"] * 3, 4)
+
+    # El usuario lanza las 3 desde la tarjeta: se anotan juntas y no se puede lanzar una cuarta.
+    ids = []
+    for i in range(3):
+        job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 5, "allow_duplicate": True},
+                               headers={"Idempotency-Key": f"var-{i}"})).json()  # fmt: skip
+        ids.append(job["id"])
+        r = await http.post(
+            f"/v1/chats/{chat['id']}/proposals/{p['tool_use_id']}/job", json={"job_id": job["id"]}
+        )
+        assert r.status_code == 200
+    assert r.json()["job_ids"] == ids
+    job = (await http.post("/v1/generations", json={"model": T2V, "input": VIDEO, "max_usd": 5, "allow_duplicate": True},
+                           headers={"Idempotency-Key": "var-extra"})).json()  # fmt: skip
+    extra = await http.post(
+        f"/v1/chats/{chat['id']}/proposals/{p['tool_use_id']}/job", json={"job_id": job["id"]}
+    )
+    assert extra.json()["error"]["code"] == "proposal_complete"
+
+    await send(http, chat["id"], "¿cómo van?")
+    head = claude.requests[-1]["messages"][-1]["content"][0]["text"]
+    assert all(f"variation {n}/3" in head for n in (1, 2, 3))
+
+
+def test_variations_get_different_seeds_when_the_model_has_one():
+    from hf_studio.supercomputer import variation_inputs
+
+    schema = {"properties": {"prompt": {}, "seed": {"type": "integer", "minimum": 0, "maximum": 999}}}
+    inputs = variation_inputs(schema, {"prompt": "x", "seed": 7}, 4)
+    seeds = [i["seed"] for i in inputs]
+    assert seeds[0] == 7 and len(set(seeds)) == 4 and all(0 <= s <= 999 for s in seeds)
+    assert variation_inputs({"properties": {"prompt": {}}}, {"prompt": "x"}, 2) == [{"prompt": "x"}] * 2

@@ -2109,7 +2109,15 @@ def create_app(
             raise ServiceError(404, "not_found", "Proposal not found")
         await get_owned_job(session, owner, body.job_id)
         proposals = dict(chat.proposals)
-        proposals[proposal_id] = {**proposals[proposal_id], "job_id": body.job_id, "reported": None}
+        p = proposals[proposal_id]
+        jobs = list(
+            dict.fromkeys([*(p.get("job_ids") or ([p["job_id"]] if p.get("job_id") else [])), body.job_id])
+        )
+        if len(jobs) > max(1, int(p.get("variations") or 1)):
+            raise ServiceError(
+                409, "proposal_complete", "All the generations of this proposal were already launched"
+            )
+        proposals[proposal_id] = {**p, "job_id": jobs[0], "job_ids": jobs, "reported": None}
         chat.proposals = proposals
         await session.commit()
         return proposals[proposal_id]
@@ -2118,19 +2126,31 @@ def create_app(
         """Novedades de las generaciones lanzadas desde propuestas que el agente aún no conoce."""
         lines, changed = [], dict(proposals)
         for pid, p in proposals.items():
-            if not p.get("job_id"):
-                continue
-            job = await session.get(Job, p["job_id"])
-            if job is None or job.status == p.get("reported"):
-                continue
-            line = f'Proposal "{p.get("title") or pid}" on {p["model"]} (generation {job.id}): {job.status}'
-            if job.status == "completed":
-                urls = [o.get("url") for o in job.outputs or [] if o.get("url")]
-                line += ". Outputs: " + ", ".join(urls)
-            elif job.error:
-                line += f" ({job.error[:200]})"
-            lines.append(line)
-            changed[pid] = {**p, "reported": job.status}
+            ids = p.get("job_ids") or ([p["job_id"]] if p.get("job_id") else [])
+            reported = dict(p.get("reported_jobs") or {})
+            if (
+                p.get("reported") and ids and ids[0] not in reported
+            ):  # chats guardados antes de las variaciones
+                reported[ids[0]] = p["reported"]
+            for n, job_id in enumerate(ids, 1):
+                job = await session.get(Job, job_id)
+                if job is None or job.status == reported.get(job_id):
+                    continue
+                which = f" variation {n}/{len(ids)}" if len(ids) > 1 else ""
+                line = f'Proposal "{p.get("title") or pid}"{which} on {p["model"]} (generation {job.id}): {job.status}'
+                if job.status == "completed":
+                    urls = [o.get("url") for o in job.outputs or [] if o.get("url")]
+                    line += ". Outputs: " + ", ".join(urls)
+                elif job.error:
+                    line += f" ({job.error[:200]})"
+                lines.append(line)
+                reported[job_id] = job.status
+            if reported != (p.get("reported_jobs") or {}):
+                changed[pid] = {
+                    **p,
+                    "reported_jobs": reported,
+                    "reported": reported.get(ids[0]) if ids else None,
+                }
         return lines, changed
 
     def chat_toolbox(request: Request, owner: ApiClient, catalog: Catalog) -> sc.Toolbox:
@@ -2153,7 +2173,9 @@ def create_app(
                 return {"error": f"Unknown model {model_id!r}; use find_models"}
             return model_out(model, full=True)
 
-        async def propose(model_id: str, arguments: dict, title: str) -> tuple[dict, dict | None]:
+        async def propose(
+            model_id: str, arguments: dict, title: str, variations: int = 1
+        ) -> tuple[dict, dict | None]:
             model = catalog.get(model_id)
             if not model or model["output"] not in ("video", "image"):
                 return {"error": f"Unknown model {model_id!r}; use find_models"}, None
@@ -2166,9 +2188,18 @@ def create_app(
                 except ServiceError as exc:
                     return {"error": exc.message}, None
             brief = {k: estimate.get(k) for k in ("usd", "kind", "provider", "reserve_usd", "missing")}
+            inputs = sc.variation_inputs(model["input_schema"], arguments, variations)
+            if len(inputs) > 1:  # el total de las variaciones: cada una es una generación con el mismo precio
+                brief = {**brief, "unit_usd": brief["usd"],
+                         "usd": round(brief["usd"] * len(inputs), 4) if brief["usd"] is not None else None,
+                         "reserve_usd": round(brief["reserve_usd"] * len(inputs), 4) if brief["reserve_usd"] else None}  # fmt: skip
             proposal = {"model": model["id"], "model_title": model["title"], "output": model["output"],
-                        "title": title, "input": arguments, "estimate": brief, "job_id": None}  # fmt: skip
-            return {"ok": True, "price": brief, "note": "Shown to the user with a Generate button"}, proposal
+                        "title": title, "input": arguments, "inputs": inputs, "variations": len(inputs),
+                        "estimate": brief, "job_id": None, "job_ids": []}  # fmt: skip
+            note = "Shown to the user as one card with a Generate button"
+            if len(inputs) > 1:
+                note += f" that launches {len(inputs)} generations (total price shown)"
+            return {"ok": True, "price": brief, "variations": len(inputs), "note": note}, proposal
 
         async def list_elements() -> dict:
             async with app.state.sessions() as s:

@@ -16,6 +16,7 @@ final: nada se reescribe, así el prefijo cacheado y los bloques de pensamiento 
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -69,7 +70,9 @@ Prefer what the user asked for; otherwise balance quality and price and say why 
 was decided: one bullet per decision, in the form "**Formato:** 9:16 vertical", covering the user's answers \
 and the choices you made (subject or character, setting, mood, aspect ratio, duration, audio, references, \
 model and why in a few words). Keep it to 4-8 bullets; mark with "(lo elegí yo)" anything the user did not \
-decide. Then call `propose_generation` with the full prompt and settings. It validates the input against the \
+decide. Then call `propose_generation` with the full prompt and settings. When the user wants several \
+variations or versions of the same thing, make ONE proposal with `variations` (the card shows the total price and \
+launches them all); separate proposals are only for different prompts or models. It validates the input against the \
 model and quotes the cost. If it returns errors, fix them and call it again. The proposal appears to the user as \
 a card with the prompt, the settings and the price, and a Generate button. Do not paste the whole prompt again \
 in your text; summarise what it contains in a few lines.
@@ -198,6 +201,16 @@ TOOLS: list[dict] = [
                     "type": "string",
                     "description": "Short title for the card, in the user's language",
                 },
+                "variations": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8,
+                    "description": (
+                        "How many separate generations of this input to launch (each with its own seed when the "
+                        "model has one). When the user asks for N variations or versions, use ONE proposal with "
+                        "variations=N, never several proposals; keep the model's own batch field at 1."
+                    ),
+                },
             },
             "required": ["model_id", "input", "title"],
             "additionalProperties": False,
@@ -314,7 +327,7 @@ class Toolbox:
     find_models: Callable[[str, str | None, int], Awaitable[dict]]
     get_model: Callable[[str], Awaitable[dict]]
     # Devuelve (resultado para Claude, propuesta para guardar o None si no pasó la validación).
-    propose: Callable[[str, dict, str], Awaitable[tuple[dict, dict | None]]]
+    propose: Callable[[str, dict, str, int], Awaitable[tuple[dict, dict | None]]]
     list_elements: Callable[[], Awaitable[dict]] | None = None
     list_skills: Callable[[], Awaitable[dict]] | None = None
     use_skill: Callable[[str], Awaitable[dict]] | None = None
@@ -374,6 +387,26 @@ def studio_time(timezone: str | None) -> tuple[str, str]:
     now = datetime.now(zone) if zone else datetime.now().astimezone()
     name = timezone if zone else (now.tzname() or "local")
     return now.strftime("%A %Y-%m-%d %H:%M") + f" ({name}, UTC{now.strftime('%z')})", name
+
+
+MAX_VARIATIONS = 8
+
+
+def variation_inputs(schema: dict, arguments: dict, count: int) -> list[dict]:
+    """Las entradas de N variaciones: la misma entrada, y con semilla distinta si el modelo tiene `seed`."""
+    count = max(1, min(int(count), MAX_VARIATIONS))
+    seed = (schema.get("properties") or {}).get("seed")
+    if count == 1 or not isinstance(seed, dict):
+        return [dict(arguments) for _ in range(count)]
+    low = int(seed.get("minimum", 0))
+    high = int(min(seed.get("maximum", 2_147_483_647), 2_147_483_647))
+    rng = random.Random()
+    seeds = [arguments["seed"]] if isinstance(arguments.get("seed"), int) else []
+    while len(seeds) < count:
+        value = rng.randint(low, high)
+        if value not in seeds:
+            seeds.append(value)
+    return [{**arguments, "seed": value} for value in seeds]
 
 
 def user_content(
@@ -537,7 +570,10 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
             model_id, arguments, title = args.get("model_id"), args.get("input"), args.get("title")
             if not isinstance(model_id, str) or not isinstance(arguments, dict):
                 return {"error": "`model_id` and `input` are required"}, None
-            return await tools.propose(model_id, arguments, str(title or "")[:120])
+            variations = args.get("variations", 1)
+            if not isinstance(variations, int) or not 1 <= variations <= MAX_VARIATIONS:
+                return {"error": f"`variations` must be an integer from 1 to {MAX_VARIATIONS}"}, None
+            return await tools.propose(model_id, arguments, str(title or "")[:120], variations)
         if name == "list_skills":
             return (await tools.list_skills() if tools.list_skills else {"skills": []}), None
         if name == "use_skill":

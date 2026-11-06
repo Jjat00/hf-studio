@@ -114,6 +114,7 @@ export const studio = {
     hints: Record<string, number> = {},
     maxReserveUsd?: number | null,
     acceptUnknownCost = false,
+    allowDuplicate = false,
   ) =>
     call<Generation>("/v1/generations", {
       method: "POST",
@@ -126,6 +127,7 @@ export const studio = {
         ...(maxUsd != null ? { max_usd: maxUsd } : {}),
         ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
         ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
+        ...(allowDuplicate ? { allow_duplicate: true } : {}),
       }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
@@ -511,8 +513,20 @@ export type ChatProposal = {
   output: "video" | "image";
   title: string;
   input: Record<string, unknown>;
-  estimate: { usd: number | null; kind: string | null; provider: string | null; reserve_usd: number | null; missing: string[] | null };
+  estimate: {
+    usd: number | null;
+    kind: string | null;
+    provider: string | null;
+    reserve_usd: number | null;
+    missing: string[] | null;
+    /** Con variaciones: precio de una; `usd` es el total. */
+    unit_usd?: number | null;
+  };
   job_id: string | null;
+  /** Variaciones: cuántas generaciones lanza la tarjeta, la entrada de cada una y las ya lanzadas. */
+  variations?: number;
+  inputs?: Record<string, unknown>[];
+  job_ids?: string[];
 };
 export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[] };
 export type Skill = SkillSummary & { body: string };
