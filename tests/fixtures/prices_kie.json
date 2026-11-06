@@ -238,6 +238,8 @@
 "gpt-image-2-5-sunburst, text-to-image, 1k": 0.03,
 "gpt-image-2-5-sunburst, text-to-image, 2k": 0.05,
 "gpt-image-2-5-sunburst, text-to-image, 4k": 0.08,
+"gpt-image-2-6-economy, image-to-image, 1k": 0.025,
+"gpt-image-2-6-economy, text-to-image, 1k": 0.025,
 "grok-4-5, chat, cached input": 0.12,
 "grok-4-5, chat, input": 0.8,
 "grok-4-5, chat, output": 2.4,

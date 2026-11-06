@@ -40,7 +40,7 @@ def refused(provider: str, model_id: str, **extra) -> None:
 
 
 def test_models_and_routes():
-    ids = {m["id"] for m in g.MODELS}
+    ids = {m["id"] for m in g.MODELS if "/gemini-omni-1.2-flash/" not in m["id"]}
     assert ids == {
         T2V,
         I2V,
@@ -49,8 +49,9 @@ def test_models_and_routes():
         "google/gemini-omni-flash/reference-to-video",
     }
     assert set(ROUTES["kie"]) == ids
-    assert set(ROUTES["apimart"]) == {T2V, I2V, REF}
-    assert all(not r.official and r.model == "gemini-omni-1.1-flash-ext" for r in ROUTES["apimart"].values())
+    v11 = {k: r for k, r in ROUTES["apimart"].items() if "/gemini-omni-1.2-flash/" not in k}
+    assert set(v11) == {T2V, I2V, REF}
+    assert all(not r.official and r.model == "gemini-omni-1.1-flash-ext" for r in v11.values())
 
 
 def test_apimart_ext_bodies_and_prices():
@@ -85,3 +86,51 @@ def test_kie_bodies_and_prices():
 def test_fields_without_equivalent_are_refused():
     refused("kie", T2V, image_url=IMG)
     refused("kie", "google/gemini-omni-flash/reference-to-video", image_urls=[IMG], end_image_url=END)
+
+
+# --- Gemini Omni 1.2 Flash (APIMart) ---------------------------------------------------------------
+
+V12 = "google/gemini-omni-1.2-flash"
+VID = "https://cdn.test/clip.mp4"
+
+
+def test_v12_models_and_routes():
+    ids = {m["id"] for m in g.MODELS if m["id"].startswith(V12)}
+    modes = ("text-to-video", "image-to-video", "reference-to-video", "video-edit")
+    assert ids == {f"{V12}/{m}" for m in modes}
+    assert ids <= set(ROUTES["apimart"])
+    assert not ids & set(ROUTES["kie"])
+    for mid in ids:
+        route = ROUTES["apimart"][mid]
+        assert route.model == "gemini-omni-1.2-flash" and route.official and route.settles_later
+
+
+def test_v12_bodies():
+    assert body("apimart", f"{V12}/text-to-video", duration=15, resolution="4k", aspect_ratio="9:16") == {
+        "prompt": "a fox", "duration": 15, "aspect_ratio": "9:16", "resolution": "4k",
+    }  # fmt: skip
+    assert body("apimart", f"{V12}/image-to-video", image_url=IMG, end_image_url=END, duration=8) == {
+        "prompt": "a fox", "duration": 8, "aspect_ratio": "16:9", "resolution": "720p",
+        "first_frame_image": IMG, "last_frame_image": END,
+    }  # fmt: skip
+    ref = body("apimart", f"{V12}/reference-to-video", image_urls=[IMG, END])
+    assert ref["image_urls"] == [IMG, END] and ref["omni_reference_task_type"] == "reference"
+    assert body("apimart", f"{V12}/video-edit", video_url=VID) == {
+        "prompt": "a fox", "aspect_ratio": "16:9", "resolution": "720p",
+        "video_urls": [VID], "omni_reference_task_type": "edit",
+    }  # fmt: skip
+    # Con último fotograma, como mucho 10 s
+    refused("apimart", f"{V12}/image-to-video", image_url=IMG, end_image_url=END, duration=12)
+
+
+def test_v12_prices_and_reserve():
+    route = ROUTES["apimart"][f"{V12}/text-to-video"]
+    assert price("apimart", f"{V12}/text-to-video") == 0.6  # 10 s × 0,06 a 720p
+    assert price("apimart", f"{V12}/text-to-video", duration=4, resolution="4k") == 0.7232
+    assert route.reserve(logical(f"{V12}/text-to-video", duration=4), {}, PRICES["apimart"]) == 0.6
+    assert route.reserve(logical(f"{V12}/text-to-video", duration=15), {}, PRICES["apimart"]) == 0.9
+    edit = ROUTES["apimart"][f"{V12}/video-edit"]
+    entry = logical(f"{V12}/video-edit", video_url=VID)
+    assert edit.price(entry, {}, PRICES["apimart"]) is None  # sin la duración del video de entrada
+    assert edit.price(entry, {"input_video_seconds": 6}, PRICES["apimart"]) == 0.36
+    assert edit.reserve(entry, {}, PRICES["apimart"]) == 0.9
