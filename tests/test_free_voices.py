@@ -52,6 +52,16 @@ async def test_free_voices_spanish_colombia_first(voice_env):  # noqa: F811
     }  # fmt: skip
 
 
+async def test_free_voices_other_language_takes_country_from_name(voice_env):  # noqa: F811
+    _, http, _, _ = voice_env
+    voices = (await http.get("/v1/voice/free-voices", params={"lang": "en"})).json()["voices"]
+    assert [(v["voice_id"], v["name"], v["country"]) for v in voices] == [
+        ("en-US-AriaNeural", "Aria", "United States")
+    ]
+    sample = await http.get("/v1/voice/free-sample", params={"voice": "en-US-AriaNeural", "text": "Hello"})
+    assert sample.status_code == 200
+
+
 async def test_free_sample_is_cached(voice_env):  # noqa: F811
     _, http, _, _ = voice_env
     params = {"voice": "es-CO-SalomeNeural", "text": "Hola  Colombia", "rate": "+10%"}

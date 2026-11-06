@@ -42,11 +42,18 @@ def _shape(v: dict) -> dict:
         "voice_id": v["ShortName"],
         "name": name,
         "locale": locale,
-        "country": COUNTRIES.get(locale, locale),
+        "country": COUNTRIES.get(locale) or _region(friendly) or locale,
         "gender": (v.get("Gender") or "").lower(),
         "personalities": tags.get("VoicePersonalities") or [],
         "multilingual": "Multilingual" in v["ShortName"],
     }
+
+
+def _region(friendly: str) -> str | None:
+    """ "... - English (United States)" -> "United States" (los países de otros idiomas, en inglés)."""
+    if not friendly.endswith(")") or "(" not in friendly.rsplit(" - ", 1)[-1]:
+        return None
+    return friendly.rsplit("(", 1)[-1][:-1].strip() or None
 
 
 async def free_voices(lang: str = "es") -> list[dict]:

@@ -144,7 +144,7 @@ export const studio = {
   /** Gasto por día, proveedor y modelo; `days` 0 = todo. `utcOffset` en minutos (Bogotá = -300). */
   usage: (days: number, utcOffset: number) => call<Usage>(`/v1/usage?days=${days}&utc_offset=${utcOffset}`),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
-  freeVoices: () => call<{ voices: FreeVoice[] }>("/v1/voice/free-voices?lang=es"),
+  freeVoices: (lang = "es") => call<{ voices: FreeVoice[] }>(`/v1/voice/free-voices?lang=${encodeURIComponent(lang)}`),
   /** URL del MP3 de una voz gratis diciendo el texto (gratis, se guarda en caché en el servidor). */
   freeSampleUrl: (voice: string, text: string, rate = "+0%") =>
     `${BASE}/v1/voice/free-sample?${new URLSearchParams({ voice, text, rate })}`,

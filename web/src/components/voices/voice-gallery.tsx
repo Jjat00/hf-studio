@@ -16,15 +16,36 @@ const OWN_CATEGORIES = new Set(["cloned", "generated"]);
 const SPEEDS = ["-10%", "+0%", "+10%", "+20%"];
 const ACCENTS = ["colombian", "latin american", "mexican", "venezuelan", "caribbean", ""];
 const MAX_TEXT = 300;
+/** Idiomas con voces gratis (edge-tts) y en la biblioteca de ElevenLabs (códigos ISO 639-1). */
+const LANGUAGES = ["es", "en", "pt", "fr", "it", "de", "nl", "pl", "ru", "tr", "ar", "hi", "ja", "ko", "zh"];
+/** Texto de prueba en el idioma de la voz (el de español viene del diccionario). */
+const SAMPLES: Record<string, string> = {
+  en: "Hi, here is today's artificial intelligence news. OpenAI just launched agents that work for you around the clock.",
+  pt: "Olá, estas são as notícias de inteligência artificial de hoje. A OpenAI acaba de lançar agentes que trabalham para você o dia todo.",
+  fr: "Bonjour, voici les actualités de l'intelligence artificielle du jour. OpenAI vient de lancer des agents qui travaillent pour vous jour et nuit.",
+  it: "Ciao, ecco le notizie di intelligenza artificiale di oggi. OpenAI ha appena lanciato agenti che lavorano per te giorno e notte.",
+  de: "Hallo, hier sind die heutigen Nachrichten zur künstlichen Intelligenz. OpenAI hat gerade Agenten vorgestellt, die rund um die Uhr für dich arbeiten.",
+  nl: "Hallo, dit is het nieuws over kunstmatige intelligentie van vandaag. OpenAI heeft net agents gelanceerd die dag en nacht voor je werken.",
+  pl: "Cześć, oto dzisiejsze wiadomości o sztucznej inteligencji. OpenAI właśnie uruchomiło agentów, którzy pracują dla ciebie całą dobę.",
+  ru: "Привет, вот сегодняшние новости об искусственном интеллекте. OpenAI только что запустила агентов, которые работают на вас круглосуточно.",
+  tr: "Merhaba, işte bugünün yapay zekâ haberleri. OpenAI, sizin için günün her saati çalışan ajanları az önce tanıttı.",
+  ar: "مرحبًا، هذه أخبار الذكاء الاصطناعي لهذا اليوم. أطلقت OpenAI للتو وكلاء يعملون من أجلك على مدار الساعة.",
+  hi: "नमस्ते, ये हैं आज की आर्टिफ़िशियल इंटेलिजेंस की खबरें। OpenAI ने अभी ऐसे एजेंट लॉन्च किए हैं जो आपके लिए चौबीसों घंटे काम करते हैं।",
+  ja: "こんにちは、今日の人工知能のニュースです。OpenAIは、あなたのために24時間働くエージェントを発表しました。",
+  ko: "안녕하세요, 오늘의 인공지능 뉴스입니다. OpenAI가 하루 종일 당신을 위해 일하는 에이전트를 막 출시했습니다.",
+  zh: "你好，这是今天的人工智能新闻。OpenAI 刚刚推出了全天候为你工作的智能体。",
+};
 
 /** Una fila de voz: botón de escuchar, nombre, datos y acciones. */
 type Card = { id: string; name: string; meta: string; badge: "free" | "paid"; note?: string | null };
 
-/** Galería para escuchar voces en español: gratis (edge-tts, con tu texto) y de pago (ElevenLabs, su muestra). */
+/** Galería para escuchar voces por idioma: gratis (edge-tts, con tu texto) y de pago (ElevenLabs, su muestra). */
 export function VoiceGallery() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const v = t.voices;
   const [tab, setTab] = useState<Tab>("free");
+  const [lang, setLang] = useState("es");
+  const sampleFor = (l: string) => (l === "es" ? v.sampleDefault : (SAMPLES[l] ?? v.sampleDefault));
   const [text, setText] = useState(v.sampleDefault);
   const [rate, setRate] = useState("+0%");
 
@@ -59,15 +80,49 @@ export function VoiceGallery() {
 
   useEffect(() => {
     if (tab !== "library" || !status?.configured) return;
+    let current = true; // una respuesta vieja (otro idioma o filtro) no pisa la nueva
     const handle = setTimeout(() => {
       setLibrary(null);
       studio
-        .libraryVoices({ language: "es", accent, gender: libGender === "all" ? "" : libGender, search: search.trim() })
-        .then((r) => setLibrary(r.voices))
-        .catch(() => setLibrary([]));
+        .libraryVoices({
+          language: lang,
+          accent: lang === "es" ? accent : "",
+          gender: libGender === "all" ? "" : libGender,
+          search: search.trim(),
+        })
+        .then((r) => current && setLibrary(r.voices))
+        .catch(() => current && setLibrary([]));
     }, 350);
-    return () => clearTimeout(handle);
-  }, [tab, status, accent, libGender, search]);
+    return () => {
+      current = false;
+      clearTimeout(handle);
+    };
+  }, [tab, status, lang, accent, libGender, search]);
+
+  function chooseLanguage(next: string) {
+    if (next === lang) return;
+    stop();
+    // Cambia el texto de prueba solo si la persona no escribió el suyo.
+    if (text.trim() === sampleFor(lang)) setText(sampleFor(next));
+    setLang(next);
+    setCountry(next === "es" ? "Colombia" : "");
+    setFree(null);
+    setFreeError(null);
+    studio.freeVoices(next).then((r) => setFree(r.voices)).catch((e) => setFreeError(String(e.message ?? e)));
+  }
+
+  const languageName = useMemo(() => {
+    let names: Intl.DisplayNames | null = null;
+    try {
+      names = new Intl.DisplayNames([locale], { type: "language" });
+    } catch {
+      /* navegador sin Intl.DisplayNames: se muestra el código */
+    }
+    return (code: string) => {
+      const name = names?.of(code) ?? code;
+      return name.charAt(0).toLocaleUpperCase(locale) + name.slice(1);
+    };
+  }, [locale]);
 
   async function removeVoice(x: Voice) {
     if (!window.confirm(v.deleteConfirm(x.name))) return;
@@ -122,11 +177,8 @@ export function VoiceGallery() {
       voice: x,
     }));
 
-  // Cuenta: primero las voces en español, luego el resto.
-  const accountCards = useMemo(() => {
-    const cards = (account ?? []).map((x) => ({ voice: x, spanish: x.labels.language === "es" }));
-    return [...cards.filter((c) => c.spanish), ...cards.filter((c) => !c.spanish)];
-  }, [account]);
+  // Cuenta: solo las voces del idioma elegido.
+  const accountCards = useMemo(() => (account ?? []).filter((x) => x.labels.language === lang), [account, lang]);
 
   return (
     <div className="px-4 py-8 md:px-8">
@@ -140,6 +192,15 @@ export function VoiceGallery() {
           <Chip key={k} active={tab === k} onClick={() => { stop(); setTab(k); }}>{v.tabs[k]}</Chip>
         ))}
       </div>
+
+      {tab !== "create" && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-fg-3">{v.language}</span>
+          {LANGUAGES.map((l) => (
+            <Chip key={l} active={lang === l} onClick={() => chooseLanguage(l)}>{languageName(l)}</Chip>
+          ))}
+        </div>
+      )}
 
       {tab === "free" && (
         <section className="mt-6 flex flex-col gap-4">
@@ -198,16 +259,24 @@ export function VoiceGallery() {
       {tab === "account" && status?.configured && (
         <section className="mt-6 flex flex-col gap-4">
           <p className="max-w-3xl text-xs text-fg-3">{v.accountHint}</p>
+          {account !== null && accountCards.length === 0 ? (
+            <p className="py-6 text-center text-sm text-fg-3">
+              {v.noAccountVoices(languageName(lang))}{" "}
+              <button type="button" onClick={() => setTab("library")} className="font-medium text-lime hover:underline">
+                {v.searchLibrary}
+              </button>
+            </p>
+          ) : (
           <VoiceGrid
             items={account === null ? null : accountCards}
             empty={v.empty}
-            render={({ voice: x, spanish }) => (
+            render={(x) => (
               <VoiceRow
                 key={x.voice_id}
                 card={{
                   id: x.voice_id,
                   name: x.name,
-                  meta: [spanish ? null : v.otherLanguages, ...Object.values(x.labels)].filter(Boolean).join(" · "),
+                  meta: Object.values(x.labels).filter(Boolean).join(" · "),
                   badge: "paid",
                   note: x.description,
                 }}
@@ -220,6 +289,7 @@ export function VoiceGallery() {
               />
             )}
           />
+          )}
         </section>
       )}
 
@@ -227,12 +297,14 @@ export function VoiceGallery() {
 
       {tab === "library" && status?.configured && (
         <section className="mt-6 flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-fg-3">{v.accent}</span>
-            {ACCENTS.map((a) => (
-              <Chip key={a || "all"} active={accent === a} onClick={() => setAccent(a)}>{v.accents[a]}</Chip>
-            ))}
-          </div>
+          {lang === "es" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-fg-3">{v.accent}</span>
+              {ACCENTS.map((a) => (
+                <Chip key={a || "all"} active={accent === a} onClick={() => setAccent(a)}>{v.accents[a]}</Chip>
+              ))}
+            </div>
+          )}
           <GenderFilter value={libGender} onChange={setLibGender} labels={v.genders} title={v.gender} />
           <label className="flex h-9 max-w-sm items-center gap-2 rounded-lg bg-glass px-3">
             <Search className="size-4 text-fg-3" />
