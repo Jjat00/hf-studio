@@ -304,6 +304,49 @@ export const studio = {
     return call<StudioElement>("/v1/elements", { method: "POST", body: form });
   },
   deleteElement: (id: string) => call<void>(`/v1/elements/${id}`, { method: "DELETE" }),
+  chats: () =>
+    call<{ available: boolean; models: string[]; default_model: string; chats: ChatSummary[] }>("/v1/chats"),
+  chat: (id: string) => call<Chat>(`/v1/chats/${id}`),
+  createChat: (model?: string) =>
+    call<Chat>("/v1/chats", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(model ? { model } : {}),
+    }),
+  deleteChat: (id: string) => call<void>(`/v1/chats/${id}`, { method: "DELETE" }),
+  /** Anota la generación lanzada desde una propuesta: el agente sabrá cómo terminó. */
+  linkProposal: (chatId: string, proposalId: string, jobId: string) =>
+    call<ChatProposal>(`/v1/chats/${chatId}/proposals/${proposalId}/job`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: jobId }),
+    }),
+  /** Envía un mensaje y entrega cada evento del stream (text, tool, proposal, usage, error, done). */
+  sendChat: async (id: string, body: ChatMessageBody, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) => {
+    const res = await fetch(`${BASE}/v1/chats/${id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok || !res.body) {
+      const err = (await res.json().catch(() => ({}))) as ApiErrorBody;
+      throw new StudioError(err.error?.message ?? `Error ${res.status}`, res.status, err.error?.code);
+    }
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let cut: number;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const chunk = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        for (const line of chunk.split("\n")) if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as ChatEvent);
+      }
+    }
+  },
   spaces: () => call<{ spaces: SpaceSummary[] }>("/v1/spaces"),
   space: (id: string) => call<Space>(`/v1/spaces/${id}`),
   createSpace: (title?: string) =>
@@ -446,3 +489,34 @@ export function modelLabel(title: string) {
   const [name, rest] = title.replace(/ API$/, "").split(" — ");
   return { name, workflow: rest ?? "" };
 }
+
+/** Supercomputer: chats con el agente que aclara la idea y propone generaciones. */
+export type ChatSummary = { id: string; title: string; model: string; cost_usd: number; created_at: string; updated_at: string };
+export type ChatProposal = {
+  tool_use_id: string;
+  model: string;
+  model_title: string;
+  output: "video" | "image";
+  title: string;
+  input: Record<string, unknown>;
+  estimate: { usd: number | null; kind: string | null; provider: string | null; reserve_usd: number | null; missing: string[] | null };
+  job_id: string | null;
+};
+export type ChatPart = { type: "text"; text: string } | { type: "proposal"; proposal: ChatProposal };
+export type ChatMessage = { role: "user"; text: string; attachments: string[] } | { role: "assistant"; parts: ChatPart[] };
+export type Chat = ChatSummary & { messages: ChatMessage[] };
+export type ChatMode = "ask" | "auto";
+export type ChatMessageBody = {
+  text: string;
+  mode: ChatMode;
+  model?: string;
+  effort?: "low" | "medium" | "high";
+  attachments?: { url: string; content_type?: string | null; filename?: string | null }[];
+};
+export type ChatEvent =
+  | { type: "text"; text: string }
+  | { type: "tool"; name: string; label: "searching" | "reading" | "proposing" | string }
+  | { type: "proposal"; proposal: ChatProposal }
+  | { type: "usage"; cost_usd: number }
+  | { type: "error"; message: string }
+  | { type: "done"; chat: Chat };

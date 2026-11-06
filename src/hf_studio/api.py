@@ -18,16 +18,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, Literal
 
+import anthropic
 import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import String, case, cast, delete, func, or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from . import supercomputer as sc
 from .audio import _run as run_ffmpeg
 from .audio import guarded, has_audio, studio_notes, supports_source_audio
 from .catalog import ALIASES as CATALOG_ALIASES
@@ -37,6 +39,7 @@ from .db import (
     ACTIVE,
     TERMINAL,
     ApiClient,
+    Chat,
     Element,
     Job,
     Preset,
@@ -103,7 +106,7 @@ from .sounds import clean_tags as clean_sound_tags
 from .sounds import history_kind as sound_history_kind
 from .sounds import register_job as register_sound
 from .sounds import title_from as sound_title
-from .space_assistant import AnthropicJobs, is_assistant
+from .space_assistant import CLAUDE_PRICES, DEFAULT_CLAUDE, AnthropicJobs, is_assistant
 from .space_audio import ElevenLabsJobs, is_audio_node
 from .space_runs import (
     Hooks,
@@ -323,6 +326,30 @@ class RunApprove(BaseModel):
     )
 
 
+class ChatIn(BaseModel):
+    model: Literal[tuple(CLAUDE_PRICES)] = Field(DEFAULT_CLAUDE, description="Modelo de Claude del chat")  # type: ignore[valid-type]
+
+
+class ChatAttachment(BaseModel):
+    url: str = Field(
+        max_length=2000, description="URL de una subida propia (/v1/uploads) o de una salida propia"
+    )
+    content_type: str | None = Field(None, max_length=100)
+    filename: str | None = Field(None, max_length=255)
+
+
+class ChatMessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    mode: Literal["ask", "auto"] = Field("ask", description="ask: aclara antes de proponer; auto: propone ya")
+    effort: Literal["low", "medium", "high"] = "medium"
+    model: Literal[tuple(CLAUDE_PRICES)] | None = None  # type: ignore[valid-type]
+    attachments: list[ChatAttachment] = Field(default_factory=list, max_length=sc.MAX_ATTACHMENTS)
+
+
+class ProposalJobIn(BaseModel):
+    job_id: str = Field(max_length=36)
+
+
 class EstimateIn(BaseModel):
     model: str
     input: dict[str, Any]
@@ -401,6 +428,7 @@ def create_app(
         app.state.router = Router(app.state.providers, app.state.prices, get_catalog, element_resolver)
         app.state.worker.router = app.state.router
         app.state.tasks = set()
+        app.state.chats_busy = set()
         app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
         async with app.state.sessions() as s:
@@ -1895,6 +1923,194 @@ def create_app(
         await session.execute(delete(SpaceRun).where(SpaceRun.space_id == space.id))
         await session.delete(space)
         await session.commit()
+
+    # --- Supercomputer: chat con un agente que aclara la idea y propone generaciones ---------------
+
+    def chat_view(chat: Chat) -> dict:
+        return {**chat.summary(), "messages": sc.visible_messages(chat.messages, chat.proposals)}
+
+    async def get_owned_chat(session: AsyncSession, owner: ApiClient, chat_id: str) -> Chat:
+        chat = await session.get(Chat, chat_id)
+        if chat is None or (chat.owner_id != owner.id and not owner.sees_all):
+            raise ServiceError(404, "not_found", "Chat not found")
+        return chat
+
+    @app.get("/v1/chats", tags=["supercomputer"])
+    async def list_chats(session: Session, owner: Owner) -> dict:
+        query = select(Chat) if owner.sees_all else select(Chat).where(Chat.owner_id == owner.id)
+        rows = await session.scalars(query.order_by(Chat.updated_at.desc()).limit(200))
+        return {"available": app.state.assistant_jobs.available, "models": list(CLAUDE_PRICES),
+                "default_model": DEFAULT_CLAUDE, "chats": [c.summary() for c in rows]}  # fmt: skip
+
+    @app.post("/v1/chats", tags=["supercomputer"], status_code=201)
+    async def create_chat(body: ChatIn, session: Session, owner: Owner) -> dict:
+        chat = Chat(owner_id=owner.id, title="New chat", model=body.model, messages=[], proposals={})
+        session.add(chat)
+        await session.commit()
+        return chat_view(chat)
+
+    @app.get("/v1/chats/{chat_id}", tags=["supercomputer"])
+    async def get_chat(chat_id: str, session: Session, owner: Owner) -> dict:
+        return chat_view(await get_owned_chat(session, owner, chat_id))
+
+    @app.delete("/v1/chats/{chat_id}", tags=["supercomputer"], status_code=204)
+    async def delete_chat(chat_id: str, session: Session, owner: Owner) -> None:
+        """Borra la conversación; las generaciones que salieron de ella siguen en el historial."""
+        await session.delete(await get_owned_chat(session, owner, chat_id))
+        await session.commit()
+
+    @app.post("/v1/chats/{chat_id}/proposals/{proposal_id}/job", tags=["supercomputer"])
+    async def link_proposal_job(
+        chat_id: str, proposal_id: str, body: ProposalJobIn, session: Session, owner: Owner
+    ) -> dict:
+        """Anota la generación que el usuario lanzó desde una propuesta: el agente sabrá cómo terminó."""
+        chat = await get_owned_chat(session, owner, chat_id)
+        if proposal_id not in chat.proposals:
+            raise ServiceError(404, "not_found", "Proposal not found")
+        await get_owned_job(session, owner, body.job_id)
+        proposals = dict(chat.proposals)
+        proposals[proposal_id] = {**proposals[proposal_id], "job_id": body.job_id, "reported": None}
+        chat.proposals = proposals
+        await session.commit()
+        return proposals[proposal_id]
+
+    async def generation_updates(session: AsyncSession, proposals: dict) -> tuple[list[str], dict]:
+        """Novedades de las generaciones lanzadas desde propuestas que el agente aún no conoce."""
+        lines, changed = [], dict(proposals)
+        for pid, p in proposals.items():
+            if not p.get("job_id"):
+                continue
+            job = await session.get(Job, p["job_id"])
+            if job is None or job.status == p.get("reported"):
+                continue
+            line = f'Proposal "{p.get("title") or pid}" on {p["model"]}: {job.status}'
+            if job.status == "completed":
+                urls = [o.get("url") for o in job.outputs or [] if o.get("url")]
+                line += ". Outputs: " + ", ".join(urls)
+            elif job.error:
+                line += f" ({job.error[:200]})"
+            lines.append(line)
+            changed[pid] = {**p, "reported": job.status}
+        return lines, changed
+
+    def chat_toolbox(request: Request, owner: ApiClient, catalog: Catalog) -> sc.Toolbox:
+        async def price(model: dict, arguments: dict) -> dict:
+            return estimate_body(await request.app.state.router.plan(model, arguments, {}))
+
+        async def find_models(task: str, output: str | None, limit: int) -> dict:
+            found = await recommend(price, catalog, task, limit, output)
+            return {"understood": found["understood"], "models": [
+                {"id": m["id"], "title": m["title"], "output": m["output"], "capabilities": m["capabilities"],
+                 "standard_input": m["standard_input"], "usd": m["estimate"].get("usd"),
+                 "price_kind": m["estimate"].get("kind"), "provider": m.get("provider"),
+                 "available": m["estimate"].get("usd") is not None or m["estimate"].get("kind") != "unavailable"}
+                for m in found["models"]
+            ]}  # fmt: skip
+
+        async def get_model_info(model_id: str) -> dict:
+            model = catalog.get(model_id)
+            if not model or model["output"] not in ("video", "image"):
+                return {"error": f"Unknown model {model_id!r}; use find_models"}
+            return model_out(model, full=True)
+
+        async def propose(model_id: str, arguments: dict, title: str) -> tuple[dict, dict | None]:
+            model = catalog.get(model_id)
+            if not model or model["output"] not in ("video", "image"):
+                return {"error": f"Unknown model {model_id!r}; use find_models"}, None
+            filled, _ = fill_placeholders(model["input_schema"], arguments)
+            if errors := catalog.validate(model["id"], filled):
+                return {"errors": errors}, None
+            async with app.state.sessions() as s:
+                try:
+                    estimate = estimate_body(await make_plan(request, s, owner, model, arguments, {}))
+                except ServiceError as exc:
+                    return {"error": exc.message}, None
+            brief = {k: estimate.get(k) for k in ("usd", "kind", "provider", "reserve_usd", "missing")}
+            proposal = {"model": model["id"], "model_title": model["title"], "output": model["output"],
+                        "title": title, "input": arguments, "estimate": brief, "job_id": None}  # fmt: skip
+            return {"ok": True, "price": brief, "note": "Shown to the user with a Generate button"}, proposal
+
+        return sc.Toolbox(find_models=find_models, get_model=get_model_info, propose=propose)
+
+    @app.post("/v1/chats/{chat_id}/messages", tags=["supercomputer"])
+    async def send_chat_message(
+        chat_id: str,
+        body: ChatMessageIn,
+        request: Request,
+        session: Session,
+        owner: Owner,
+        catalog: CatalogDep,
+    ) -> StreamingResponse:
+        """Envía un mensaje y responde en streaming (text/event-stream): eventos `text`, `tool`, `proposal`,
+        `usage`, `error` y al final `done` con el chat completo. Cobra solo la API de Claude, nunca créditos de
+        generación: las propuestas se generan desde la UI con su cotización."""
+        jobs = app.state.assistant_jobs
+        if not jobs.available:
+            raise ServiceError(
+                503, "anthropic_not_configured", "Set ANTHROPIC_API_KEY in .env to use Supercomputer"
+            )
+        chat = await get_owned_chat(session, owner, chat_id)
+        busy: set[str] = app.state.chats_busy
+        if chat.id in busy:
+            raise ServiceError(409, "chat_busy", "This chat is still answering")
+        for a in body.attachments:
+            if not await trusted_media(session, owner, a.url):
+                raise ServiceError(
+                    422, "untrusted_source", "Attach files from /v1/uploads or your generations"
+                )
+        updates, proposals = await generation_updates(session, chat.proposals)
+        model = body.model or chat.model
+        user_msg = {"role": "user", "content": sc.user_content(
+            body.text, body.mode, [a.model_dump() for a in body.attachments], updates)}  # fmt: skip
+        history = [*chat.messages, user_msg]
+        first = not chat.messages
+        chat_key, owner_id = chat.id, owner.id
+        busy.add(chat_key)
+
+        async def save(turn: sc.Turn) -> Chat | None:
+            async with app.state.sessions() as s:
+                row = await s.get(Chat, chat_key)
+                if row is None:
+                    return None
+                row.messages = [*history, *turn.messages]
+                row.proposals = {**proposals, **{p["tool_use_id"]: p for p in turn.proposals}}
+                row.cost_usd = (row.cost_usd or 0) + turn.cost_usd
+                row.model = model
+                row.updated_at = utcnow()
+                if first:
+                    row.title = sc.chat_title(body.text)
+                await s.commit()
+                return row
+
+        async def events() -> AsyncIterator[bytes]:
+            turn = sc.Turn()
+            client = anthropic.AsyncAnthropic(
+                api_key=jobs.api_key,
+                base_url=settings.secret("ANTHROPIC_BASE_URL") or None,
+                http_client=jobs.http_client_factory() if jobs.http_client_factory else None,
+            )
+            toolbox = chat_toolbox(request, SimpleNamespace(id=owner_id, sees_all=owner.sees_all), catalog)
+            try:
+                async for event in sc.run_turn(client, model, body.effort, history, toolbox, turn):
+                    yield sc.sse(event)
+            except anthropic.APIStatusError as exc:
+                turn.error = f"Claude API error {exc.status_code}: {exc.message}"
+            except anthropic.APIConnectionError:
+                turn.error = "Could not reach the Claude API"
+            finally:
+                try:
+                    row = await asyncio.shield(save(turn))
+                finally:
+                    busy.discard(chat_key)
+                    await client.close()
+            if turn.error:
+                yield sc.sse({"type": "error", "message": turn.error})
+            if row is not None:
+                yield sc.sse({"type": "done", "chat": chat_view(row)})
+
+        return StreamingResponse(
+            events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+        )
 
     # --- Corridas de Spaces (fase 2) -------------------------------------------------------------
 

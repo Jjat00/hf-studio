@@ -31,6 +31,7 @@ const PRIMARY: Item[] = [
   { href: "/mcp", label: "mcp", match: (p) => p.startsWith("/mcp") },
 ];
 const PRODUCTS: Item[] = [
+  { href: "/supercomputer", label: "supercomputer", badge: "new", match: (p) => p.startsWith("/supercomputer") },
   { href: "/video?tab=genjutsu", label: "genjutsu", badge: "top", match: (p, q) => p.startsWith("/video") && tabIs(q, "genjutsu") },
   { href: "/spaces", label: "spaces", badge: "new", match: (p) => p.startsWith("/spaces") || p.startsWith("/flows") },
   { href: "/influencer", label: "influencer", badge: "new", match: (p) => p.startsWith("/influencer") },

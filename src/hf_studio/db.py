@@ -166,6 +166,30 @@ class Space(Base):
         return {**self.summary(), "graph": self.graph}
 
 
+class Chat(Base):
+    """Conversación con Supercomputer. `messages` está en el formato de la API de Claude (con bloques de
+    pensamiento) y solo crece por el final; `proposals` guarda cada propuesta de generación por el id de su
+    llamada (`tool_use_id`), con la generación que lanzó el usuario (`job_id`) y el último estado que se le contó
+    al agente (`reported`)."""
+
+    __tablename__ = "chats"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    model: Mapped[str] = mapped_column(String(60))
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    proposals: Mapped[dict] = mapped_column(JSON, default=dict)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    def summary(self) -> dict:
+        return {"id": self.id, "title": self.title, "model": self.model, "cost_usd": round(self.cost_usd, 6),
+                "created_at": self.created_at.replace(tzinfo=UTC).isoformat(),
+                "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+
+
 class SpaceRun(Base):
     """Corrida de un Space en el servidor: un nodo y lo que depende de él (`downstream`) o todo el lienzo
     (`workflow`). Trabaja sobre una copia del grafo tomada al empezar. `nodes` guarda el estado de cada
