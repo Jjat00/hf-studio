@@ -69,7 +69,7 @@ Prefer what the user asked for; otherwise balance quality and price and say why 
 3. Propose. Right before the proposal, write a short recap titled "Resumen" (in the user's language) of what \
 was decided: one bullet per decision, in the form "**Formato:** 9:16 vertical", covering the user's answers \
 and the choices you made (subject or character, setting, mood, aspect ratio, duration, audio, references, \
-model and why in a few words). Keep it to 4-8 bullets; mark with "(lo elegí yo)" anything the user did not \
+model and why in a few words, and the provider it runs on: `find_models` and the proposal's price say it). Keep it to 4-8 bullets; mark with "(lo elegí yo)" anything the user did not \
 decide. Then call `propose_generation` with the full prompt and settings. When the user wants several \
 variations or versions of the same thing, make ONE proposal with `variations` (the card shows the total price and \
 launches them all); separate proposals are only for different prompts or models. It validates the input against the \

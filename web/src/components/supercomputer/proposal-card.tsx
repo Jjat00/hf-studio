@@ -5,7 +5,7 @@ import { AlertTriangle, Check, Copy, ExternalLink, Film, ImageIcon, Loader2, Max
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FinalizeDraft } from "@/components/generations/finalize-draft";
-import { ApprovalActions, StatusPill } from "@/components/generations/generation-card";
+import { ApprovalActions, providerTitle, StatusPill } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
 import { Lightbox, type Viewable } from "@/components/lightbox";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
@@ -117,7 +117,10 @@ function Tile({
         <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white">{label}</span>
       </div>
       <div className="flex items-center justify-between gap-2">
-        {job ? <StatusPill g={job} /> : <span />}
+        <span className="flex min-w-0 items-center gap-1.5">
+          {job && <StatusPill g={job} />}
+          {job?.provider && <span className="truncate text-[11px] text-fg-4">{t.cost.via(providerTitle(job.provider))}</span>}
+        </span>
         <Link href={`/history/${jobId}`} title={t.supercomputer.openDetail} className="text-fg-3 hover:text-fg">
           <ExternalLink className="size-3.5" />
         </Link>
@@ -221,6 +224,9 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   const price = count > 1 && unit != null && unitText ? s.totalPrice(count, unitText, formatUsd(unit * count)) : unitText;
   const buttonPrice = count > 1 && unit != null ? formatUsd(unit * count) : unitText;
   const done = jobIds.filter((id) => jobs[id]?.terminal).length;
+  // Por dónde va a salir: el proveedor más barato con clave (el router lo elige igual al generar).
+  const chosen = estimate?.options?.find((o) => o.provider === estimate.provider) ?? estimate?.options?.[0];
+  const others = (estimate?.options?.length ?? 0) - 1;
   const viewable: Viewable[] = jobIds
     .map((id) => jobs[id]?.status === "completed" ? jobs[id].outputs.find((o) => o.kind === "video" || o.kind === "image") : undefined)
     .filter((o) => o !== undefined)
@@ -291,6 +297,18 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
           </div>
         )}
         {viewing !== null && viewable[viewing] && <Lightbox items={viewable} start={viewing} onClose={() => setViewing(null)} />}
+        {pending > 0 && chosen && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-surface-3 px-3 py-2 text-xs text-fg-3">
+            <span className="font-medium text-fg-2">{t.cost.via(providerTitle(chosen.provider))}</span>
+            <span className="font-mono text-fg-4">{chosen.model}</span>
+            {!chosen.official && <span className="text-warning">{t.cost.unofficial}</span>}
+            {estimate?.savings_vs_higgsfield && estimate.savings_vs_higgsfield.usd > 0 && (
+              <span className="text-lime">{t.cost.saves(formatUsd(estimate.savings_vs_higgsfield.usd * count), estimate.savings_vs_higgsfield.pct)}</span>
+            )}
+            {others > 0 && <span>{s.otherProviders(others)}</span>}
+            {estimate?.reserve_usd ? <span className="basis-full">{t.cost.reserve(formatUsd(estimate.reserve_usd * count))}</span> : null}
+          </div>
+        )}
         {error && <p className="text-sm text-warning">{error}</p>}
       </div>
 
