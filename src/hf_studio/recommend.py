@@ -53,6 +53,35 @@ QUALITY = r"best|mejor|highest|m[aá]xima|premium|4k|1080p|cinematic|cinematogr"
 AUDIO = r"audio|sound|sonido|voice|voz|music|m[uú]sica"
 
 
+# Palabras de los ids y títulos que no nombran un modelo (aparecen en casi todos).
+GENERIC = {
+    "video", "videos", "image", "images", "imagen", "text", "to", "api", "reference", "references", "edit",
+    "frame", "first", "last", "playground", "the", "and", "with", "from", "of", "de", "con", "un", "una", "el",
+    "la", "usa", "use", "using", "quiero", "want", "model", "modelo", "for", "por", "en", "in", "a", "y",
+}  # fmt: skip
+TOKEN = r"[a-z0-9]+(?:\.[0-9]+)?"
+
+
+def _tokens(text: str) -> set[str]:
+    return set(re.findall(TOKEN, text.lower()))
+
+
+def named_models(task: str, pool: list[dict]) -> list[dict]:
+    """Modelos que la tarea nombra («usa gemini omni 1.2», «con Kling 3.0»): los que comparten más palabras
+    propias del nombre (familia y versión) con la tarea. Sin una palabra de familia no hay coincidencia."""
+    words = _tokens(task) - GENERIC
+    best, found = 0, []
+    for m in pool:
+        hits = words & _tokens(f"{m['id']} {m['title']}")
+        if not any(not h.replace(".", "").isdigit() and len(h) >= 3 for h in hits):
+            continue
+        if len(hits) > best:
+            best, found = len(hits), [m]
+        elif len(hits) == best:
+            found.append(m)
+    return found
+
+
 def _version(model_id: str) -> float:
     nums = re.findall(r"v?(\d+(?:\.\d+)?)", model_id)
     return max((float(n) for n in nums if float(n) < 50), default=0.0)
@@ -126,6 +155,12 @@ async def recommend(price, catalog: Catalog, task: str, limit: int = 5, output: 
     if not matches and required:  # sin coincidencia completa: al menos la capacidad principal
         matches = [m for m in pool if required[0] in m["capabilities"]]
         relaxed = True
+    # Un modelo nombrado en la tarea va primero, aunque no sea el de versión más alta; entre sus variantes,
+    # las que tienen las capacidades pedidas.
+    named = sorted(
+        named_models(task, pool),
+        key=lambda m: (not all(c in m["capabilities"] for c in required), m["id"]),
+    )[:limit]
 
     def score(m: dict) -> float:
         s = _version(m["id"])
@@ -138,7 +173,13 @@ async def recommend(price, catalog: Catalog, task: str, limit: int = 5, output: 
         s -= 0.5 * max(0, len(m["capabilities"]) - len(required) - 2)  # más específico, mejor
         return s
 
-    ranked = sorted(matches, key=score, reverse=True)[: max(limit * 2, limit)]
+    ids = {m["id"] for m in named}
+    ranked = (
+        named
+        + [m for m in sorted(matches, key=score, reverse=True) if m["id"] not in ids][
+            : max(limit * 2, limit) - len(named)
+        ]
+    )
     quotes = await asyncio.gather(*(price(m, _standard_input(m)) for m in ranked))
     items = []
     for m, q in zip(ranked, quotes, strict=True):
@@ -146,7 +187,7 @@ async def recommend(price, catalog: Catalog, task: str, limit: int = 5, output: 
             "id": m["id"], "title": m["title"], "output": m["output"], "capabilities": m["capabilities"],
             "standard_input": _standard_input(m), "estimate": q, "provider": q.get("provider"),
         })  # fmt: skip
-    if parsed["cheap"]:
+    if parsed["cheap"] and not named:
         items.sort(key=lambda i: (i["estimate"]["usd"] is None, i["estimate"]["usd"] or 0))
     return {
         "task": task,
@@ -159,5 +200,6 @@ async def recommend(price, catalog: Catalog, task: str, limit: int = 5, output: 
         },
         "why": parsed["reasons"],
         "relaxed_match": relaxed,
+        "named": [m["id"] for m in named],
         "models": items[:limit],
     }
