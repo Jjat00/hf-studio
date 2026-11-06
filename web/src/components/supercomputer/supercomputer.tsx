@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowUp, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, Wand2, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -18,6 +18,7 @@ import {
   type ChatPart,
   type ChatQuestion,
   type ChatSummary,
+  type SkillSummary,
 } from "@/lib/studio";
 import { ProposalCard } from "./proposal-card";
 
@@ -240,6 +241,11 @@ export function Supercomputer() {
   const bottom = useRef<HTMLDivElement>(null);
   const file = useRef<HTMLInputElement>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  // Menú de skills: la palabra «/algo» que se está escribiendo (sin la barra) y la opción marcada.
+  const [slash, setSlash] = useState<{ query: string; start: number; end: number } | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const input = useRef<HTMLTextAreaElement>(null);
   const [picking, setPicking] = useState<"image" | "video" | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
   const streaming = draft !== null;
@@ -262,6 +268,39 @@ export function Supercomputer() {
   }, []);
 
   useEffect(loadList, [loadList]);
+  useEffect(() => {
+    studio.skills().then((r) => setSkills(r.skills), () => setSkills([]));
+  }, []);
+
+  const slashMatches = slash
+    ? skills
+        .filter((k) => k.slug.includes(slash.query))
+        .sort((a, b) => Number(!a.slug.startsWith(slash.query)) - Number(!b.slug.startsWith(slash.query)))
+        .slice(0, 8)
+    : [];
+
+  function updateSlash(value: string, caret: number) {
+    const before = value.slice(0, caret);
+    const m = /(^|\s)\/([a-z0-9-]*)$/.exec(before);
+    if (!m) {
+      setSlash(null);
+      return;
+    }
+    setSlash({ query: m[2], start: caret - m[2].length - 1, end: caret });
+    setSlashIndex(0);
+  }
+
+  function pickSkill(slug: string) {
+    if (!slash) return;
+    const next = `${text.slice(0, slash.start)}/${slug} ${text.slice(slash.end)}`;
+    const caret = slash.start + slug.length + 2;
+    setText(next);
+    setSlash(null);
+    requestAnimationFrame(() => {
+      input.current?.focus();
+      input.current?.setSelectionRange(caret, caret);
+    });
+  }
 
   // El chat abierto vive en la URL (?c=…) para poder volver a él.
   useEffect(() => {
@@ -410,10 +449,66 @@ export function Supercomputer() {
           onClose={() => setPicking(null)}
         />
       )}
+      {slash && (
+        <div className="mb-2 overflow-hidden rounded-xl border border-line-2 bg-surface-1">
+          <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">
+            {s.skillsMenu}
+            <a href="/skills" className="font-normal tracking-normal text-fg-3 normal-case hover:text-fg">
+              {s.manageSkills}
+            </a>
+          </div>
+          {slashMatches.length === 0 ? (
+            <p className="px-3 pb-2 text-sm text-fg-3">{s.noSkills}</p>
+          ) : (
+            <ul role="listbox" aria-label={s.skillsMenu}>
+              {slashMatches.map((k, i) => (
+                <li key={k.slug} role="option" aria-selected={i === slashIndex}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pickSkill(k.slug)}
+                    onMouseEnter={() => setSlashIndex(i)}
+                    className={clsx("flex w-full items-start gap-2 px-3 py-2 text-left", i === slashIndex ? "bg-surface-4" : "hover:bg-surface-3")}
+                  >
+                    <Wand2 className="mt-0.5 size-4 shrink-0 text-lime" />
+                    <span className="min-w-0">
+                      <span className="block font-mono text-sm text-fg">/{k.slug}</span>
+                      <span className="block truncate text-xs text-fg-3">{k.description}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <textarea
+        ref={input}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          updateSlash(e.target.value, e.target.selectionStart ?? e.target.value.length);
+        }}
+        onBlur={() => setSlash(null)}
         onKeyDown={(e) => {
+          if (slash && slashMatches.length > 0) {
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const step = e.key === "ArrowDown" ? 1 : -1;
+              setSlashIndex((i) => (i + step + slashMatches.length) % slashMatches.length);
+              return;
+            }
+            if ((e.key === "Enter" || e.key === "Tab") && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              pickSkill(slashMatches[slashIndex]?.slug ?? slashMatches[0].slug);
+              return;
+            }
+          }
+          if (slash && e.key === "Escape") {
+            e.preventDefault();
+            setSlash(null);
+            return;
+          }
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             void send();

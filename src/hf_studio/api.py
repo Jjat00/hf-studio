@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from . import skills as skill_files
 from . import supercomputer as sc
 from .audio import _run as run_ffmpeg
 from .audio import guarded, has_audio, studio_notes, supports_source_audio
@@ -43,6 +44,7 @@ from .db import (
     Element,
     Job,
     Preset,
+    Skill,
     Sound,
     Space,
     SpaceRun,
@@ -327,6 +329,17 @@ class RunApprove(BaseModel):
     )
 
 
+class SkillIn(BaseModel):
+    slug: str | None = Field(None, max_length=64, description="Nombre con el que se llama: /slug")
+    description: str | None = Field(None, max_length=skill_files.MAX_DESCRIPTION)
+    body: str | None = Field(None, max_length=skill_files.MAX_BODY)
+    skill_md: str | None = Field(
+        None,
+        max_length=skill_files.MAX_BODY + 2000,
+        description="Un SKILL.md completo (frontmatter y cuerpo)",
+    )
+
+
 class ChatIn(BaseModel):
     model: Literal[tuple(CLAUDE_PRICES)] = Field(DEFAULT_CLAUDE, description="Modelo de Claude del chat")  # type: ignore[valid-type]
 
@@ -507,6 +520,10 @@ def create_app(
 
     @app.exception_handler(ElementError)
     async def _element_error(_: Request, exc: ElementError) -> JSONResponse:
+        return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
+
+    @app.exception_handler(skill_files.SkillError)
+    async def _skill_error(_: Request, exc: skill_files.SkillError) -> JSONResponse:
         return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
 
     @app.exception_handler(VoiceError)
@@ -1979,6 +1996,55 @@ def create_app(
             raise ServiceError(404, "not_found", "Chat not found")
         return chat
 
+    # --- Skills de Supercomputer -------------------------------------------------------------------
+
+    def skill_fields(body: SkillIn) -> tuple[str, str, str]:
+        if body.skill_md:
+            return skill_files.parse_skill_md(body.skill_md)
+        return skill_files.check(body.slug or "", body.description or "", body.body or "")
+
+    async def get_skill_or_404(session: AsyncSession, slug: str) -> Skill:
+        skill = await session.scalar(select(Skill).where(Skill.slug == slug))
+        if skill is None:
+            raise ServiceError(404, "skill_not_found", f"Unknown skill /{slug}")
+        return skill
+
+    @app.get("/v1/skills", tags=["supercomputer"])
+    async def list_skills(session: Session, _: Owner, full: bool = False) -> dict:
+        """Skills de Supercomputer (se llaman con /slug en el chat). Sin `full`, solo nombre y descripción."""
+        rows = await session.scalars(select(Skill).order_by(Skill.slug))
+        return {"skills": [s.out(full) for s in rows]}
+
+    @app.get("/v1/skills/{slug}", tags=["supercomputer"])
+    async def get_skill(slug: str, session: Session, _: Owner) -> dict:
+        return (await get_skill_or_404(session, slug)).out()
+
+    @app.post("/v1/skills", status_code=201, tags=["supercomputer"])
+    async def create_skill(body: SkillIn, session: Session, owner: Owner) -> dict:
+        """Crea una skill con `slug`, `description` y `body`, o importando un SKILL.md entero (`skill_md`)."""
+        slug, description, text_ = skill_fields(body)
+        if await session.scalar(select(Skill.id).where(Skill.slug == slug)):
+            raise ServiceError(409, "skill_exists", f"There is already a skill called /{slug}")
+        skill = Skill(slug=slug, description=description, body=text_, created_by=owner.id)
+        session.add(skill)
+        await session.commit()
+        return skill.out()
+
+    @app.put("/v1/skills/{slug}", tags=["supercomputer"])
+    async def update_skill(slug: str, body: SkillIn, session: Session, _: Owner) -> dict:
+        skill = await get_skill_or_404(session, slug)
+        new_slug, description, text_ = skill_fields(body)
+        if new_slug != slug and await session.scalar(select(Skill.id).where(Skill.slug == new_slug)):
+            raise ServiceError(409, "skill_exists", f"There is already a skill called /{new_slug}")
+        skill.slug, skill.description, skill.body, skill.updated_at = new_slug, description, text_, utcnow()
+        await session.commit()
+        return skill.out()
+
+    @app.delete("/v1/skills/{slug}", status_code=204, tags=["supercomputer"])
+    async def delete_skill(slug: str, session: Session, _: Owner) -> None:
+        await session.delete(await get_skill_or_404(session, slug))
+        await session.commit()
+
     @app.get("/v1/chats", tags=["supercomputer"])
     async def list_chats(session: Session, owner: Owner) -> dict:
         query = select(Chat) if owner.sees_all else select(Chat).where(Chat.owner_id == owner.id)
@@ -2088,9 +2154,22 @@ def create_app(
                     for e in rows
                 ]}  # fmt: skip
 
+        async def list_skills_tool() -> dict:
+            async with app.state.sessions() as s:
+                rows = await s.scalars(select(Skill).order_by(Skill.slug))
+                return {"skills": [{"name": r.slug, "description": r.description} for r in rows]}
+
+        async def use_skill(name: str) -> dict:
+            async with app.state.sessions() as s:
+                skill = await s.scalar(select(Skill).where(Skill.slug == name))
+            if skill is None:
+                return {"error": f"Unknown skill {name!r}; call list_skills"}
+            return {"name": skill.slug, "instructions": skill.body}
+
         return sc.Toolbox(
-            find_models=find_models, get_model=get_model_info, propose=propose, list_elements=list_elements
-        )
+            find_models=find_models, get_model=get_model_info, propose=propose, list_elements=list_elements,
+            list_skills=list_skills_tool, use_skill=use_skill,
+        )  # fmt: skip
 
     @app.post("/v1/chats/{chat_id}/messages", tags=["supercomputer"])
     async def send_chat_message(
@@ -2121,8 +2200,12 @@ def create_app(
         updates, proposals = await generation_updates(session, chat.proposals)
         model = body.model or chat.model
         now, timezone = sc.studio_time(body.timezone)
+        known = set(await session.scalars(select(Skill.slug)))
+        called = skill_files.invoked(body.text, known)
+        bodies = {r.slug: r.body for r in await session.scalars(select(Skill).where(Skill.slug.in_(called)))}
         user_msg = {"role": "user", "content": sc.user_content(
-            body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now)}  # fmt: skip
+            body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now,
+            [(slug, bodies[slug]) for slug in called if slug in bodies])}  # fmt: skip
         history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
         chat_key, owner_id = chat.id, owner.id

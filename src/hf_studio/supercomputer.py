@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anthropic
 
+from .skills import skill_block
 from .space_assistant import CLAUDE_PRICES, DEFAULT_CLAUDE
 
 MAX_TOKENS = 32000
@@ -75,6 +76,13 @@ in your text; summarise what it contains in a few lines.
 4. Iterate. When the user asks for changes, propose a revised version. Updates about their generations (status, \
 output URLs) arrive inside <studio_update> tags; an output URL can be reused as an input (for example the image \
 of a character as `image_url` / start frame of a video).
+
+# Skills
+The studio has skills: playbooks with instructions for a kind of task. When the user calls one with /name, its \
+instructions arrive in their message inside <skill name="…"> tags: follow them for this request (they take \
+precedence over your usual flow where they differ, but never over the rules about generating and prices). When \
+a new request might match a skill (ads, UGC, product shots, a recurring format), call `list_skills` once and, if \
+one fits, `use_skill` to load it. Mention which skill you are using in one short line.
 
 # Time and research
 Each user turn starts with <studio_time>: the current date, weekday, time and the user's time zone. Use it for \
@@ -242,7 +250,30 @@ TOOLS.append(
     }
 )
 
+TOOLS += [
+    {
+        "name": "list_skills",
+        "description": (
+            "List the studio's skills: saved playbooks with step-by-step instructions for a kind of task (ads, "
+            "UGC scripts, product shots…), each with a name and when to use it. Free."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "use_skill",
+        "description": "Load a skill's full instructions by its name (from list_skills) and follow them. Free.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Skill name, e.g. ads-ugc"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    },
+]
+
 TOOL_LABELS = {
+    "list_skills": "skills",
+    "use_skill": "skills",
     "web_search": "researching",
     "web_fetch": "browsing",
     "ask_user": "asking",
@@ -262,6 +293,8 @@ class Toolbox:
     # Devuelve (resultado para Claude, propuesta para guardar o None si no pasó la validación).
     propose: Callable[[str, dict, str], Awaitable[tuple[dict, dict | None]]]
     list_elements: Callable[[], Awaitable[dict]] | None = None
+    list_skills: Callable[[], Awaitable[dict]] | None = None
+    use_skill: Callable[[str], Awaitable[dict]] | None = None
 
 
 @dataclass
@@ -320,7 +353,12 @@ def studio_time(timezone: str | None) -> tuple[str, str]:
 
 
 def user_content(
-    text: str, mode: str, attachments: list[dict], updates: list[str], now: str | None = None
+    text: str,
+    mode: str,
+    attachments: list[dict],
+    updates: list[str],
+    now: str | None = None,
+    skills: list[tuple[str, str]] | None = None,
 ) -> list[dict]:
     """Bloques del mensaje del usuario: modo, hora actual, novedades de sus generaciones, adjuntos (las imágenes
     también como imagen, para que Claude las vea) y el texto."""
@@ -337,6 +375,8 @@ def user_content(
         blocks.append(
             {"type": "text", "text": f"Attached {kind} ({a.get('filename') or 'file'}): {a['url']}"}
         )
+    for slug, body in skills or []:  # las que el usuario llamó con /nombre
+        blocks.append({"type": "text", "text": skill_block(slug, body)})
     blocks.append({"type": "text", "text": text})
     return blocks
 
@@ -474,6 +514,12 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
             if not isinstance(model_id, str) or not isinstance(arguments, dict):
                 return {"error": "`model_id` and `input` are required"}, None
             return await tools.propose(model_id, arguments, str(title or "")[:120])
+        if name == "list_skills":
+            return (await tools.list_skills() if tools.list_skills else {"skills": []}), None
+        if name == "use_skill":
+            if not isinstance(args.get("name"), str) or tools.use_skill is None:
+                return {"error": "`name` is required"}, None
+            return await tools.use_skill(args["name"].lstrip("/")), None
         if name == "list_elements":
             if tools.list_elements is None:
                 return {"elements": []}, None

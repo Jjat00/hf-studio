@@ -43,6 +43,7 @@ const PRODUCTS: Item[] = [
 const MORE: Item[] = [
   { href: "/models", label: "models", match: (p) => p.startsWith("/models") },
   { href: "/elements", label: "elements", match: (p) => p.startsWith("/elements") },
+  { href: "/skills", label: "skills", match: (p) => p.startsWith("/skills") },
   { href: "/history", label: "history", match: (p) => p.startsWith("/history") },
   { href: "/providers", label: "providers", match: (p) => p.startsWith("/providers") },
   { href: "/usage", label: "usage", match: (p) => p.startsWith("/usage") },

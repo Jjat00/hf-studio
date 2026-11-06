@@ -190,6 +190,26 @@ class Chat(Base):
                 "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
 
 
+class Skill(Base):
+    """Skill de Supercomputer: instrucciones en Markdown con nombre (`slug`, se llama con `/slug`) y una
+    descripción que dice cuándo usarla, como un SKILL.md de Claude. Se comparten en toda la instalación."""
+
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    description: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[str] = mapped_column(ForeignKey("api_clients.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    def out(self, full: bool = True) -> dict:
+        data = {"slug": self.slug, "description": self.description,
+                "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+        return {**data, "body": self.body} if full else data
+
+
 class SpaceRun(Base):
     """Corrida de un Space en el servidor: un nodo y lo que depende de él (`downstream`) o todo el lienzo
     (`workflow`). Trabaja sobre una copia del grafo tomada al empezar. `nodes` guarda el estado de cada

@@ -322,6 +322,17 @@ export const studio = {
       body: JSON.stringify({ job_id: jobId }),
     }),
   /** Envía un mensaje y entrega cada evento del stream (text, tool, proposal, usage, error, done). */
+  skills: () => call<{ skills: SkillSummary[] }>("/v1/skills"),
+  skill: (slug: string) => call<Skill>(`/v1/skills/${encodeURIComponent(slug)}`),
+  createSkill: (body: SkillBody) =>
+    call<Skill>("/v1/skills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  updateSkill: (slug: string, body: SkillBody) =>
+    call<Skill>(`/v1/skills/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (slug: string) => call<void>(`/v1/skills/${encodeURIComponent(slug)}`, { method: "DELETE" }),
   sendChat: async (id: string, body: ChatMessageBody, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) => {
     const res = await fetch(`${BASE}/v1/chats/${id}/messages`, {
       method: "POST",
@@ -503,6 +514,9 @@ export type ChatProposal = {
   estimate: { usd: number | null; kind: string | null; provider: string | null; reserve_usd: number | null; missing: string[] | null };
   job_id: string | null;
 };
+export type SkillSummary = { slug: string; description: string; updated_at: string };
+export type Skill = SkillSummary & { body: string };
+export type SkillBody = { slug: string; description: string; body: string } | { skill_md: string };
 export type ChatQuestion = { id: string; question: string; options: { label: string; detail?: string }[] };
 export type ChatPart =
   | { type: "text"; text: string }
