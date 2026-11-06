@@ -526,6 +526,8 @@ export type ChatProposal = {
   /** Variaciones: cuántas generaciones lanza la tarjeta, la entrada de cada una y las ya lanzadas. */
   variations?: number;
   inputs?: Record<string, unknown>[];
+  /** Varias piezas distintas (`items`): el título de cada una. Vacío en variaciones. */
+  labels?: string[];
   job_ids?: string[];
 };
 export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[] };

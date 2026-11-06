@@ -70,9 +70,11 @@ Prefer what the user asked for; otherwise balance quality and price and say why 
 was decided: one bullet per decision, in the form "**Formato:** 9:16 vertical", covering the user's answers \
 and the choices you made (subject or character, setting, mood, aspect ratio, duration, audio, references, \
 model and why in a few words, and the provider it runs on: `find_models` and the proposal's price say it). Keep it to 4-8 bullets; mark with "(lo elegí yo)" anything the user did not \
-decide. Then call `propose_generation` with the full prompt and settings. When the user wants several \
-variations or versions of the same thing, make ONE proposal with `variations` (the card shows the total price and \
-launches them all); separate proposals are only for different prompts or models. It validates the input against the \
+decide. Then call `propose_generation` with the full prompt and settings. When the user asks for several \
+things at once, it is ONE proposal: N variations or versions of the same input use `variations`; N different \
+pieces on the same model (5 places, 3 shots, a kit of ads) use `items`, each with its title and full input. The \
+card shows the total price, launches them all with one click and shows them in a grid. Make separate proposals \
+only when they need different models or when the user should choose one of several alternatives. It validates the input against the \
 model and quotes the cost. If it returns errors, fix them and call it again. The proposal appears to the user as \
 a card with the prompt, the settings and the price, and a Generate button. Do not paste the whole prompt again \
 in your text; summarise what it contains in a few lines.
@@ -197,6 +199,27 @@ TOOLS: list[dict] = [
                     "type": "object",
                     "description": "Arguments for the model, matching its input_schema (prompt, duration, …)",
                 },
+                "items": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 8,
+                    "description": (
+                        "Several different pieces on the same model in ONE card (e.g. 5 places, 3 shots, a kit): "
+                        "each with a short title and its full input. Use it instead of `input` whenever the user "
+                        "asks for several things at once; never make one proposal per piece."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "Short label, e.g. 'Callejón grafiti'",
+                            },
+                            "input": {"type": "object", "description": "Full arguments for this piece"},
+                        },
+                        "required": ["title", "input"],
+                    },
+                },
                 "title": {
                     "type": "string",
                     "description": "Short title for the card, in the user's language",
@@ -212,7 +235,7 @@ TOOLS: list[dict] = [
                     ),
                 },
             },
-            "required": ["model_id", "input", "title"],
+            "required": ["model_id", "title"],
             "additionalProperties": False,
         },
     },
@@ -327,7 +350,7 @@ class Toolbox:
     find_models: Callable[[str, str | None, int], Awaitable[dict]]
     get_model: Callable[[str], Awaitable[dict]]
     # Devuelve (resultado para Claude, propuesta para guardar o None si no pasó la validación).
-    propose: Callable[[str, dict, str, int], Awaitable[tuple[dict, dict | None]]]
+    propose: Callable[..., Awaitable[tuple[dict, dict | None]]]
     list_elements: Callable[[], Awaitable[dict]] | None = None
     list_skills: Callable[[], Awaitable[dict]] | None = None
     use_skill: Callable[[str], Awaitable[dict]] | None = None
@@ -568,8 +591,20 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
             return await tools.get_model(args["model_id"]), None
         if name == "propose_generation":
             model_id, arguments, title = args.get("model_id"), args.get("input"), args.get("title")
+            items = args.get("items")
+            if items is not None:
+                if (
+                    not isinstance(items, list)
+                    or not 2 <= len(items) <= MAX_VARIATIONS
+                    or not all(isinstance(i, dict) and isinstance(i.get("input"), dict) for i in items)
+                ):
+                    return {"error": f"`items` takes 2 to {MAX_VARIATIONS} objects with an `input`"}, None
+                if not isinstance(model_id, str):
+                    return {"error": "`model_id` is required"}, None
+                clean = [{"title": str(i.get("title") or "")[:80], "input": i["input"]} for i in items]
+                return await tools.propose(model_id, None, str(title or "")[:120], 1, clean)
             if not isinstance(model_id, str) or not isinstance(arguments, dict):
-                return {"error": "`model_id` and `input` are required"}, None
+                return {"error": "`model_id` and `input` (or `items`) are required"}, None
             variations = args.get("variations", 1)
             if not isinstance(variations, int) or not 1 <= variations <= MAX_VARIATIONS:
                 return {"error": f"`variations` must be an integer from 1 to {MAX_VARIATIONS}"}, None

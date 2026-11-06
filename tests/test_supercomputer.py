@@ -408,3 +408,28 @@ def test_variations_get_different_seeds_when_the_model_has_one():
     seeds = [i["seed"] for i in inputs]
     assert seeds[0] == 7 and len(set(seeds)) == 4 and all(0 <= s <= 999 for s in seeds)
     assert variation_inputs({"properties": {"prompt": {}}}, {"prompt": "x"}, 2) == [{"prompt": "x"}] * 2
+
+
+async def test_several_different_pieces_are_one_proposal(env):
+    _, http, claude = env
+    places = ["callejón con grafiti", "escaleras de colores", "calle de noche"]
+    items = [{"title": p, "input": {**VIDEO, "prompt": f"Empty {p}"}} for p in places]
+    claude.script = [
+        ([tool("propose_generation", {"model_id": T2V, "title": "3 lugares", "items": items})], "tool_use")
+    ]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "dame 3 lugares urbanos")
+    proposals = [e["proposal"] for e in events if e["type"] == "proposal"]
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["labels"] == places and [i["prompt"] for i in p["inputs"]] == [f"Empty {x}" for x in places]
+    single = (await http.post("/v1/estimate", json={"model": T2V, "input": VIDEO})).json()["usd"]
+    assert p["estimate"]["usd"] == round(single * 3, 4)
+
+    bad = [*items[:2], {"title": "mal", "input": {**VIDEO, "duration": 999}}]
+    claude.script = [
+        ([tool("propose_generation", {"model_id": T2V, "title": "x", "items": bad}, 2)], "tool_use")
+    ]
+    await send(http, chat["id"], "otra")
+    result = json.loads(claude.requests[-1]["messages"][-1]["content"][0]["content"])
+    assert "item 3" in result["errors"]

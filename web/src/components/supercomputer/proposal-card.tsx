@@ -39,6 +39,23 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** Una pieza de una propuesta con varias: título, precio y su prompt plegado. */
+function Piece({ n, title, prompt, price }: { n: number; title: string; prompt: string; price: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="rounded-xl bg-surface-3 px-3 py-2">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 text-left">
+        <span className="font-mono text-xs text-fg-4">{n}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{title}</span>
+        {price && <span className="text-xs text-fg-3">{price}</span>}
+      </button>
+      {prompt && (
+        <p className={clsx("mt-1 text-[12.5px] leading-relaxed whitespace-pre-wrap text-fg-3", !open && "line-clamp-2")}>{prompt}</p>
+      )}
+    </li>
+  );
+}
+
 /** Sigue una generación hasta que termina (la API espera hasta 20 s por lectura) y avisa de cada cambio. */
 function useJob(jobId: string, onUpdate: (g: Generation) => void) {
   useEffect(() => {
@@ -142,7 +159,11 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   const s = t.supercomputer;
   const inputs = proposal.inputs?.length ? proposal.inputs : [proposal.input];
   const count = inputs.length;
-  const [estimate, setEstimate] = useState<Estimate | null>(null);
+  const labels = proposal.labels ?? [];
+  const pieces = labels.length === count; // piezas distintas, cada una con su prompt y su precio
+  // Precio vigente de cada generación: en piezas, una cotización por pieza; en variaciones, la de la primera.
+  const [estimates, setEstimates] = useState<Estimate[] | null>(null);
+  const estimate = estimates?.[0] ?? null;
   const [quoting, setQuoting] = useState(true);
   const [jobIds, setJobIds] = useState<string[]>(proposal.job_ids?.length ? proposal.job_ids : proposal.job_id ? [proposal.job_id] : []);
   const [jobs, setJobs] = useState<Record<string, Generation>>({});
@@ -163,7 +184,8 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   async function quote() {
     setQuoting(true);
     try {
-      setEstimate(await studio.estimate(proposal.model, inputs[0]));
+      const one = pieces ? inputs : [inputs[0]];
+      setEstimates(await Promise.all(one.map((input) => studio.estimate(proposal.model, input))));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -174,18 +196,21 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   // Precio vigente de una generación al abrir la tarjeta (el total es ese precio por el número de variaciones).
   useEffect(() => {
     if (proposal.job_ids?.length === count || (count === 1 && proposal.job_id)) return;
-    studio
-      .estimate(proposal.model, (proposal.inputs?.length ? proposal.inputs : [proposal.input])[0])
+    const all = proposal.inputs?.length ? proposal.inputs : [proposal.input];
+    const one = (proposal.labels?.length ?? 0) === all.length ? all : [all[0]];
+    Promise.all(one.map((input) => studio.estimate(proposal.model, input)))
       .then(
-        (e) => setEstimate(e),
+        (e) => setEstimates(e),
         (e) => setError(e instanceof Error ? e.message : String(e)),
       )
       .finally(() => setQuoting(false));
   }, [proposal, count]);
 
+  const priceOf = (i: number) => (pieces ? estimates?.[i] : estimate) ?? null;
+
   async function generate() {
-    if (!estimate) return;
-    const known = costAllowsDirectSubmit(estimate);
+    if (!estimates?.length) return;
+    const known = estimates.every((e) => costAllowsDirectSubmit(e));
     if (!known && !window.confirm(s.confirmUnknown)) return;
     setBusy(true);
     setError(null);
@@ -198,9 +223,9 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
           inputs[i],
           `${key.current}-${i}`,
           false,
-          known ? estimate.usd : null,
+          known ? (priceOf(i)?.usd ?? null) : null,
           {},
-          estimate.reserve_usd ?? null,
+          priceOf(i)?.reserve_usd ?? null,
           !known,
           count > 1,
         );
@@ -219,10 +244,13 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
     }
   }
 
-  const unit = estimate?.usd ?? null;
   const unitText = costShort(estimate);
-  const price = count > 1 && unit != null && unitText ? s.totalPrice(count, unitText, formatUsd(unit * count)) : unitText;
-  const buttonPrice = count > 1 && unit != null ? formatUsd(unit * count) : unitText;
+  const usds = Array.from({ length: count }, (_, i) => priceOf(i)?.usd ?? null);
+  const total = usds.every((u) => u != null) ? usds.reduce((a, b) => (a ?? 0) + (b ?? 0), 0) : null;
+  const sameUnit = !pieces || new Set(usds).size === 1;
+  const price =
+    count > 1 && total != null ? (sameUnit && unitText ? s.totalPrice(count, unitText, formatUsd(total)) : formatUsd(total)) : unitText;
+  const buttonPrice = count > 1 && total != null ? formatUsd(total) : unitText;
   const done = jobIds.filter((id) => jobs[id]?.terminal).length;
   // Por dónde va a salir: el proveedor más barato con clave (el router lo elige igual al generar).
   const chosen = estimate?.options?.find((o) => o.provider === estimate.provider) ?? estimate?.options?.[0];
@@ -256,7 +284,14 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
       </div>
 
       <div className="space-y-3 px-4 py-3">
-        {prompt && (
+        {pieces && (
+          <ol className="space-y-1.5">
+            {inputs.map((input, i) => (
+              <Piece key={i} n={i + 1} title={labels[i]} prompt={typeof input.prompt === "string" ? input.prompt : ""} price={costShort(priceOf(i))} />
+            ))}
+          </ol>
+        )}
+        {prompt && !pieces && (
           <div>
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{s.prompt}</span>
@@ -287,7 +322,7 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
                 key={id}
                 jobId={id}
                 job={jobs[id]}
-                label={count > 1 ? `${i + 1}/${count}` : s.variation(1)}
+                label={pieces ? `${i + 1}. ${labels[i]}` : count > 1 ? `${i + 1}/${count}` : s.variation(1)}
                 aspect={ratio}
                 video={proposal.output === "video"}
                 onUpdate={onUpdate}
@@ -303,10 +338,10 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
             <span className="font-mono text-fg-4">{chosen.model}</span>
             {!chosen.official && <span className="text-warning">{t.cost.unofficial}</span>}
             {estimate?.savings_vs_higgsfield && estimate.savings_vs_higgsfield.usd > 0 && (
-              <span className="text-lime">{t.cost.saves(formatUsd(estimate.savings_vs_higgsfield.usd * count), estimate.savings_vs_higgsfield.pct)}</span>
+              <span className="text-lime">{t.cost.saves(formatUsd(estimate.savings_vs_higgsfield.usd * (pieces ? 1 : count)), estimate.savings_vs_higgsfield.pct)}</span>
             )}
             {others > 0 && <span>{s.otherProviders(others)}</span>}
-            {estimate?.reserve_usd ? <span className="basis-full">{t.cost.reserve(formatUsd(estimate.reserve_usd * count))}</span> : null}
+            {estimate?.reserve_usd ? <span className="basis-full">{t.cost.reserve(formatUsd(estimate.reserve_usd * (pieces ? 1 : count)))}</span> : null}
           </div>
         )}
         {error && <p className="text-sm text-warning">{error}</p>}

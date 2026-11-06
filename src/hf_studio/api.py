@@ -2174,32 +2174,58 @@ def create_app(
             return model_out(model, full=True)
 
         async def propose(
-            model_id: str, arguments: dict, title: str, variations: int = 1
+            model_id: str,
+            arguments: dict | None,
+            title: str,
+            variations: int = 1,
+            items: list[dict] | None = None,
         ) -> tuple[dict, dict | None]:
+            """Una tarjeta: una generación, N variaciones de la misma entrada o varias piezas (`items`), cada
+            una validada y cotizada; el precio de la tarjeta es la suma."""
             model = catalog.get(model_id)
             if not model or model["output"] not in ("video", "image"):
                 return {"error": f"Unknown model {model_id!r}; use find_models"}, None
-            filled, _ = fill_placeholders(model["input_schema"], arguments)
-            if errors := catalog.validate(model["id"], filled):
-                return {"errors": errors}, None
+            if items:
+                inputs = [i["input"] for i in items]
+                labels = [i.get("title") or f"{n}" for n, i in enumerate(items, 1)]
+            else:
+                inputs = sc.variation_inputs(model["input_schema"], arguments or {}, variations)
+                labels = []
+            errors, quotes = {}, []
             async with app.state.sessions() as s:
-                try:
-                    estimate = estimate_body(await make_plan(request, s, owner, model, arguments, {}))
-                except ServiceError as exc:
-                    return {"error": exc.message}, None
-            brief = {k: estimate.get(k) for k in ("usd", "kind", "provider", "reserve_usd", "missing")}
-            inputs = sc.variation_inputs(model["input_schema"], arguments, variations)
-            if len(inputs) > 1:  # el total de las variaciones: cada una es una generación con el mismo precio
-                brief = {**brief, "unit_usd": brief["usd"],
-                         "usd": round(brief["usd"] * len(inputs), 4) if brief["usd"] is not None else None,
-                         "reserve_usd": round(brief["reserve_usd"] * len(inputs), 4) if brief["reserve_usd"] else None}  # fmt: skip
+                for n, args in enumerate(inputs, 1):
+                    filled, _ = fill_placeholders(model["input_schema"], args)
+                    if found := catalog.validate(model["id"], filled):
+                        errors[f"item {n}"] = found
+                        continue
+                    try:
+                        quotes.append(estimate_body(await make_plan(request, s, owner, model, args, {})))
+                    except ServiceError as exc:
+                        errors[f"item {n}"] = exc.message
+                    if not items:
+                        quotes *= len(inputs)  # variaciones: misma entrada (salvo la semilla), mismo precio
+                        break
+            if errors:
+                return {"errors": errors if items else next(iter(errors.values()))}, None
+            usds = [q.get("usd") for q in quotes]
+            reserves = [q.get("reserve_usd") or 0 for q in quotes]
+            kinds = [q.get("kind") for q in quotes]
+            brief = {
+                "usd": round(sum(usds), 4) if None not in usds else None,
+                "kind": next((k for k in ("unavailable", "formula", "approx") if k in kinds), kinds[0]),
+                "provider": quotes[0].get("provider"),
+                "reserve_usd": round(sum(reserves), 4) if any(reserves) else None,
+                "missing": sorted({m for q in quotes for m in q.get("missing") or []}),
+            }
+            if len(inputs) > 1:
+                brief["unit_usd"] = usds[0] if len(set(usds)) == 1 else None
             proposal = {"model": model["id"], "model_title": model["title"], "output": model["output"],
-                        "title": title, "input": arguments, "inputs": inputs, "variations": len(inputs),
-                        "estimate": brief, "job_id": None, "job_ids": []}  # fmt: skip
+                        "title": title, "input": inputs[0], "inputs": inputs, "labels": labels,
+                        "variations": len(inputs), "estimate": brief, "job_id": None, "job_ids": []}  # fmt: skip
             note = "Shown to the user as one card with a Generate button"
             if len(inputs) > 1:
-                note += f" that launches {len(inputs)} generations (total price shown)"
-            return {"ok": True, "price": brief, "variations": len(inputs), "note": note}, proposal
+                note += f" that launches all {len(inputs)} generations at once (total price shown)"
+            return {"ok": True, "price": brief, "generations": len(inputs), "note": note}, proposal
 
         async def list_elements() -> dict:
             async with app.state.sessions() as s:
