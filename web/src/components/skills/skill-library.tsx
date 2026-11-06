@@ -182,7 +182,7 @@ export function SkillLibrary() {
               value={draft.body}
               onChange={(e) => setDraft({ ...draft, body: e.target.value })}
               rows={16}
-              maxLength={60000}
+              maxLength={150000}
               className={`${field} thin-scrollbar font-mono text-[13px] leading-relaxed`}
             />
             <span className="text-xs text-fg-3">{k.bodyHint}</span>

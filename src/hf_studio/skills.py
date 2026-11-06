@@ -14,13 +14,13 @@ from pathlib import Path
 import yaml
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-MAX_BODY = 60_000  # caracteres: una skill larga llena el contexto en cada vuelta que la usa
+MAX_BODY = 150_000  # caracteres: una skill larga llena el contexto en cada vuelta que la usa
 MAX_DESCRIPTION = 1_000
 FILE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*){0,4}$")
 FILE_TYPES = (".md", ".txt", ".json", ".csv", ".yaml", ".yml")
-MAX_FILE = 100_000
+MAX_FILE = 150_000
 MAX_FILES = 100
-MAX_FILES_TOTAL = 600_000
+MAX_FILES_TOTAL = 2_000_000
 MENTION = re.compile(r"(?:^|(?<=\s))/([a-z0-9][a-z0-9-]{0,62})(?=$|[\s.,;:!?)])")
 MAX_INVOKED = 3
 
