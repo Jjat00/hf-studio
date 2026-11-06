@@ -44,9 +44,7 @@ async def test_skills_crud_and_import(env):  # noqa: F811
     bad = await http.post("/v1/skills", json={"slug": "Mal Nombre", "description": "x", "body": "y"})
     assert bad.json()["error"]["code"] == "invalid_slug"
     listed = (await http.get("/v1/skills")).json()["skills"]
-    assert listed == [
-        {"slug": "ads-ugc", "description": listed[0]["description"], "updated_at": listed[0]["updated_at"]}
-    ]
+    assert listed[0]["slug"] == "ads-ugc" and listed[0]["files"] == [] and "body" not in listed[0]
     edited = await http.put(
         "/v1/skills/ads-ugc", json={"slug": "ugc", "description": "Otra", "body": "Pasos"}
     )
@@ -74,3 +72,34 @@ async def test_a_slash_skill_goes_with_the_message_and_the_agent_can_load_one(en
     results = claude.requests[2]["messages"][-1]["content"]
     assert json.loads(results[0]["content"])["skills"][0]["name"] == "ads-ugc"
     assert json.loads(results[1]["content"])["instructions"].startswith("# Cómo hacerlo")
+
+
+async def test_reference_files_are_read_on_demand(env):  # noqa: F811
+    _, http, claude = env
+    files = {"references/master.md": "# Máster\nÁngulos…", "references/plantillas/01-chat.md": "Plantilla 1"}
+    made = await http.post("/v1/skills", json={"skill_md": SKILL_MD, "files": files})
+    assert [f["path"] for f in made.json()["files"]] == sorted(files)
+    bad = await http.post(
+        "/v1/skills", json={"slug": "x", "description": "d", "body": "b", "files": {"../etc": "x"}}
+    )
+    assert bad.json()["error"]["code"] == "invalid_file"
+    got = await http.get("/v1/skills/ads-ugc/files/references/master.md")
+    assert got.json()["content"].startswith("# Máster")
+    # Editar sin `files` conserva los archivos
+    await http.put("/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "d", "body": "b"})
+    assert len((await http.get("/v1/skills/ads-ugc")).json()["files"]) == 2
+
+    chat = (await http.post("/v1/chats", json={})).json()
+    claude.script = [
+        (
+            [tool("read_skill_file", {"name": "ads-ugc", "path": "references/plantillas/01-chat.md"})],
+            "tool_use",
+        )
+    ]
+    await send(http, chat["id"], "/ads-ugc un anuncio")
+    block = next(
+        b["text"] for b in claude.requests[0]["messages"][0]["content"] if b["text"].startswith("<skill")
+    )
+    assert "- references/master.md" in block  # la lista de archivos va con la skill, no su contenido
+    result = json.loads(claude.requests[1]["messages"][-1]["content"][0]["content"])
+    assert result["content"] == "Plantilla 1"

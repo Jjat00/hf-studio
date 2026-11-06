@@ -1,13 +1,14 @@
 "use client";
 
-import { FileUp, Loader2, Pencil, Plus, Trash2, Wand2 } from "lucide-react";
+import { FileText, FileUp, FolderUp, Loader2, Pencil, Plus, Trash2, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { studio, type SkillSummary } from "@/lib/studio";
 
-type Draft = { original: string | null; slug: string; description: string; body: string };
+type Draft = { original: string | null; slug: string; description: string; body: string; files: { path: string; chars: number }[] };
 
-const EMPTY: Draft = { original: null, slug: "", description: "", body: "" };
+const EMPTY: Draft = { original: null, slug: "", description: "", body: "", files: [] };
+const TEXT_FILE = /\.(md|txt|json|csv|ya?ml)$/i;
 const field = "w-full rounded-xl border border-line-2 bg-surface-3 px-3 py-2 text-sm text-fg outline-none focus:border-lime/60";
 
 /** Biblioteca de skills de Supercomputer: crear, editar, importar un SKILL.md y borrar. */
@@ -19,6 +20,7 @@ export function SkillLibrary() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
+  const folder = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
     studio.skills().then(
@@ -35,7 +37,7 @@ export function SkillLibrary() {
     setError(null);
     try {
       const s = await studio.skill(slug);
-      setDraft({ original: s.slug, slug: s.slug, description: s.description, body: s.body });
+      setDraft({ original: s.slug, slug: s.slug, description: s.description, body: s.body, files: s.files });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -73,6 +75,27 @@ export function SkillLibrary() {
     }
   }
 
+  /** Una carpeta de skill (SKILL.md y references/…): el SKILL.md es el cuerpo, el resto, archivos de referencia. */
+  async function importFolder(list: FileList | null) {
+    if (!list?.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const all = Array.from(list).map((f) => ({ f, path: (f.webkitRelativePath || f.name).split("/").slice(1).join("/") || f.name }));
+      const main = all.find((x) => x.path === "SKILL.md");
+      if (!main) throw new Error(k.noSkillMd);
+      const files: Record<string, string> = {};
+      for (const x of all) if (x !== main && TEXT_FILE.test(x.path)) files[x.path] = await x.f.text();
+      await studio.createSkill({ skill_md: await main.f.text(), files });
+      load();
+    } catch (e) {
+      setError(`${k.importError}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+      if (folder.current) folder.current.value = "";
+    }
+  }
+
   async function remove(slug: string) {
     if (!window.confirm(k.confirmDelete(slug))) return;
     await studio.deleteSkill(slug).catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -88,6 +111,24 @@ export function SkillLibrary() {
         </div>
         <div className="flex gap-2">
           <input ref={file} type="file" accept=".md,text/markdown,text/plain" multiple hidden onChange={(e) => importFiles(e.target.files)} />
+          <input
+            ref={(el) => {
+              folder.current = el;
+              el?.setAttribute("webkitdirectory", "");
+            }}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => importFolder(e.target.files)}
+          />
+          <button
+            type="button"
+            onClick={() => folder.current?.click()}
+            disabled={busy}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-surface-4 px-3 text-sm text-fg-2 hover:text-fg disabled:opacity-50"
+          >
+            <FolderUp className="size-4" /> {k.importFolder}
+          </button>
           <button
             type="button"
             onClick={() => file.current?.click()}
@@ -146,6 +187,18 @@ export function SkillLibrary() {
             />
             <span className="text-xs text-fg-3">{k.bodyHint}</span>
           </label>
+          {draft.files.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-fg">{k.filesTitle}</p>
+              <ul className="space-y-0.5 text-xs text-fg-3">
+                {draft.files.map((f) => (
+                  <li key={f.path} className="flex items-center gap-1.5 font-mono">
+                    <FileText className="size-3.5" /> {f.path} <span className="text-fg-4">· {k.chars(f.chars)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setDraft(null)} className="h-9 rounded-xl px-3 text-sm text-fg-3 hover:text-fg">
               {k.cancel}
@@ -176,6 +229,7 @@ export function SkillLibrary() {
                 <div className="min-w-0 flex-1">
                   <p className="font-mono text-sm font-semibold text-fg">/{s.slug}</p>
                   <p className="mt-1 line-clamp-3 text-sm text-fg-3">{s.description}</p>
+                  {s.files.length > 0 && <p className="mt-1.5 text-xs text-fg-4">{k.files(s.files.length)}</p>}
                 </div>
                 <button type="button" title={k.edit} aria-label={`${k.edit}: ${s.slug}`} onClick={() => edit(s.slug)} className="rounded-lg p-1.5 text-fg-3 hover:text-fg">
                   <Pencil className="size-4" />

@@ -14,6 +14,11 @@ import yaml
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 MAX_BODY = 60_000  # caracteres: una skill larga llena el contexto en cada vuelta que la usa
 MAX_DESCRIPTION = 1_000
+FILE_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*){0,4}$")
+FILE_TYPES = (".md", ".txt", ".json", ".csv", ".yaml", ".yml")
+MAX_FILE = 100_000
+MAX_FILES = 100
+MAX_FILES_TOTAL = 600_000
 MENTION = re.compile(r"(?:^|(?<=\s))/([a-z0-9][a-z0-9-]{0,62})(?=$|[\s.,;:!?)])")
 MAX_INVOKED = 3
 
@@ -49,6 +54,27 @@ def check(slug: str, description: str, body: str) -> tuple[str, str, str]:
     return slug, description, body
 
 
+def check_files(files: dict[str, str] | None) -> dict[str, str]:
+    """Archivos de referencia: rutas relativas de texto (sin `..`), con límites de tamaño y cantidad."""
+    clean: dict[str, str] = {}
+    for path, content in (files or {}).items():
+        path = path.strip().lstrip("./")
+        if path == "SKILL.md":
+            continue  # es el cuerpo de la skill
+        if not FILE_PATH.match(path) or ".." in path.split("/") or not path.endswith(FILE_TYPES):
+            raise SkillError(
+                422, "invalid_file", f"Skill files are text files with a relative path: {path!r}"
+            )
+        if not isinstance(content, str) or len(content) > MAX_FILE:
+            raise SkillError(422, "file_too_long", f"{path} is limited to {MAX_FILE:,} characters")
+        clean[path] = content
+    if len(clean) > MAX_FILES or sum(len(v) for v in clean.values()) > MAX_FILES_TOTAL:
+        raise SkillError(
+            422, "too_many_files", f"A skill takes up to {MAX_FILES} files and {MAX_FILES_TOTAL:,} characters"
+        )
+    return clean
+
+
 def parse_skill_md(text: str) -> tuple[str, str, str]:
     """(slug, descripción, cuerpo) de un SKILL.md: frontmatter con `name` y `description` y el resto como cuerpo."""
     text = text.lstrip("﻿")
@@ -74,5 +100,11 @@ def invoked(text: str, known: set[str]) -> list[str]:
     return found[:MAX_INVOKED]
 
 
-def skill_block(slug: str, body: str) -> str:
-    return f'<skill name="{slug}">\n{body}\n</skill>'
+def skill_block(slug: str, body: str, files: list[str] | None = None) -> str:
+    listing = ""
+    if files:
+        listing = (
+            "\n\nFiles of this skill (read one with read_skill_file when the instructions point to it):\n"
+        )
+        listing += "\n".join(f"- {f}" for f in files)
+    return f'<skill name="{slug}">\n{body}{listing}\n</skill>'

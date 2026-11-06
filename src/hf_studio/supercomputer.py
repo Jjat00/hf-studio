@@ -261,7 +261,10 @@ TOOLS += [
     },
     {
         "name": "use_skill",
-        "description": "Load a skill's full instructions by its name (from list_skills) and follow them. Free.",
+        "description": (
+            "Load a skill's full instructions by its name (from list_skills) and follow them. Returns the list of "
+            "its reference files too. Free."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"name": {"type": "string", "description": "Skill name, e.g. ads-ugc"}},
@@ -271,7 +274,27 @@ TOOLS += [
     },
 ]
 
+TOOLS.append(
+    {
+        "name": "read_skill_file",
+        "description": (
+            "Read one reference file of a skill (templates, a method, examples) when its instructions point to it. "
+            "Read only the files you need. Free."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Skill name"},
+                "path": {"type": "string", "description": "File path as listed, e.g. references/master.md"},
+            },
+            "required": ["name", "path"],
+            "additionalProperties": False,
+        },
+    }
+)
+
 TOOL_LABELS = {
+    "read_skill_file": "skills",
     "list_skills": "skills",
     "use_skill": "skills",
     "web_search": "researching",
@@ -295,6 +318,7 @@ class Toolbox:
     list_elements: Callable[[], Awaitable[dict]] | None = None
     list_skills: Callable[[], Awaitable[dict]] | None = None
     use_skill: Callable[[str], Awaitable[dict]] | None = None
+    read_skill_file: Callable[[str, str], Awaitable[dict]] | None = None
 
 
 @dataclass
@@ -358,7 +382,7 @@ def user_content(
     attachments: list[dict],
     updates: list[str],
     now: str | None = None,
-    skills: list[tuple[str, str]] | None = None,
+    skills: list[tuple[str, str, list[str]]] | None = None,
 ) -> list[dict]:
     """Bloques del mensaje del usuario: modo, hora actual, novedades de sus generaciones, adjuntos (las imágenes
     también como imagen, para que Claude las vea) y el texto."""
@@ -375,8 +399,8 @@ def user_content(
         blocks.append(
             {"type": "text", "text": f"Attached {kind} ({a.get('filename') or 'file'}): {a['url']}"}
         )
-    for slug, body in skills or []:  # las que el usuario llamó con /nombre
-        blocks.append({"type": "text", "text": skill_block(slug, body)})
+    for slug, body, files in skills or []:  # las que el usuario llamó con /nombre
+        blocks.append({"type": "text", "text": skill_block(slug, body, files)})
     blocks.append({"type": "text", "text": text})
     return blocks
 
@@ -520,6 +544,11 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
             if not isinstance(args.get("name"), str) or tools.use_skill is None:
                 return {"error": "`name` is required"}, None
             return await tools.use_skill(args["name"].lstrip("/")), None
+        if name == "read_skill_file":
+            skill, path = args.get("name"), args.get("path")
+            if not isinstance(skill, str) or not isinstance(path, str) or tools.read_skill_file is None:
+                return {"error": "`name` and `path` are required"}, None
+            return await tools.read_skill_file(skill.lstrip("/"), path), None
         if name == "list_elements":
             if tools.list_elements is None:
                 return {"elements": []}, None

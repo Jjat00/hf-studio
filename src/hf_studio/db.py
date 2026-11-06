@@ -200,12 +200,16 @@ class Skill(Base):
     slug: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
+    # Archivos de referencia de la skill (`{ruta: texto}`, como references/ en un SKILL.md): el agente lee solo el
+    # que necesita con `read_skill_file`, en vez de cargarlos todos en cada mensaje.
+    files: Mapped[dict] = mapped_column(JSON, default=dict)
     created_by: Mapped[str] = mapped_column(ForeignKey("api_clients.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
     def out(self, full: bool = True) -> dict:
-        data = {"slug": self.slug, "description": self.description,
+        files = [{"path": k, "chars": len(v)} for k, v in sorted((self.files or {}).items())]
+        data = {"slug": self.slug, "description": self.description, "files": files,
                 "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
         return {**data, "body": self.body} if full else data
 
@@ -283,6 +287,7 @@ ADDED_COLUMNS = {
     "uploads": {"source": "VARCHAR(80)"},
     "space_runs": {"idempotency_key": "VARCHAR(200)", "request_hash": "VARCHAR(64)"},
     "spaces": {"flow": "JSON"},
+    "skills": {"files": "JSON"},
 }
 
 

@@ -338,6 +338,9 @@ class SkillIn(BaseModel):
         max_length=skill_files.MAX_BODY + 2000,
         description="Un SKILL.md completo (frontmatter y cuerpo)",
     )
+    files: dict[str, str] | None = Field(
+        None, description="Archivos de referencia {ruta: texto}; en una edición, si no viene, se conservan"
+    )
 
 
 class ChatIn(BaseModel):
@@ -2025,7 +2028,8 @@ def create_app(
         slug, description, text_ = skill_fields(body)
         if await session.scalar(select(Skill.id).where(Skill.slug == slug)):
             raise ServiceError(409, "skill_exists", f"There is already a skill called /{slug}")
-        skill = Skill(slug=slug, description=description, body=text_, created_by=owner.id)
+        files = skill_files.check_files(body.files)
+        skill = Skill(slug=slug, description=description, body=text_, files=files, created_by=owner.id)
         session.add(skill)
         await session.commit()
         return skill.out()
@@ -2037,8 +2041,17 @@ def create_app(
         if new_slug != slug and await session.scalar(select(Skill.id).where(Skill.slug == new_slug)):
             raise ServiceError(409, "skill_exists", f"There is already a skill called /{new_slug}")
         skill.slug, skill.description, skill.body, skill.updated_at = new_slug, description, text_, utcnow()
+        if body.files is not None:
+            skill.files = skill_files.check_files(body.files)
         await session.commit()
         return skill.out()
+
+    @app.get("/v1/skills/{slug}/files/{path:path}", tags=["supercomputer"])
+    async def get_skill_file(slug: str, path: str, session: Session, _: Owner) -> dict:
+        skill = await get_skill_or_404(session, slug)
+        if path not in (skill.files or {}):
+            raise ServiceError(404, "skill_file_not_found", f"/{slug} has no file {path}")
+        return {"path": path, "content": skill.files[path]}
 
     @app.delete("/v1/skills/{slug}", status_code=204, tags=["supercomputer"])
     async def delete_skill(slug: str, session: Session, _: Owner) -> None:
@@ -2164,11 +2177,21 @@ def create_app(
                 skill = await s.scalar(select(Skill).where(Skill.slug == name))
             if skill is None:
                 return {"error": f"Unknown skill {name!r}; call list_skills"}
-            return {"name": skill.slug, "instructions": skill.body}
+            return {"name": skill.slug, "instructions": skill.body, "files": sorted(skill.files or {})}
+
+        async def read_skill_file(name: str, path: str) -> dict:
+            async with app.state.sessions() as s:
+                skill = await s.scalar(select(Skill).where(Skill.slug == name))
+            if skill is None:
+                return {"error": f"Unknown skill {name!r}; call list_skills"}
+            content = (skill.files or {}).get(path.strip().lstrip("./"))
+            if content is None:
+                return {"error": f"/{name} has no file {path!r}", "files": sorted(skill.files or {})}
+            return {"name": skill.slug, "path": path, "content": content}
 
         return sc.Toolbox(
             find_models=find_models, get_model=get_model_info, propose=propose, list_elements=list_elements,
-            list_skills=list_skills_tool, use_skill=use_skill,
+            list_skills=list_skills_tool, use_skill=use_skill, read_skill_file=read_skill_file,
         )  # fmt: skip
 
     @app.post("/v1/chats/{chat_id}/messages", tags=["supercomputer"])
@@ -2202,10 +2225,11 @@ def create_app(
         now, timezone = sc.studio_time(body.timezone)
         known = set(await session.scalars(select(Skill.slug)))
         called = skill_files.invoked(body.text, known)
-        bodies = {r.slug: r.body for r in await session.scalars(select(Skill).where(Skill.slug.in_(called)))}
+        bodies = {r.slug: (r.body, sorted(r.files or {}))
+                  for r in await session.scalars(select(Skill).where(Skill.slug.in_(called)))}  # fmt: skip
         user_msg = {"role": "user", "content": sc.user_content(
             body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now,
-            [(slug, bodies[slug]) for slug in called if slug in bodies])}  # fmt: skip
+            [(slug, *bodies[slug]) for slug in called if slug in bodies])}  # fmt: skip
         history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
         chat_key, owner_id = chat.id, owner.id

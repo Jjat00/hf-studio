@@ -514,9 +514,9 @@ export type ChatProposal = {
   estimate: { usd: number | null; kind: string | null; provider: string | null; reserve_usd: number | null; missing: string[] | null };
   job_id: string | null;
 };
-export type SkillSummary = { slug: string; description: string; updated_at: string };
+export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[] };
 export type Skill = SkillSummary & { body: string };
-export type SkillBody = { slug: string; description: string; body: string } | { skill_md: string };
+export type SkillBody = ({ slug: string; description: string; body: string } | { skill_md: string }) & { files?: Record<string, string> };
 export type ChatQuestion = { id: string; question: string; options: { label: string; detail?: string }[] };
 export type ChatPart =
   | { type: "text"; text: string }
