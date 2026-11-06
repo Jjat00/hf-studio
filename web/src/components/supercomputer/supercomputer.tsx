@@ -439,6 +439,7 @@ export function Supercomputer() {
       {picking && (
         <CreationsPicker
           kind={picking}
+          max={Math.max(1, 6 - attachments.length)}
           onPick={(url) =>
             setAttachments((prev) =>
               prev.length >= 6 || prev.some((a) => a.url === url)
