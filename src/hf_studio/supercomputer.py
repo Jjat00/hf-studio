@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import anthropic
 
@@ -50,19 +52,43 @@ ask you to go ahead.
 is whether to include a character (or product): call `list_elements` first and offer their saved elements by \
 name as options, plus "use an image of mine" (attach it or pick it from history) and "a new character you \
 describe" or "no character".
-   - `auto`: make the creative decisions yourself, tell them in one or two sentences what you chose, and propose \
+     For a video, also ask the aspect ratio unless the request already says it or clearly implies it (a reel, \
+TikTok, Shorts or story means 9:16; YouTube or a website means 16:9). Offer only ratios the chosen model \
+accepts (its `aspect_ratio` enum; read it with `get_model`), up to 4, for example "9:16 vertical (Reels, TikTok, \
+Shorts)", "16:9 horizontal (YouTube, web)", "1:1 square (feed)" and "21:9 cinematic". Ask it first, before the \
+other questions, because it changes the framing of every shot, and use it in `aspect_ratio`.
+   - `auto`: make the creative decisions yourself, tell them in one or two sentences what you chose (for a video, \
+including the aspect ratio: 9:16 when the request hints at social media, otherwise 16:9), and propose \
 right away.
 2. Pick the model. If the user names a model, put its name in the `find_models` task (for example "gemini \
 omni 1.2"): named models come first. Use `find_models` (it returns real prices), then `get_model` to read the exact input schema, \
 limits (prompt maxLength, durations, aspect ratios, resolutions, audio support) and notes before writing for it. \
 Prefer what the user asked for; otherwise balance quality and price and say why in one line.
-3. Propose. Call `propose_generation` with the full prompt and settings. It validates the input against the \
+3. Propose. Right before the proposal, write a short recap titled "Resumen" (in the user's language) of what \
+was decided: one bullet per decision, in the form "**Formato:** 9:16 vertical", covering the user's answers \
+and the choices you made (subject or character, setting, mood, aspect ratio, duration, audio, references, \
+model and why in a few words). Keep it to 4-8 bullets; mark with "(lo elegí yo)" anything the user did not \
+decide. Then call `propose_generation` with the full prompt and settings. It validates the input against the \
 model and quotes the cost. If it returns errors, fix them and call it again. The proposal appears to the user as \
 a card with the prompt, the settings and the price, and a Generate button. Do not paste the whole prompt again \
 in your text; summarise what it contains in a few lines.
 4. Iterate. When the user asks for changes, propose a revised version. Updates about their generations (status, \
 output URLs) arrive inside <studio_update> tags; an output URL can be reused as an input (for example the image \
 of a character as `image_url` / start frame of a video).
+
+# Time and research
+Each user turn starts with <studio_time>: the current date, weekday, time and the user's time zone. Use it for \
+anything that depends on today (this week, recent, latest, seasons, dates on posters). Your own knowledge has a \
+cutoff: for news, recent model releases, trends, current events, prices outside the studio, or facts you are not \
+sure about, search the web with `web_search` (and read a page with `web_fetch` when a result needs detail) \
+instead of guessing. Say briefly what you found and rely on the sources; the sources are shown to the user. \
+Studio models and prices always come from `find_models`, never from the web.
+
+# Drafts
+For a Seedance 2.5 scene that is long or expensive, or when the user wants to try versions, offer Seedance 2.5 \
+Draft (bytedance/seedance-2.5-draft/…): a cheap 480p draft. When an update shows a completed draft and the user \
+likes it, propose bytedance/seedance-2.5-draft/final with `draft_generation_id` set to that draft's generation id: \
+the same scene at 1080p (it reuses the prompt, references, duration and seed, so do not send them again).
 
 # References
 The user can attach images or videos (from their device or their history); each arrives as a line \
@@ -217,6 +243,8 @@ TOOLS.append(
 )
 
 TOOL_LABELS = {
+    "web_search": "researching",
+    "web_fetch": "browsing",
     "ask_user": "asking",
     "find_models": "searching",
     "get_model": "reading",
@@ -253,13 +281,52 @@ def usage_usd(model: str, usage: Any) -> float:
     written = getattr(usage, "cache_creation_input_tokens", 0) or 0
     read = getattr(usage, "cache_read_input_tokens", 0) or 0
     out = getattr(usage, "output_tokens", 0) or 0
-    return (tokens_in * price_in + written * price_in * 1.25 + read * price_in * 0.1 + out * price_out) / 1e6
+    searches = getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0) or 0
+    tokens = tokens_in * price_in + written * price_in * 1.25 + read * price_in * 0.1 + out * price_out
+    return tokens / 1e6 + searches * WEB_SEARCH_USD
 
 
-def user_content(text: str, mode: str, attachments: list[dict], updates: list[str]) -> list[dict]:
-    """Bloques del mensaje del usuario: modo, novedades de sus generaciones, adjuntos (las imágenes también
-    como imagen, para que Claude las vea) y el texto."""
+WEB_SEARCH_USD = 0.01  # 10 USD por 1.000 búsquedas; leer páginas (web_fetch) solo cobra sus tokens
+WEB_MAX_USES = 5  # búsquedas y lecturas por respuesta, para que una pregunta no dispare el costo
+
+
+def web_tools(model: str, timezone: str | None) -> list[dict]:
+    """Búsqueda y lectura web del lado de Anthropic. Haiku 4.5 solo tiene las versiones sin filtrado dinámico."""
+    basic = model == "claude-haiku-4-5"
+    search: dict = {
+        "type": "web_search_20250305" if basic else "web_search_20260209",
+        "name": "web_search",
+        "max_uses": WEB_MAX_USES,
+    }
+    if timezone:
+        search["user_location"] = {"type": "approximate", "timezone": timezone}
+    fetch = {
+        "type": "web_fetch_20250910" if basic else "web_fetch_20260209",
+        "name": "web_fetch",
+        "max_uses": WEB_MAX_USES,
+    }
+    return [search, fetch]
+
+
+def studio_time(timezone: str | None) -> tuple[str, str]:
+    """Fecha y hora de ahora en la zona del usuario (IANA, la que manda el navegador) y la zona usada."""
+    try:
+        zone = ZoneInfo(timezone) if timezone else None
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = None
+    now = datetime.now(zone) if zone else datetime.now().astimezone()
+    name = timezone if zone else (now.tzname() or "local")
+    return now.strftime("%A %Y-%m-%d %H:%M") + f" ({name}, UTC{now.strftime('%z')})", name
+
+
+def user_content(
+    text: str, mode: str, attachments: list[dict], updates: list[str], now: str | None = None
+) -> list[dict]:
+    """Bloques del mensaje del usuario: modo, hora actual, novedades de sus generaciones, adjuntos (las imágenes
+    también como imagen, para que Claude las vea) y el texto."""
     head = f"<studio_mode>{mode}</studio_mode>"
+    if now:
+        head += f"\n<studio_time>{now}</studio_time>"
     if updates:
         head += "\n<studio_update>\n" + "\n".join(updates) + "\n</studio_update>"
     blocks: list[dict] = [{"type": "text", "text": head}]
@@ -281,6 +348,7 @@ async def run_turn(
     history: list[dict],
     tools: Toolbox,
     turn: Turn,
+    timezone: str | None = None,
 ) -> AsyncIterator[dict]:
     """Corre una vuelta del agente sobre `history` (que ya termina en el mensaje del usuario) y emite eventos
     para la UI. Cada respuesta completa de Claude (y los resultados de sus herramientas) se añade a
@@ -289,7 +357,7 @@ async def run_turn(
         "model": model,
         "max_tokens": MAX_TOKENS,
         "system": SYSTEM,
-        "tools": TOOLS,
+        "tools": [*TOOLS, *web_tools(model, timezone)],
         # Caché automática del último bloque: cada vuelta reutiliza el prefijo de la conversación.
         "cache_control": {"type": "ephemeral"},
     }
@@ -299,7 +367,10 @@ async def run_turn(
     for _ in range(MAX_ROUNDS):
         async with client.messages.stream(messages=history + turn.messages, **params) as stream:
             async for event in stream:
-                if event.type == "content_block_start" and event.content_block.type == "tool_use":
+                if event.type == "content_block_start" and event.content_block.type in (
+                    "tool_use",
+                    "server_tool_use",
+                ):
                     name = event.content_block.name
                     yield {"type": "tool", "name": name, "label": TOOL_LABELS.get(name, name)}
                 elif event.type == "content_block_delta" and event.delta.type == "text_delta":
@@ -438,8 +509,12 @@ def visible_messages(messages: list[dict], proposals: dict[str, dict]) -> list[d
             continue
         parts = []
         for b in content:
-            if b.get("type") == "text" and b.get("text", "").strip():
-                parts.append({"type": "text", "text": b["text"]})
+            if b.get("type") == "text" and b.get("text"):
+                if parts and parts[-1]["type"] == "text":
+                    # Dentro de una misma respuesta, las citas parten el texto en bloques: se leen como uno.
+                    parts[-1] = {"type": "text", "text": parts[-1]["text"] + b["text"]}
+                elif b["text"].strip():
+                    parts.append({"type": "text", "text": b["text"]})
             elif (
                 b.get("type") == "tool_use" and b.get("name") == "propose_generation" and b["id"] in proposals
             ):
@@ -448,10 +523,27 @@ def visible_messages(messages: list[dict], proposals: dict[str, dict]) -> list[d
                 question, _ = parse_question(b.get("input"))
                 if question:
                     parts.append({"type": "question", "question": {**question, "id": b["id"]}})
+        sources = [
+            {"url": c["url"], "title": c.get("title") or c["url"]}
+            for b in content if b.get("type") == "text"
+            for c in b.get("citations") or [] if isinstance(c, dict) and c.get("url")
+        ]  # fmt: skip
+        if sources:
+            parts.append({"type": "sources", "sources": sources})
         if not parts:
             continue
         if out and out[-1]["role"] == "assistant":  # varias rondas de una vuelta: un solo mensaje
             out[-1]["parts"].extend(parts)
         else:
             out.append({"role": "assistant", "parts": parts})
+    for msg in out:  # las fuentes de todas las rondas, juntas al final y sin repetir
+        if msg["role"] != "assistant":
+            continue
+        seen: dict[str, dict] = {}
+        for part in msg["parts"]:
+            for src in part.get("sources", []) if part["type"] == "sources" else []:
+                seen.setdefault(src["url"], src)
+        msg["parts"] = [p for p in msg["parts"] if p["type"] != "sources"]
+        if seen:
+            msg["parts"].append({"type": "sources", "sources": list(seen.values())[:12]})
     return out

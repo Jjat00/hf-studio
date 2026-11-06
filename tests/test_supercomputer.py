@@ -165,6 +165,8 @@ async def test_the_agent_lists_saved_elements_to_cite_them(env):
     }  # fmt: skip
     assert "list_elements" in {t["name"] for t in claude.requests[0]["tools"]}
     assert "# References" in str(claude.requests[0]["system"])
+    assert "ask the aspect ratio" in str(claude.requests[0]["system"])  # en video pregunta el formato
+    assert '"Resumen"' in str(claude.requests[0]["system"])  # resumen de lo decidido antes de proponer
 
 
 async def test_questions_come_one_at_a_time_with_clickable_options(env):
@@ -316,3 +318,49 @@ def test_the_visible_chat_hides_thinking_and_tool_traffic():
             "parts": [{"type": "text", "text": "Busco"}, {"type": "text", "text": "Listo"}],
         },
     ]
+
+
+async def test_the_agent_knows_the_time_and_can_search_the_web(env):
+    _, http, claude = env
+    chat = (await http.post("/v1/chats", json={})).json()
+    await send(http, chat["id"], "noticias de IA de esta semana", timezone="America/Bogota")
+    first = claude.requests[0]
+    head = first["messages"][0]["content"][0]["text"]
+    assert "<studio_time>" in head and "America/Bogota" in head
+    web = {t["name"]: t for t in first["tools"] if t.get("type", "").startswith("web_")}
+    assert (
+        web["web_search"]["type"] == "web_search_20260209"
+        and web["web_fetch"]["type"] == "web_fetch_20260209"
+    )
+    assert web["web_search"]["user_location"] == {"type": "approximate", "timezone": "America/Bogota"}
+    bad = await http.post(f"/v1/chats/{chat['id']}/messages", json={"text": "hola", "timezone": "x; drop"})
+    assert bad.status_code == 422
+
+
+def test_web_searches_are_charged_and_sources_are_shown():
+    from types import SimpleNamespace
+
+    from hf_studio.supercomputer import usage_usd
+
+    usage = SimpleNamespace(input_tokens=0, output_tokens=0, cache_creation_input_tokens=0,
+                            cache_read_input_tokens=0, server_tool_use=SimpleNamespace(web_search_requests=3))  # fmt: skip
+    assert round(usage_usd("claude-opus-5-5", usage), 4) == 0.03
+    cite = {
+        "type": "web_search_result_location",
+        "url": "https://news.test/a",
+        "title": "A",
+        "cited_text": "x",
+    }
+    shown = visible_messages([
+        {"role": "user", "content": [{"type": "text", "text": "<studio_mode>ask</studio_mode>"},
+                                     {"type": "text", "text": "noticias"}]},
+        {"role": "assistant", "content": [
+            {"type": "server_tool_use", "id": "srv_1", "name": "web_search", "input": {"query": "ai news"}},
+            {"type": "web_search_tool_result", "tool_use_id": "srv_1", "content": []},
+            {"type": "text", "text": "Esta semana ", "citations": None},
+            {"type": "text", "text": "salió X.", "citations": [cite, cite]},
+        ]},
+    ], {})  # fmt: skip
+    parts = shown[1]["parts"]
+    assert [p["type"] for p in parts] == ["text", "sources"] and parts[0]["text"] == "Esta semana salió X."
+    assert parts[-1]["sources"] == [{"url": "https://news.test/a", "title": "A"}]

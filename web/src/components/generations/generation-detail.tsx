@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CopyBlock } from "@/components/copy-block";
+import { FinalizeDraft } from "@/components/generations/finalize-draft";
 import { AudioPlayer, IconButton, StatusPill, generationCost, modelName, providerModel, providerTitle, sourceLabel } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
 import { outputSrc, reuseHref, studio, modelMap } from "@/lib/studio";
@@ -138,6 +139,7 @@ export function GenerationDetail({ id }: { id: string }) {
               )}
             </div>
           </div>
+          <FinalizeDraft g={g} />
 
           <Block title={d.model}>
             <p className="font-semibold">{modelName(g.model, locale, models)}</p>

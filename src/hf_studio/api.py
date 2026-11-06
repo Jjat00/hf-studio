@@ -141,6 +141,7 @@ from .spaces import (
     graph_refs,
     input_kinds,
 )
+from .store import seedance_draft
 from .styles import StyleCatalog
 from .usage import UsageRow, summarize
 from .voice import (
@@ -344,6 +345,12 @@ class ChatMessageIn(BaseModel):
     effort: Literal["low", "medium", "high"] = "medium"
     model: Literal[tuple(CLAUDE_PRICES)] | None = None  # type: ignore[valid-type]
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=sc.MAX_ATTACHMENTS)
+    timezone: str | None = Field(
+        None,
+        max_length=64,
+        pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+){0,2}$",
+        description="Zona IANA del navegador",
+    )
 
 
 class ProposalJobIn(BaseModel):
@@ -425,7 +432,27 @@ def create_app(
             async with app.state.sessions() as s:
                 return await resolve_elements(s, ids, settings.storage_dir, app.state.hf.upload)
 
-        app.state.router = Router(app.state.providers, app.state.prices, get_catalog, element_resolver)
+        async def draft_resolver(generation_id: object) -> dict | None:
+            # El borrador de Seedance 2.5 que pide un final: proveedor, id de tarea y lo que cobra el final.
+            if not isinstance(generation_id, str):
+                return None
+            async with app.state.sessions() as s:
+                job = await s.get(Job, generation_id)
+            if job is None or job.status != "completed" or not seedance_draft.is_draft(job.model):
+                return None
+            if not job.hf_request_id or job.provider not in seedance_draft.EXPIRES:
+                return None
+            hints = (job.plan[job.plan_index] if job.plan and job.plan_index < len(job.plan) else {}).get(
+                "hints"
+            ) or {}
+            return {
+                "provider": job.provider, "task_id": job.hf_request_id, "duration": job.input.get("duration") or 5,
+                "has_video": bool(job.input.get("video_urls")), "input_video_seconds": hints.get("input_video_seconds"),
+            }  # fmt: skip
+
+        app.state.router = Router(
+            app.state.providers, app.state.prices, get_catalog, element_resolver, draft_resolver
+        )
         app.state.worker.router = app.state.router
         app.state.tasks = set()
         app.state.chats_busy = set()
@@ -775,7 +802,24 @@ def create_app(
                     )
         if provider and provider not in provider_registry.PROVIDERS:
             raise ServiceError(422, "unknown_provider", f"Unknown provider {provider!r}")
+        if model["id"] == seedance_draft.FINAL_ID:
+            await check_draft(session, owner, arguments.get("draft_generation_id"))
         return await request.app.state.router.plan(model, arguments, hints, only=provider)
+
+    async def check_draft(session: AsyncSession, owner: ApiClient, generation_id: object) -> None:
+        """El final de un borrador: solo de un borrador propio, terminado y que la tienda aún guarda."""
+        job = await session.get(Job, generation_id) if isinstance(generation_id, str) else None
+        if job is None or not (owner.sees_all or job.owner_id == owner.id):
+            raise ServiceError(404, "draft_not_found", "Unknown draft generation")
+        if not seedance_draft.is_draft(job.model):
+            raise ServiceError(422, "not_a_draft", "That generation is not a Seedance 2.5 draft")
+        if job.status != "completed":
+            raise ServiceError(422, "draft_not_ready", "The draft has not finished yet")
+        expires = seedance_draft.EXPIRES.get(job.provider)
+        if expires is None or utcnow() - (job.finished_at or job.created_at) > expires - timedelta(
+            minutes=10
+        ):
+            raise ServiceError(422, "draft_expired", "The draft expired; make a new one")
 
     def check_reserve(
         reserve: float | None, approved: float | None, details=None, what: str = "This provider"
@@ -1983,7 +2027,7 @@ def create_app(
             job = await session.get(Job, p["job_id"])
             if job is None or job.status == p.get("reported"):
                 continue
-            line = f'Proposal "{p.get("title") or pid}" on {p["model"]}: {job.status}'
+            line = f'Proposal "{p.get("title") or pid}" on {p["model"]} (generation {job.id}): {job.status}'
             if job.status == "completed":
                 urls = [o.get("url") for o in job.outputs or [] if o.get("url")]
                 line += ". Outputs: " + ", ".join(urls)
@@ -2076,8 +2120,9 @@ def create_app(
                 )
         updates, proposals = await generation_updates(session, chat.proposals)
         model = body.model or chat.model
+        now, timezone = sc.studio_time(body.timezone)
         user_msg = {"role": "user", "content": sc.user_content(
-            body.text, body.mode, [a.model_dump() for a in body.attachments], updates)}  # fmt: skip
+            body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now)}  # fmt: skip
         history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
         chat_key, owner_id = chat.id, owner.id
@@ -2107,7 +2152,15 @@ def create_app(
             )
             toolbox = chat_toolbox(request, SimpleNamespace(id=owner_id, sees_all=owner.sees_all), catalog)
             try:
-                async for event in sc.run_turn(client, model, body.effort, history, toolbox, turn):
+                async for event in sc.run_turn(
+                    client,
+                    model,
+                    body.effort,
+                    history,
+                    toolbox,
+                    turn,
+                    body.timezone if timezone == body.timezone else None,
+                ):
                     yield sc.sse(event)
             except anthropic.APIStatusError as exc:
                 turn.error = f"Claude API error {exc.status_code}: {exc.message}"

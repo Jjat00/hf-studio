@@ -22,6 +22,7 @@ from .providers.routes import Route, routes_for, with_defaults
 from .space_assistant import assistant_quote, is_assistant
 from .space_audio import audio_quote, is_audio_node
 from .space_tools import ASSISTANT_PROVIDER, AUDIO_PROVIDER, TOOL_PROVIDER, is_tool
+from .store.seedance_draft import FINAL_ID as DRAFT_FINAL
 
 BALANCE_TTL = 60.0
 OUTDATED_PRICES = 3 * 24 * 3600  # una tabla sin poder actualizarse en 3 días ya no da precios exactos
@@ -101,12 +102,16 @@ class Plan:
 
 
 class Router:
-    def __init__(self, providers: dict[str, Provider], prices: PriceBook, catalog_getter, elements=None):
+    def __init__(
+        self, providers: dict[str, Provider], prices: PriceBook, catalog_getter, elements=None, drafts=None
+    ):
         self.providers = providers
         self.prices = prices
         self.catalog_getter = catalog_getter
         # `async (ids) -> {id: {name, description, image_urls}}`: elementos de HF Studio con URLs vigentes.
         self.elements = elements
+        # `async (generation_id) -> {provider, task_id, duration, ...} | None`: un borrador de Seedance 2.5.
+        self.drafts = drafts
         self._balances: dict[str, tuple[float, float | None, bool | None]] = {}
 
     @property
@@ -165,6 +170,18 @@ class Router:
             option = Option(AUDIO_PROVIDER, "ElevenLabs", model["id"], logical, est["usd"], est["kind"],
                             basis=est["basis"])  # fmt: skip
             return Plan(model["id"], [option], [], hints, forced=only is not None)
+        if model["id"] == DRAFT_FINAL:
+            # El final va al proveedor que hizo el borrador, con el id de tarea de ese proveedor.
+            draft = await self.drafts(arguments.get("draft_generation_id")) if self.drafts else None
+            if draft is None or (only and only != draft["provider"]):
+                reason = (
+                    "Not a completed Seedance 2.5 draft"
+                    if draft is None
+                    else "The draft was made on another provider"
+                )
+                return Plan(model["id"], [], [{"provider": only or "store", "title": "Seedance 2.5 Draft",
+                                               "model": model["id"], "reason": reason}], hints, forced=only is not None)  # fmt: skip
+            hints, only = {**hints, "draft": draft}, draft["provider"]
         ids = element_ids(arguments.get("elements"))
         elements = await self.elements(ids) if ids and self.elements else {}
         options: list[Option] = []
@@ -265,6 +282,8 @@ class Router:
         elements: dict,
     ) -> Option | None:
         filled, placeholders = fill_placeholders(model["input_schema"], arguments)
+        if hints.get("draft") and filled.get("draft_generation_id"):
+            filled = {**filled, "draft_generation_id": hints["draft"]}  # el traductor necesita el id de tarea
         if filled.get("elements"):
             # Elementos de HF Studio resueltos desde la base (nombre, descripción e imágenes), que el traductor
             # envía en línea. Un id de Higgsfield queda como texto.

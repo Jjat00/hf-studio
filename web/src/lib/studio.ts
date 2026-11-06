@@ -326,7 +326,8 @@ export const studio = {
     const res = await fetch(`${BASE}/v1/chats/${id}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(body),
+      // La zona del navegador: el agente sabe qué día y hora es para el usuario.
+      body: JSON.stringify({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || undefined, ...body }),
       signal,
     });
     if (!res.ok || !res.body) {
@@ -506,7 +507,8 @@ export type ChatQuestion = { id: string; question: string; options: { label: str
 export type ChatPart =
   | { type: "text"; text: string }
   | { type: "proposal"; proposal: ChatProposal }
-  | { type: "question"; question: ChatQuestion };
+  | { type: "question"; question: ChatQuestion }
+  | { type: "sources"; sources: { url: string; title: string }[] };
 export type ChatMessage = { role: "user"; text: string; attachments: string[] } | { role: "assistant"; parts: ChatPart[] };
 export type Chat = ChatSummary & { messages: ChatMessage[] };
 export type ChatMode = "ask" | "auto";

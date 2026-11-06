@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ApprovalActions, StatusPill } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
+import { FinalizeDraft } from "@/components/generations/finalize-draft";
 import { Lightbox } from "@/components/lightbox";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { costShort, modelLabel, outputSrc, studio, StudioError, type ChatProposal, type Estimate } from "@/lib/studio";
@@ -54,6 +55,7 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [viewing, setViewing] = useState<number | null>(null);
+  const [finalId, setFinalId] = useState<string | null>(null);
   const key = useRef<string>("");
 
   const prompt = typeof proposal.input.prompt === "string" ? proposal.input.prompt : "";
@@ -200,6 +202,12 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
         )}
         {viewing !== null && viewable[viewing] && <Lightbox items={viewable} start={viewing} onClose={() => setViewing(null)} />}
         {job?.status === "awaiting_approval" && <ApprovalActions g={job} />}
+        {job && !finalId && <FinalizeDraft g={job} onStarted={(j) => setFinalId(j.id)} />}
+        {finalId && (
+          <Link href={`/history/${finalId}`} className="flex items-center gap-1.5 text-sm font-medium text-lime hover:underline">
+            <Sparkles className="size-4" /> {t.generation.draft.started}
+          </Link>
+        )}
         {job?.terminal && job.status !== "completed" && job.error && <p className="text-sm text-danger">{job.error}</p>}
         {error && <p className="text-sm text-warning">{error}</p>}
       </div>

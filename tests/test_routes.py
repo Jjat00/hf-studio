@@ -27,6 +27,10 @@ EXPECTED_UNSUPPORTED = {
     ("apimart", "kling-video/o3/video-reference"),
     # GPT Image 2: APIMart convierte el formato «auto» en 1:1; sin formato elegido, la edición va a KIE
     ("apimart", "openai/gpt-image-2/edit"),
+    # El final de un borrador necesita el borrador resuelto por el router (proveedor e id de tarea): solo con el id
+    # de la generación, el traductor lo rechaza (ver tests/test_store_seedance_draft.py).
+    ("apimart", "bytedance/seedance-2.5-draft/final"),
+    ("kie", "bytedance/seedance-2.5-draft/final"),
 }
 ROUTED = [
     (name, mid, route.model)

@@ -46,6 +46,10 @@ owner's credits.
 - Kling 3.0 elements: `list_elements` / `create_element` (2–4 JPG/PNG images). Put their `el_…` ids in the model's
   `elements` field and cite each as `@name` in the prompt; they run on APIMart and KIE only (KIE also needs
   `image_url`).
+- Seedance 2.5 Draft (`bytedance/seedance-2.5-draft/…`, APIMart and KIE only): a cheap 480p draft of a Seedance 2.5
+  video. To get the same scene at 1080p, generate `bytedance/seedance-2.5-draft/final` with
+  `draft_generation_id` = the draft's generation id; it runs on the store that made the draft (within 3 days on
+  APIMart, 7 on KIE) and its price is approximate.
 - Genjutsu Restyle (`higgsfield/genjutsu/restyle/v1.0`) restyles a video and keeps its motion and audio: pick the
   style with `list_styles` and pass its id in `preset_id` (styles change without notice). Prefer Higgsfield's own
   functions over imitating them: AI Influencer (`higgsfield/ai-influencer`) takes `selection` keys from

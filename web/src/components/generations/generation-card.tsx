@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { MediaViewer } from "@/components/generations/media-viewer";
 import { ReuseMenu } from "@/components/generations/reuse-menu";
+import { FinalizeDraft } from "@/components/generations/finalize-draft";
 import { useI18n } from "@/components/i18n-provider";
 import type { Locale } from "@/lib/i18n";
 import { workflowLabel } from "@/lib/i18n/workflow";
@@ -238,6 +239,7 @@ export function GenerationCard({
         </IconButton>
       )}
       <ReuseMenu g={g} className={ICON_BUTTON} />
+      <FinalizeDraft g={g} variant="icon" />
       {onReuse && (
         <IconButton label={t.generation.reuse} onClick={() => onReuse(g)}>
           <RotateCcw className="size-4" />

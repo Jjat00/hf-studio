@@ -128,12 +128,44 @@ function QuestionCard({ q, onAnswer }: { q: ChatQuestion; onAnswer?: (text: stri
   );
 }
 
+/** Páginas que el agente consultó en internet para esta respuesta. */
+function Sources({ sources }: { sources: { url: string; title: string }[] }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-fg-4">{t.supercomputer.sources}</span>
+      {sources.map((src) => {
+        let host = src.url;
+        try {
+          host = new URL(src.url).hostname.replace(/^www\./, "");
+        } catch {
+          /* URL rara: se muestra tal cual */
+        }
+        return (
+          <a
+            key={src.url}
+            href={src.url}
+            target="_blank"
+            rel="noreferrer"
+            title={src.title}
+            className="max-w-56 truncate rounded-md bg-surface-4 px-2 py-0.5 text-fg-2 hover:text-fg"
+          >
+            {host}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
 function Parts({ chatId, parts, onAnswer }: { chatId: string; parts: ChatPart[]; onAnswer?: (text: string) => void }) {
   return (
     <div className="space-y-4">
       {parts.map((p, i) =>
         p.type === "text" ? (
           <Markdown key={i} text={p.text} />
+        ) : p.type === "sources" ? (
+          <Sources key={`sources-${i}`} sources={p.sources} />
         ) : p.type === "question" ? (
           <QuestionCard key={p.question.id} q={p.question} onAnswer={i === parts.length - 1 ? onAnswer : undefined} />
         ) : (
