@@ -89,6 +89,27 @@ characters, locations and props (`list_elements`); with Kling 3.0 pass their ids
 @name (Kling needs 2+ images); with other models that take image references put their `image_urls` in the \
 reference field and describe them in the prompt.
 
+# Director
+Inside a project you are its AI Director and run it like a film production. The index of the project's \
+documents arrives in <studio_project_documents> and a summary of its shot list in <studio_shot_list>. The usual \
+order is: treatment (vision, tone, look) → script breakdown → continuity bible and elements → look and color \
+script → shot list and a cheap storyboard (one image per shot) → generate the hardest shot of each scene first → \
+review the dailies → chain continuous shots → assemble. Each step has a skill (/tratamiento, /desglose-guion, \
+/biblia-continuidad, /look-y-color, /lista-de-tomas, /plan-de-cobertura, /puesta-en-escena, /revision-dailies, \
+/spot-publicitario, /trailer-teaser, /videoclip, /entregables-plataforma); the parameter map of Cinema Studio 4.0 \
+is in `read_skill_file` name "lista-de-tomas", path "references/cinema-studio.md".
+- Save the work in the project, not only in the chat: written deliverables with `save_document` (read one \
+before changing it and pass its base_version), lasting decisions with `update_project_brief` (one section), \
+shots with `upsert_shots`. Then keep the chat message short and point to them.
+- Proposals for a planned shot carry its `shot_id` (per item in `items`; `shot_role` "board" for its storyboard \
+frame): the take is linked to the shot when it is launched. Price a whole plan with `estimate_shot_list` before \
+producing.
+- When takes finish (<studio_update>) or the user asks how something turned out, look at it with \
+`review_generation` before judging, then record the verdict, notes, status and selected take with `update_shot`.
+- `chain_shot` gives the last (or first) frame of a finished video as an image URL for the next shot; \
+`create_element_from_generation` turns approved outputs into an element after the user confirms its card.
+- Project tools need a project: if a tool says the chat has none, ask the user to open or pick one.
+
 # Skills
 The studio has skills: playbooks with instructions for a kind of task. When the user calls one with /name, its \
 instructions arrive in their message inside <skill name="…"> tags: follow them for this request (they take \
@@ -223,6 +244,15 @@ TOOLS: list[dict] = [
                                 "description": "Short label, e.g. 'Callejón grafiti'",
                             },
                             "input": {"type": "object", "description": "Full arguments for this piece"},
+                            "shot_id": {
+                                "type": "string",
+                                "description": "Shot of the project's shot list this piece belongs to",
+                            },
+                            "shot_role": {
+                                "type": "string",
+                                "enum": ["take", "board"],
+                                "description": "take (default): a take of the shot; board: its storyboard frame",
+                            },
                         },
                         "required": ["title", "input"],
                     },
@@ -230,6 +260,18 @@ TOOLS: list[dict] = [
                 "title": {
                     "type": "string",
                     "description": "Short title for the card, in the user's language",
+                },
+                "shot_id": {
+                    "type": "string",
+                    "description": (
+                        "Shot of the project's shot list (from upsert_shots) this generation is for: when the user "
+                        "launches it, it is linked to the shot as a take and the shot moves to generating"
+                    ),
+                },
+                "shot_role": {
+                    "type": "string",
+                    "enum": ["take", "board"],
+                    "description": "take (default): a take of the shot; board: its storyboard frame",
                 },
                 "variations": {
                     "type": "integer",
@@ -337,7 +379,268 @@ TOOLS.append(
     }
 )
 
+_SHOT_PROPS: dict = {
+    "shot_id": {"type": "string", "description": "Id of an existing shot to update"},
+    "scene": {"type": "string", "description": "Scene, e.g. '2' or '2B'"},
+    "number": {"type": "string", "description": "Shot number, e.g. '2.3'"},
+    "order": {"type": "integer", "description": "Position inside the scene"},
+    "purpose": {"type": "string", "description": "What the shot tells, in one sentence"},
+    "shot_size": {
+        "type": "string",
+        "enum": ["EWS", "WS", "MS", "MCU", "CU", "ECU", "OTS", "insert", "cutaway", "POV", "two-shot"],
+    },
+    "duration_s": {"type": "number"},
+    "screen_direction": {"type": "string", "description": "Who looks or moves left/right in frame"},
+    "element_ids": {"type": "array", "items": {"type": "string"}, "description": "Elements in frame (el_…)"},
+    "model_id": {"type": "string", "description": "Catalog model that will generate it"},
+    "params": {"type": "object", "description": "Model fields except the prompt (genre, camera_movement, …)"},
+    "prompt": {"type": "string"},
+    "notes": {"type": "string"},
+}
+_DOC_KINDS = [
+    "treatment",
+    "breakdown",
+    "bible",
+    "lookbook",
+    "color_script",
+    "blocking",
+    "script",
+    "notes",
+    "other",
+]
+_STATUSES = ["planned", "boarded", "proposed", "generating", "review", "approved", "retake", "cut"]
+
+# Herramientas del director: todas gratis; las de proyecto necesitan que el chat tenga uno.
+DIRECTOR_TOOLS: list[dict] = [
+    {
+        "name": "upsert_shots",
+        "description": (
+            "Create or update shots of the project's shot list (the user sees it as a table and a storyboard). "
+            "Without shot_id a shot with the same scene and number is updated, otherwise a new one is created. "
+            "Returns the shots with their ids. Free. Needs a project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "shots": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 60,
+                    "items": {"type": "object", "properties": _SHOT_PROPS},
+                },
+            },
+            "required": ["shots"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_shot_list",
+        "description": (
+            "Read the project's shot list in order: each shot with its plan, status, storyboard frame, takes "
+            "(generation ids, status and output URL), selected take and review notes. Free. Needs a project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"scene": {"type": "string"}, "status": {"type": "string", "enum": _STATUSES}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "update_shot",
+        "description": (
+            "Change one shot: status, verdict and notes after a review, the selected (circle) take, its "
+            "storyboard frame or its plan (prompt, params, model_id). Free. Needs a project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                **_SHOT_PROPS,
+                "status": {"type": "string", "enum": _STATUSES},
+                "verdict": {
+                    "type": "string",
+                    "description": "Approved / approved with a note / retake, and why",
+                },
+                "selected_job_id": {
+                    "type": "string",
+                    "description": "The good take (one of its generations)",
+                },
+                "board_job_id": {"type": "string", "description": "Generation used as its storyboard frame"},
+            },
+            "required": ["shot_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "review_generation",
+        "description": (
+            "Look at a finished generation like dailies: returns the image, or for a video N evenly spaced frames "
+            "(first and last included) with their timestamps, plus the prompt and settings used. compare_with adds "
+            "the images of other generations or elements (el_…) to check continuity. Free (costs only the image "
+            "tokens of this chat)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string"},
+                "frames": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8,
+                    "description": "Frames of a video (4)",
+                },
+                "compare_with": {
+                    "type": "array",
+                    "maxItems": 4,
+                    "items": {"type": "string"},
+                    "description": "Generation ids or element ids",
+                },
+            },
+            "required": ["job_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "save_document",
+        "description": (
+            "Save a living document of the project in Markdown (treatment, breakdown, bible, lookbook, color "
+            "script, blocking, script, notes). With document_id it replaces that document; pass base_version (the "
+            "version you read) so you never overwrite the user's edits. Free. Needs a project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": _DOC_KINDS},
+                "title": {"type": "string", "maxLength": 120},
+                "markdown": {"type": "string", "maxLength": 60000},
+                "document_id": {"type": "string"},
+                "base_version": {"type": "integer"},
+            },
+            "required": ["kind", "title", "markdown"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "read_document",
+        "description": "Read one document of the project (its Markdown and version). Free. Needs a project.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"document_id": {"type": "string"}},
+            "required": ["document_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "list_documents",
+        "description": "List the project's documents (id, kind, title, version, first line). Free. Needs a project.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"kind": {"type": "string", "enum": _DOC_KINDS}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "update_project_brief",
+        "description": (
+            "Replace or append to ONE section (## Contexto, Narrativa, Visuales, Producción or Estado) of the "
+            "project brief, the memory every chat of the project reads. Free. Needs a project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "section": {
+                    "type": "string",
+                    "enum": ["Contexto", "Narrativa", "Visuales", "Producción", "Estado"],
+                },
+                "markdown": {"type": "string", "maxLength": 8000},
+                "mode": {"type": "string", "enum": ["replace", "append"]},
+            },
+            "required": ["section", "markdown"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "chain_shot",
+        "description": (
+            "Take the first or last frame of a finished video and return a public image URL to use as the start "
+            "frame or reference of the next shot (continuous action). With to_shot_id it is saved in that shot. "
+            "Free."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_job_id": {"type": "string"},
+                "which": {"type": "string", "enum": ["last", "first"]},
+                "to_shot_id": {"type": "string"},
+            },
+            "required": ["from_job_id"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "estimate_shot_list",
+        "description": (
+            "Price the shot list (or a scene or some shots) on the cheapest provider: cost per shot, total, total "
+            "with a retake margin (takes_per_shot, default 1.5) and what the project already spent. Shots need "
+            "model_id and prompt. Free. Needs a project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "shot_ids": {"type": "array", "items": {"type": "string"}},
+                "scene": {"type": "string"},
+                "takes_per_shot": {"type": "number", "minimum": 1, "maximum": 5},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "create_element_from_generation",
+        "description": (
+            "Turn approved outputs (a character sheet, a location frame, a product shot) into a saved element "
+            "(@name). Elements are shared by the whole studio, so this shows the user a confirmation card and the "
+            "element exists only after they click it. Sources: 1-4 images (job_id, output_index, and frame "
+            "first/last for a video); Kling 3.0 needs 2+."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "maxLength": 32, "description": "Lowercase name cited as @name"},
+                "category": {"type": "string", "enum": ["character", "location", "prop", "other"]},
+                "description": {"type": "string", "maxLength": 500},
+                "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "job_id": {"type": "string"},
+                            "output_index": {"type": "integer"},
+                            "frame": {"type": "string", "enum": ["first", "last"]},
+                        },
+                        "required": ["job_id"],
+                    },
+                },
+            },
+            "required": ["name", "category", "description", "sources"],
+            "additionalProperties": False,
+        },
+    },
+]
+TOOLS += DIRECTOR_TOOLS
+
 TOOL_LABELS = {
+    "upsert_shots": "shots",
+    "get_shot_list": "shots",
+    "update_shot": "shots",
+    "estimate_shot_list": "estimating",
+    "review_generation": "reviewing",
+    "save_document": "documents",
+    "read_document": "documents",
+    "list_documents": "documents",
+    "update_project_brief": "brief",
+    "chain_shot": "frames",
+    "create_element_from_generation": "element",
     "read_skill_file": "skills",
     "list_skills": "skills",
     "use_skill": "skills",
@@ -363,6 +666,9 @@ class Toolbox:
     list_skills: Callable[[], Awaitable[dict]] | None = None
     use_skill: Callable[[str], Awaitable[dict]] | None = None
     read_skill_file: Callable[[str, str], Awaitable[dict]] | None = None
+    # Herramientas del director por nombre: reciben la entrada cruda y devuelven (resultado, propuesta o None). Un
+    # resultado con `_blocks` lleva además bloques de imagen para Claude.
+    director: dict[str, Callable[[dict], Awaitable[tuple[dict, dict | None]]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -557,10 +863,7 @@ async def run_turn(
                 proposal = {**proposal, "tool_use_id": use.id}
                 turn.proposals.append(proposal)
                 yield {"type": "proposal", "proposal": proposal}
-            results.append({
-                "type": "tool_result", "tool_use_id": use.id, "content": json.dumps(result, ensure_ascii=False),
-                **({"is_error": True} if "error" in result or "errors" in result else {}),
-            })  # fmt: skip
+            results.append(tool_result(use.id, result))
         # La llamada y sus resultados entran juntos: una conversación guardada nunca deja un tool_use sin
         # respuesta (la API rechazaría la siguiente vuelta).
         turn.messages.append({"role": "assistant", "content": content})
@@ -568,6 +871,17 @@ async def run_turn(
         if asked:  # la pregunta queda en pantalla: la vuelta termina hasta que el usuario responda
             return
     turn.error = "Stopped after too many steps; send another message to continue"
+
+
+def tool_result(tool_use_id: str, result: dict) -> dict:
+    """Resultado de una herramienta para Claude: JSON y, si trae `_blocks`, también sus imágenes."""
+    blocks = result.pop("_blocks", None) if isinstance(result, dict) else None
+    text = json.dumps(result, ensure_ascii=False)
+    content: str | list = [{"type": "text", "text": text}, *blocks] if blocks else text
+    return {
+        "type": "tool_result", "tool_use_id": tool_use_id, "content": content,
+        **({"is_error": True} if "error" in result or "errors" in result else {}),
+    }  # fmt: skip
 
 
 QUESTION_NOTE = "Shown to the user with clickable options. Stop now; their answer is their next message."
@@ -631,13 +945,17 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
                 if not isinstance(model_id, str):
                     return {"error": "`model_id` is required"}, None
                 clean = [{"title": str(i.get("title") or "")[:80], "input": i["input"]} for i in items]
-                return await tools.propose(model_id, None, str(title or "")[:120], 1, clean)
+                links = [shot_link(i) for i in items]
+                extra = {"links": links} if any(links) else {}
+                return await tools.propose(model_id, None, str(title or "")[:120], 1, clean, **extra)
             if not isinstance(model_id, str) or not isinstance(arguments, dict):
                 return {"error": "`model_id` and `input` (or `items`) are required"}, None
             variations = args.get("variations", 1)
             if not isinstance(variations, int) or not 1 <= variations <= MAX_VARIATIONS:
                 return {"error": f"`variations` must be an integer from 1 to {MAX_VARIATIONS}"}, None
-            return await tools.propose(model_id, arguments, str(title or "")[:120], variations)
+            link = shot_link(args)
+            extra = {"links": [link] * variations} if link else {}
+            return await tools.propose(model_id, arguments, str(title or "")[:120], variations, **extra)
         if name == "list_skills":
             return (await tools.list_skills() if tools.list_skills else {"skills": []}), None
         if name == "use_skill":
@@ -653,9 +971,19 @@ async def call_tool(tools: Toolbox, name: str, args: Any) -> tuple[dict, dict | 
             if tools.list_elements is None:
                 return {"elements": []}, None
             return await tools.list_elements(), None
+        if name in tools.director:
+            return await tools.director[name](args)
     except Exception as exc:  # noqa: BLE001 - el agente ve el error y decide
         return {"error": str(exc)[:500]}, None
     return {"error": f"Unknown tool {name}"}, None
+
+
+def shot_link(args: dict) -> dict | None:
+    """Toma de la lista a la que va una propuesta (o un item): `{shot_id, role}` o None."""
+    shot_id = args.get("shot_id")
+    if not isinstance(shot_id, str) or not shot_id.strip():
+        return None
+    return {"shot_id": shot_id.strip(), "role": "board" if args.get("shot_role") == "board" else "take"}
 
 
 def sse(event: dict) -> bytes:
@@ -695,7 +1023,9 @@ def visible_messages(messages: list[dict], proposals: dict[str, dict]) -> list[d
                 elif b["text"].strip():
                     parts.append({"type": "text", "text": b["text"]})
             elif (
-                b.get("type") == "tool_use" and b.get("name") == "propose_generation" and b["id"] in proposals
+                b.get("type") == "tool_use"
+                and b.get("name") in ("propose_generation", "create_element_from_generation")
+                and b["id"] in proposals
             ):
                 parts.append({"type": "proposal", "proposal": proposals[b["id"]]})
             elif b.get("type") == "tool_use" and b.get("name") == "ask_user":

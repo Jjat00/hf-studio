@@ -4,10 +4,12 @@ import clsx from "clsx";
 import {
   ArrowLeft,
   AtSign,
+  BookOpen,
   Check,
   ChevronDown,
   Clapperboard,
   FileText,
+  Film,
   Folder,
   FolderOpen,
   LayoutGrid,
@@ -35,10 +37,12 @@ import { studio } from "@/lib/studio";
 import type { Generation, Project } from "@/lib/types";
 import { Composer, type ComposerHandle } from "./composer";
 import { DirectorPanel } from "./director";
+import { ProjectDocuments } from "./documents";
+import { ShotList } from "./shot-list";
 import { CinemaShell, Dropdown, SideItem } from "./shell";
 
-type View = "assets" | "brief" | "settings" | "elements";
-const VIEWS: View[] = ["assets", "brief", "settings", "elements"];
+type View = "assets" | "brief" | "settings" | "elements" | "shots" | "documents";
+const VIEWS: View[] = ["assets", "brief", "settings", "elements", "shots", "documents"];
 type Filters = { type: "all" | "image" | "video"; model: string; status: "all" | "done" | "running" | "failed"; hideFailed: boolean; liked: boolean };
 const NO_FILTERS: Filters = { type: "all", model: "", status: "all", hideFailed: false, liked: false };
 const FAILED = new Set(["failed", "nsfw", "canceled", "timed_out"]);
@@ -64,6 +68,19 @@ export function CinemaProject({ id }: { id: string }) {
   const composer = useRef<ComposerHandle>(null);
   const upload = useRef<HTMLInputElement>(null);
   const { brief, init, change, retry } = useBriefDraft(id, setProject);
+  // Sube tras cada respuesta de AI Director: la lista de tomas, los documentos y el brief se releen.
+  const [revision, setRevision] = useState(0);
+  const [shotMode, setShotMode] = useState<"table" | "storyboard">("table");
+  const briefSaved = brief?.state === "saved";
+
+  useEffect(() => {
+    if (!revision || !briefSaved) return;
+    // El agente pudo cambiar una sección del brief: se relee si el usuario no tiene cambios sin guardar.
+    studio.project(id).then((pr) => {
+      setProject(pr);
+      init(pr.brief);
+    }, () => undefined);
+  }, [revision, id, init, briefSaved]);
 
   useEffect(() => {
     studio.project(id).then(
@@ -118,7 +135,19 @@ export function CinemaProject({ id }: { id: string }) {
     }
   }
 
-  const title = view === "brief" ? cs.projectBrief : view === "settings" ? cs.settings : view === "elements" ? cs.elements : project.name;
+  const pr = t.production;
+  const title =
+    view === "brief"
+      ? cs.projectBrief
+      : view === "settings"
+        ? cs.settings
+        : view === "elements"
+          ? cs.elements
+          : view === "shots"
+            ? pr.shotList
+            : view === "documents"
+              ? pr.documents
+              : project.name;
   const realFolder = folder && folder !== "none" ? folder : null;
 
   return (
@@ -279,6 +308,8 @@ export function CinemaProject({ id }: { id: string }) {
                     />
                   </div>
                 )}
+                {view === "shots" && <ShotList projectId={project.id} revision={revision} mode={shotMode} onMode={setShotMode} />}
+                {view === "documents" && <ProjectDocuments projectId={project.id} revision={revision} />}
                 {view === "elements" && (
                   <div className="-mx-4 -my-6 md:-mx-10">
                     <ElementLibrary />
@@ -290,7 +321,7 @@ export function CinemaProject({ id }: { id: string }) {
 
           {director && (
             <aside className="fixed inset-0 z-50 flex flex-col border-l border-line lg:static lg:z-auto lg:w-[420px] lg:shrink-0">
-              <DirectorPanel projectId={project.id} onClose={() => setDirector(false)} />
+              <DirectorPanel projectId={project.id} onClose={() => setDirector(false)} onActivity={() => setRevision((n) => n + 1)} />
             </aside>
           )}
         </div>
@@ -457,6 +488,8 @@ function ProjectSidebar({
         <SideItem icon={<FileText className="size-4" />} label={cs.projectBrief} active={view === "brief"} onClick={() => onView("brief")} />
         <SideItem icon={<Settings className="size-4" />} label={cs.settings} active={view === "settings"} onClick={() => onView("settings")} />
         <SideItem icon={<AtSign className="size-4" />} label={cs.elements} active={view === "elements"} onClick={() => onView("elements")} />
+        <SideItem icon={<Film className="size-4" />} label={t.production.shotList} active={view === "shots"} onClick={() => onView("shots")} />
+        <SideItem icon={<BookOpen className="size-4" />} label={t.production.documents} active={view === "documents"} onClick={() => onView("documents")} />
         <SideItem
           icon={<Sparkles className="size-4" />}
           label={cs.tools}

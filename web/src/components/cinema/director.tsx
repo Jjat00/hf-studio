@@ -31,7 +31,7 @@ function writeChat(projectId: string, id: string | null) {
  * AI Director: el agente de Supercomputer en un panel al lado del proyecto. Sus chats van a este proyecto (lee su
  * brief) y se recuerda el último abierto. «Generar sin preguntar» usa la generación automática con tope en USD.
  */
-export function DirectorPanel({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+export function DirectorPanel({ projectId, onClose, onActivity }: { projectId: string; onClose: () => void; onActivity?: () => void }) {
   const { t } = useI18n();
   const d = t.supercomputer.director;
   const [chatId, setChatId] = useState<string | null>(() => readChat(projectId));
@@ -131,6 +131,9 @@ export function DirectorPanel({ projectId, onClose }: { projectId: string; onClo
         onChatId={open}
         placeholder={d.placeholder}
         suggestions={d.suggestions}
+        quickActions={d.skills.map((k) => ({ label: k.label, text: `/${k.slug} ` }))}
+        quickActionsTitle={d.skillsTitle}
+        onActivity={onActivity}
         greeting={
           <div className="flex items-start gap-3">
             <span className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime text-ink">
