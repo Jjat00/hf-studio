@@ -58,14 +58,28 @@ function useDocDraft(onSaved: (doc: ProjectDoc) => void, untitled: string) {
     [onSaved, untitled],
   );
 
+  /**
+   * Abre un documento leído del servidor. Si ese documento tiene un borrador sin guardar o un guardado en vuelo, se
+   * conserva lo local (una lectura anterior al guardado no puede revertirlo); también se ignora una lectura más vieja
+   * que la versión ya conocida. `force` (recargar tras un conflicto) descarta lo local y toma lo leído.
+   */
   const init = useCallback(
-    (d: ProjectDoc) => {
+    (d: ProjectDoc, force = false) => {
       const prev = current.current;
       if (prev && prev !== d.id) void flush(prev); // lo pendiente del anterior se envía, no se pierde
+      current.current = d.id;
+      const known = server.current.get(d.id);
+      const local = latest.current.get(d.id);
+      const busy = inFlight.current.has(d.id) || (!!local && !!known && !same(local, known.draft));
+      if (!force && known && (busy || d.version < known.version)) {
+        setDoc((x) => (x?.id === d.id && x.version >= d.version ? x : { ...d, version: known.version }));
+        setDraft(local ?? known.draft);
+        setState(inFlight.current.has(d.id) ? "saving" : busy ? "unsaved" : "saved");
+        return;
+      }
       const value = { title: d.title, kind: d.kind, markdown: d.markdown };
       server.current.set(d.id, { version: d.version, draft: value });
       latest.current.set(d.id, value);
-      current.current = d.id;
       setDoc(d);
       setDraft(value);
       setState("saved");
@@ -114,15 +128,16 @@ export function ProjectDocuments({ projectId, revision }: { projectId: string; r
   const onSaved = useCallback((d: ProjectDoc) => setDocs((list) => list?.map((x) => (x.id === d.id ? d : x)) ?? list), []);
   const { doc, draft, state, init, change, retry, dirty } = useDocDraft(onSaved, p.untitled);
 
-  // Solo vale la respuesta del último documento pedido (una lectura lenta de otro no lo sustituye).
-  const requested = useRef<string | null>(null);
+  // Solo vale la respuesta de la última lectura pedida: cada una lleva su número (volver a A no revive lecturas viejas
+  // de A). Crear un documento también invalida las lecturas en curso.
+  const reads = useRef(0);
   const open = useCallback(
-    (id: string) => {
+    (id: string, force = false) => {
       setSelected(id);
-      requested.current = id;
+      const ticket = ++reads.current;
       studio.document(id).then(
-        (d) => requested.current === id && init(d),
-        (e) => requested.current === id && setError(e instanceof Error ? e.message : String(e)),
+        (d) => reads.current === ticket && init(d, force),
+        (e) => reads.current === ticket && setError(e instanceof Error ? e.message : String(e)),
       );
     },
     [init],
@@ -150,6 +165,7 @@ export function ProjectDocuments({ projectId, revision }: { projectId: string; r
     try {
       const d = await studio.createDocument(projectId, { kind: "notes", title: p.untitled, markdown: "" });
       setDocs((list) => [d, ...(list ?? [])]);
+      reads.current += 1;
       init(d);
       setSelected(d.id);
       setEditing(true);
@@ -248,7 +264,7 @@ export function ProjectDocuments({ projectId, revision }: { projectId: string; r
               {state === "conflict" ? (
                 <>
                   <span className="text-danger">{p.conflict}</span>
-                  <button type="button" onClick={() => open(current.id)} className="text-fg-2 underline hover:text-fg">
+                  <button type="button" onClick={() => open(current.id, true)} className="text-fg-2 underline hover:text-fg">
                     {p.reload}
                   </button>
                 </>
