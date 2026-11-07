@@ -539,7 +539,7 @@ export type ChatPart =
   | { type: "proposal"; proposal: ChatProposal }
   | { type: "question"; question: ChatQuestion }
   | { type: "sources"; sources: { url: string; title: string }[] };
-export type ChatMessage = { role: "user"; text: string; attachments: string[] } | { role: "assistant"; parts: ChatPart[] };
+export type ChatMessage = { role: "user"; text: string; attachments: string[]; documents?: string[] } | { role: "assistant"; parts: ChatPart[] };
 export type Chat = ChatSummary & { messages: ChatMessage[] };
 export type ChatMode = "ask" | "auto";
 export type ChatMessageBody = {
@@ -548,6 +548,8 @@ export type ChatMessageBody = {
   model?: string;
   effort?: "low" | "medium" | "high";
   attachments?: { url: string; content_type?: string | null; filename?: string | null }[];
+  /** Archivos de texto (.md, .txt) que viajan con el mensaje. */
+  documents?: { name: string; content: string }[];
 };
 export type ChatEvent =
   | { type: "text"; text: string }

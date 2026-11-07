@@ -347,6 +347,11 @@ class ChatIn(BaseModel):
     model: Literal[tuple(CLAUDE_PRICES)] = Field(DEFAULT_CLAUDE, description="Modelo de Claude del chat")  # type: ignore[valid-type]
 
 
+class ChatDocument(BaseModel):
+    name: str = Field(min_length=1, max_length=120, description="Nombre del archivo, p. ej. brief.md")
+    content: str = Field(max_length=sc.MAX_DOCUMENT_CHARS, description="Texto del archivo (.md, .txt)")
+
+
 class ChatAttachment(BaseModel):
     url: str = Field(
         max_length=2000, description="URL de una subida propia (/v1/uploads) o de una salida propia"
@@ -361,6 +366,7 @@ class ChatMessageIn(BaseModel):
     effort: Literal["low", "medium", "high"] = "medium"
     model: Literal[tuple(CLAUDE_PRICES)] | None = None  # type: ignore[valid-type]
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=sc.MAX_ATTACHMENTS)
+    documents: list[ChatDocument] = Field(default_factory=list, max_length=sc.MAX_DOCUMENTS)
     timezone: str | None = Field(
         None,
         max_length=64,
@@ -2304,7 +2310,8 @@ def create_app(
                   for r in await session.scalars(select(Skill).where(Skill.slug.in_(called)))}  # fmt: skip
         user_msg = {"role": "user", "content": sc.user_content(
             body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now,
-            [(slug, *bodies[slug]) for slug in called if slug in bodies])}  # fmt: skip
+            [(slug, *bodies[slug]) for slug in called if slug in bodies],
+            [d.model_dump() for d in body.documents])}  # fmt: skip
         history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
         chat_key, owner_id = chat.id, owner.id

@@ -433,3 +433,20 @@ async def test_several_different_pieces_are_one_proposal(env):
     await send(http, chat["id"], "otra")
     result = json.loads(claude.requests[-1]["messages"][-1]["content"][0]["content"])
     assert "item 3" in result["errors"]
+
+
+async def test_text_documents_go_with_the_message(env):
+    _, http, claude = env
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(
+        http, chat["id"], "usa este brief", documents=[{"name": "brief.md", "content": "# Brief\nUn zorro."}]
+    )
+    blocks = [b["text"] for b in claude.requests[0]["messages"][0]["content"] if b["type"] == "text"]
+    assert '<document name="brief.md">\n# Brief\nUn zorro.\n</document>' in blocks
+    assert blocks[-1] == "usa este brief"
+    shown = events[-1]["chat"]["messages"][0]
+    assert shown["text"] == "usa este brief" and shown["documents"] == ["brief.md"]
+    big = await http.post(f"/v1/chats/{chat['id']}/messages", json={
+        "text": "x", "documents": [{"name": "a.md", "content": "a" * 100_001}],
+    })  # fmt: skip
+    assert big.status_code == 422

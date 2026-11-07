@@ -413,6 +413,8 @@ def studio_time(timezone: str | None) -> tuple[str, str]:
 
 
 MAX_VARIATIONS = 8
+MAX_DOCUMENTS = 3
+MAX_DOCUMENT_CHARS = 100_000
 
 
 def variation_inputs(schema: dict, arguments: dict, count: int) -> list[dict]:
@@ -439,6 +441,7 @@ def user_content(
     updates: list[str],
     now: str | None = None,
     skills: list[tuple[str, str, list[str]]] | None = None,
+    documents: list[dict] | None = None,
 ) -> list[dict]:
     """Bloques del mensaje del usuario: modo, hora actual, novedades de sus generaciones, adjuntos (las imágenes
     también como imagen, para que Claude las vea) y el texto."""
@@ -457,6 +460,11 @@ def user_content(
         )
     for slug, body, files in skills or []:  # las que el usuario llamó con /nombre
         blocks.append({"type": "text", "text": skill_block(slug, body, files)})
+    for doc in (documents or [])[:MAX_DOCUMENTS]:  # archivos de texto que el usuario adjuntó (.md, .txt)
+        name = str(doc.get("name") or "document").replace('"', "'")[:120]
+        blocks.append(
+            {"type": "text", "text": f'<document name="{name}">\n{doc.get("content", "")}\n</document>'}
+        )
     blocks.append({"type": "text", "text": text})
     return blocks
 
@@ -651,7 +659,11 @@ def visible_messages(messages: list[dict], proposals: dict[str, dict]) -> list[d
             attachments = [
                 t.split(": ", 1)[1] for t in texts[1:-1] if t.startswith("Attached ") and ": " in t
             ]  # fmt: skip
-            out.append({"role": "user", "text": texts[-1] if texts else "", "attachments": attachments})
+            documents = [t.split('"', 2)[1] for t in texts[1:-1] if t.startswith('<document name="')]
+            item = {"role": "user", "text": texts[-1] if texts else "", "attachments": attachments}
+            if documents:
+                item["documents"] = documents
+            out.append(item)
             continue
         parts = []
         for b in content:

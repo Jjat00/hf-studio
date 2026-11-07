@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowUp, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, Wand2, X } from "lucide-react";
+import { ArrowUp, FileText, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, Wand2, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -11,6 +11,7 @@ import { CreationsPicker } from "@/components/studio/creations-picker";
 import {
   formatUsd,
   studio,
+  StudioError,
   type Chat,
   type ChatEvent,
   type ChatMessage,
@@ -208,6 +209,15 @@ function UserBubble({ m }: { m: Extract<ChatMessage, { role: "user" }> }) {
         </div>
       )}
       {open !== null && <Lightbox items={items} start={open} onClose={() => setOpen(null)} />}
+      {m.documents && m.documents.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {m.documents.map((d) => (
+            <span key={d} className="flex items-center gap-1.5 rounded-lg bg-surface-3 px-2 py-1 text-xs text-fg-2">
+              <FileText className="size-3.5 text-fg-3" /> {d}
+            </span>
+          ))}
+        </div>
+      )}
       <p className="max-w-[85%] rounded-2xl rounded-br-md bg-surface-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-fg">{m.text}</p>
     </div>
   );
@@ -242,6 +252,8 @@ export function Supercomputer() {
   const file = useRef<HTMLInputElement>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [documents, setDocuments] = useState<{ name: string; content: string }[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
   const dragDepth = useRef(0); // dragenter/dragleave saltan en cada hijo: se cuenta para no parpadear
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   // Menú de skills: la palabra «/algo» que se está escribiendo (sin la barra) y la opción marcada.
@@ -321,10 +333,50 @@ export function Supercomputer() {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [chat?.messages.length, pending, draft]);
 
+  /** Un .md o .txt: si es un SKILL.md se añade a las skills y se llama con /nombre; si no, viaja como documento. */
+  async function addText(f: File) {
+    const content = await f.text();
+    const meta = /^\uFEFF?---\s*\n([\s\S]*?)\n---/.exec(content)?.[1] ?? "";
+    const name = /^name:\s*["']?([^"'\n]+)/m.exec(meta)?.[1]?.trim();
+    if (name && /^description:/m.test(meta)) {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);
+      try {
+        await studio.createSkill({ skill_md: content });
+        setNotice(s.skillImported(slug));
+      } catch (e) {
+        if (!(e instanceof StudioError && e.code === "skill_exists")) throw e;
+        setNotice(s.skillExisting(slug));
+      }
+      studio.skills().then((r) => setSkills(r.skills), () => undefined);
+      setText((t) => (new RegExp(`(^|\\s)/${slug}(\\s|$)`).test(t) ? t : `/${slug} ${t}`));
+      return;
+    }
+    if (content.length > 100_000) throw new Error(s.docTooLong(f.name));
+    setDocuments((prev) => {
+      if (prev.length >= 3) {
+        setError(s.tooManyDocs);
+        return prev;
+      }
+      return prev.some((d) => d.name === f.name) ? prev : [...prev, { name: f.name, content }];
+    });
+  }
+
   async function upload(files: FileList | File[] | null) {
-    // Solo imágenes y videos (lo que se arrastra o se pega puede traer otros archivos).
-    const media = Array.from(files ?? []).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
-    if (!media.length) return;
+    const all = Array.from(files ?? []);
+    setNotice(null);
+    // Texto (.md, .txt): skill o documento. Lo demás, solo imágenes y videos.
+    for (const f of all.filter((x) => /\.(md|markdown|txt)$/i.test(x.name) || x.type === "text/markdown" || x.type === "text/plain")) {
+      try {
+        await addText(f);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+    const media = all.filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (!media.length) {
+      if (file.current) file.current.value = "";
+      return;
+    }
     setUploading(true);
     try {
       for (const f of media.slice(0, 6 - attachments.length)) {
@@ -369,8 +421,11 @@ export function Supercomputer() {
     setError(null);
     setText("");
     const sent = attachments;
+    const docs = documents;
     setAttachments([]);
-    setPending({ role: "user", text: body, attachments: sent.map((a) => a.url) });
+    setDocuments([]);
+    setNotice(null);
+    setPending({ role: "user", text: body, attachments: sent.map((a) => a.url), documents: docs.map((d) => d.name) });
     setDraft({ parts: [], status: s.thinking });
     setCost(null);
     const controller = new AbortController();
@@ -382,7 +437,12 @@ export function Supercomputer() {
         setChat(target);
         router.replace(`/supercomputer?c=${target.id}`);
       }
-      await studio.sendChat(target.id, { text: body, mode, model: model || undefined, attachments: sent }, onEvent, controller.signal);
+      await studio.sendChat(
+        target.id,
+        { text: body, mode, model: model || undefined, attachments: sent, documents: docs },
+        onEvent,
+        controller.signal,
+      );
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError")) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -431,6 +491,24 @@ export function Supercomputer() {
               </button>
             </span>
           ))}
+        </div>
+      )}
+      {(documents.length > 0 || notice) && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {documents.map((d) => (
+            <span key={d.name} className="flex items-center gap-1.5 rounded-lg bg-surface-4 py-1 pr-1 pl-2 text-xs text-fg-2">
+              <FileText className="size-3.5 text-fg-3" /> {d.name}
+              <button
+                type="button"
+                aria-label={s.removeDocument}
+                onClick={() => setDocuments((p) => p.filter((x) => x.name !== d.name))}
+                className="rounded p-0.5 hover:bg-surface-5"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+          {notice && <span className="flex items-center gap-1.5 text-xs text-lime"><Wand2 className="size-3.5" /> {notice}</span>}
         </div>
       )}
       {viewing !== null && attachments[viewing] && (
@@ -533,7 +611,7 @@ export function Supercomputer() {
         className="thin-scrollbar max-h-60 w-full resize-none bg-transparent px-1 text-[15px] text-fg outline-none placeholder:text-fg-4"
       />
       <div className="mt-1 flex items-center gap-2">
-        <input ref={file} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => upload(e.target.files)} />
+        <input ref={file} type="file" accept="image/*,video/*,.md,.markdown,.txt" multiple hidden onChange={(e) => upload(e.target.files)} />
         <button
           type="button"
           title={s.attach}
@@ -680,7 +758,7 @@ export function Supercomputer() {
           e.preventDefault();
           dragDepth.current = 0;
           setDragging(false);
-          if (available && attachments.length < 6) void upload(e.dataTransfer.files);
+          if (available) void upload(e.dataTransfer.files);
         }}
       >
         {dragging && (
