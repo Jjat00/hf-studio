@@ -39,12 +39,18 @@ class Catalog:
         # Herramientas locales de HF Studio (fotograma, combinar, mezclar): modelos propios, gratis.
         # y nodos de audio de ElevenLabs para Spaces (voz, efecto, música).
         # y el nodo Assistant (Claude) para Spaces.
+        from .factory import FACTORY_NODE
         from .space_assistant import ASSISTANT_NODE
         from .space_audio import AUDIO_NODES
         from .space_tools import TOOLS
         from .store import models as store_models
 
-        for tool_id, tool in {**TOOLS, **AUDIO_NODES, ASSISTANT_NODE["id"]: ASSISTANT_NODE}.items():
+        for tool_id, tool in {
+            **TOOLS,
+            **AUDIO_NODES,
+            ASSISTANT_NODE["id"]: ASSISTANT_NODE,
+            FACTORY_NODE["id"]: FACTORY_NODE,
+        }.items():
             self.models.setdefault(tool_id, tool)
         # Modelos que solo venden APIMart y KIE (`store: True`): si Higgsfield publica el mismo id, gana el suyo.
         for model_id, model in store_models().items():

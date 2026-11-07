@@ -88,6 +88,10 @@ from .elevenlabs_audio import SERVICES as AUDIO_SERVICES
 from .elevenlabs_audio import estimate as audio_estimate
 from .elevenlabs_audio import remote_model as audio_remote_model
 from .elevenlabs_audio import run as run_audio_service
+from .factory import ContentFactoryJobs, is_factory, renderer_problem
+from .factory_script import MAX_EPISODES, ScriptError, write_scripts
+from .factory_styles import STYLES as FACTORY_STYLES
+from .factory_styles import public_styles as factory_styles
 from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES
 from .media import cached_source, local_duration, matches_type
@@ -137,6 +141,7 @@ from .space_tools import (
     ASSISTANT_PROVIDER,
     AUDIO_PROVIDER,
     BACKGROUND_PROVIDERS,
+    FACTORY_PROVIDER,
     TOOL_PROVIDER,
     LocalTools,
     is_tool,
@@ -473,6 +478,16 @@ class EstimateIn(BaseModel):
     provider: str | None = Field(None, description="Cotiza solo este proveedor")
 
 
+class FactoryScriptIn(BaseModel):
+    topic: str = Field(
+        min_length=3, max_length=500, description="Escenario, p. ej. «¿Qué pasaría si la Luna desapareciera?»"
+    )
+    style: str = Field("neon-grid", max_length=40, description="Estilo visual (GET /v1/factory)")
+    duration_seconds: int = Field(60, ge=30, le=90, description="Duración aproximada de cada episodio")
+    episodes: int = Field(1, ge=1, le=MAX_EPISODES, description="Episodios de la serie")
+    language: str = Field("es", pattern=r"^[a-z]{2}$", description="Idioma del guion y la voz")
+
+
 class ApproveIn(BaseModel):
     accept_unknown_cost: bool = Field(
         False, description="Aprueba aunque el precio sea desconocido; con max_usd, ese tope sigue mandando"
@@ -522,6 +537,8 @@ def create_app(
         app.state.audio_jobs.sweep()
         app.state.assistant_jobs = AnthropicJobs(settings, transport)
         app.state.assistant_jobs.sweep()
+        app.state.factory_jobs = ContentFactoryJobs(settings, app.state.eleven, transport)
+        app.state.factory_jobs.sweep()
         app.state.worker = Worker(
             app.state.sessions,
             {
@@ -529,6 +546,7 @@ def create_app(
                 TOOL_PROVIDER: app.state.local_tools,
                 AUDIO_PROVIDER: app.state.audio_jobs,
                 ASSISTANT_PROVIDER: app.state.assistant_jobs,
+                FACTORY_PROVIDER: app.state.factory_jobs,
             },
             settings,
         )
@@ -593,6 +611,7 @@ def create_app(
         await app.state.local_tools.aclose()
         await app.state.audio_jobs.aclose()
         await app.state.assistant_jobs.aclose()
+        await app.state.factory_jobs.aclose()
         await app.state.eleven.aclose()
         await engine.dispose()
 
@@ -906,6 +925,12 @@ def create_app(
             raise ServiceError(
                 503, "anthropic_not_configured", "Set ANTHROPIC_API_KEY in .env to use the Assistant"
             )
+        if (
+            is_factory(model["id"])
+            and (arguments.get("voice") or {}).get("engine") == "elevenlabs"
+            and (not app.state.eleven.configured)
+        ):
+            raise ServiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
         if is_audio_node(model["id"]) and not app.state.eleven.configured:
             # ServiceError (no VoiceError): también la entiende el motor de corridas, que marca el paso fallido.
             raise ServiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
@@ -3909,6 +3934,40 @@ def create_app(
     ) -> dict:
         filters = {k: v for k, v in {"language": language, "accent": accent, "gender": gender}.items() if v}
         return {"voices": await request.app.state.eleven.voices(search, library, limit, filters)}
+
+    @app.get("/v1/factory", tags=["content factory"])
+    async def factory_info(_: Owner, lang: str = Query("es", pattern=r"^[a-z]{2}$")) -> dict:
+        """Content Factory: estilos, plantillas de escena y qué hace falta para escribir guiones y renderizar."""
+        from .factory_script import LAYOUTS
+
+        return {
+            "model": "hf-studio/content-factory",
+            "styles": factory_styles(lang),
+            "layouts": list(LAYOUTS),
+            "max_episodes": MAX_EPISODES,
+            "renderer": {"available": renderer_problem() is None, "reason": renderer_problem()},
+            "scripts": {"available": app.state.assistant_jobs.available, "model": DEFAULT_CLAUDE},
+            "elevenlabs": app.state.eleven.configured,
+        }
+
+    @app.post("/v1/factory/scripts", tags=["content factory"])
+    async def factory_scripts(body: FactoryScriptIn, _: Owner) -> dict:
+        """Claude escribe el guion (uno por episodio, con arco y cliffhanger en series). Solo cuesta tokens de Claude
+        (`cost_usd`, del uso real); el usuario puede editarlo antes de generar."""
+        jobs = app.state.assistant_jobs
+        if not jobs.available:
+            raise ServiceError(
+                503, "anthropic_not_configured", "Set ANTHROPIC_API_KEY in .env to write scripts"
+            )
+        if body.style not in FACTORY_STYLES:
+            raise ServiceError(422, "unknown_style", f"Unknown style: {body.style}")
+        try:
+            return await write_scripts(
+                jobs.api_key, body.topic, body.style, body.duration_seconds, body.episodes, body.language,
+                base_url=settings.secret("ANTHROPIC_BASE_URL") or None, http_client_factory=jobs.http_client_factory,
+            )  # fmt: skip
+        except ScriptError as exc:
+            raise ServiceError(exc.status, exc.code, exc.message) from None
 
     @app.get("/v1/voice/free-voices", tags=["voz"])
     async def free_voice_list(_: Owner, lang: str = Query("es", pattern=r"^[a-z]{2}$")) -> dict:

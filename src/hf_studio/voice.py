@@ -208,6 +208,14 @@ class ElevenLabsClient:
         )
         return response.content
 
+    async def text_to_speech_timestamps(self, voice_id: str, body: dict) -> dict:
+        """Voz con alineamiento por carácter: {audio_base64, alignment: {characters, character_*_times_seconds}}."""
+        response = await self._request(
+            "POST", f"/v1/text-to-speech/{voice_id}/with-timestamps",
+            params={"output_format": "mp3_44100_128"}, json=body,
+        )  # fmt: skip
+        return response.json()
+
     async def sound_effect(self, body: dict) -> bytes:
         response = await self._request(
             "POST", "/v1/sound-generation", params={"output_format": "mp3_44100_128"}, json=body

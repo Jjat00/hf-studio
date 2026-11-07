@@ -14,6 +14,8 @@ from typing import Any
 
 from .catalog import ALIASES, Catalog
 from .elements import element_ids, is_element_id
+from .factory import is_factory, renderer_problem
+from .factory import quote as factory_quote
 from .pricing import fill_placeholders, quote
 from .providers.base import Provider, ProviderError
 from .providers.prices import PriceBook
@@ -21,7 +23,7 @@ from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
 from .providers.routes import Route, routes_for, with_defaults
 from .space_assistant import assistant_quote, is_assistant
 from .space_audio import audio_quote, is_audio_node
-from .space_tools import ASSISTANT_PROVIDER, AUDIO_PROVIDER, TOOL_PROVIDER, is_tool
+from .space_tools import ASSISTANT_PROVIDER, AUDIO_PROVIDER, FACTORY_PROVIDER, TOOL_PROVIDER, is_tool
 from .store.seedance_draft import FINAL_ID as DRAFT_FINAL
 
 BALANCE_TTL = 60.0
@@ -148,6 +150,16 @@ class Router:
             # Herramienta local (ffmpeg): una sola opción, gratis, en el proveedor interno del worker.
             option = Option(TOOL_PROVIDER, "HF Studio (local)", model["id"], logical, 0.0, "exact",
                             basis="Local tool (ffmpeg): free")  # fmt: skip
+            return Plan(model["id"], [option], [], hints, forced=only is not None)
+        if is_factory(model["id"]):
+            # Content Factory: render local con HyperFrames; solo la voz de ElevenLabs cuesta.
+            problem = renderer_problem()
+            if problem:
+                excluded = [{"provider": FACTORY_PROVIDER, "title": "Content Factory", "reason": problem}]
+                return Plan(model["id"], [], excluded, hints, forced=only is not None)
+            est = factory_quote(logical)
+            option = Option(FACTORY_PROVIDER, "Content Factory (local)", model["id"], logical, est["usd"], est["kind"],
+                            basis=est["basis"])  # fmt: skip
             return Plan(model["id"], [option], [], hints, forced=only is not None)
         if is_assistant(model["id"]):
             # Nodo Assistant de Spaces: la API de Claude, cotizada con su cota superior (aproximada).

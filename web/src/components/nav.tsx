@@ -34,6 +34,7 @@ const PRIMARY: Item[] = [
 const PRODUCTS: Item[] = [
   { href: "/cinema", label: "cinema", badge: "new", match: (p) => p.startsWith("/cinema") || p.startsWith("/projects") },
   { href: "/supercomputer", label: "supercomputer", badge: "new", match: (p) => p.startsWith("/supercomputer") },
+  { href: "/factory", label: "factory", badge: "new", match: (p) => p.startsWith("/factory") },
   { href: "/video?tab=genjutsu", label: "genjutsu", badge: "top", match: (p, q) => p.startsWith("/video") && tabIs(q, "genjutsu") },
   { href: "/spaces", label: "spaces", badge: "new", match: (p) => p.startsWith("/spaces") || p.startsWith("/flows") },
   { href: "/influencer", label: "influencer", badge: "new", match: (p) => p.startsWith("/influencer") },
