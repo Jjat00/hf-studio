@@ -1,11 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { Camera, Clapperboard, Lightbulb, Palette } from "lucide-react";
 import { useEffect, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import {
   APERTURES,
+  CARD_IMAGES,
   CAMERAS,
   ERAS,
   GENRES,
@@ -28,7 +28,7 @@ import { CameraModal, Sequence } from "./camera-modal";
 import { FilmModal } from "./film-modal";
 import { LightingModal } from "./lighting-modal";
 import { PaletteModal } from "./palette-modal";
-import { LightSphere, PaletteMosaic, PaletteStrip } from "./previews";
+import { CinemaImg, LightSphere, PaletteMosaic, PaletteStrip } from "./previews";
 
 export type CinemaProps = {
   keys: CinemaKey[];
@@ -100,17 +100,28 @@ export function CinemaControls(props: ControlsProps) {
   const paletteName = catalogPalette?.name ?? palette?.name ?? t.cinema.auto;
   const lightName = scheme ? pick(scheme.label) : (lighting?.name ?? t.cinema.auto);
 
+  // Miniaturas de las tarjetas: la foto de la opción elegida o, en Auto, la de la tarjeta (como Higgsfield).
+  const img = (src: string, fit: "cover" | "contain" = "cover") => <CinemaImg src={src} fit={fit} className={clsx("size-full", fit === "contain" && "p-0.5")} />;
+  const filmPick = [findOption(GENRES, values.genre), findOption(ERAS, values.era), findOption(PACINGS, values.pacing)].find(Boolean);
+  const gearPick = [findOption(LENSES, values.camera_lens), findOption(CAMERAS, values.camera_model), findOption(APERTURES, values.camera_aperture)].find(Boolean);
+  const thumbs = {
+    film: img(filmPick?.image ?? CARD_IMAGES.film, filmPick?.image ? "cover" : "contain"),
+    camera: firstMove?.image ? img(firstMove.image) : img(gearPick?.image ?? CARD_IMAGES.camera, "contain"),
+    palette: paletteColors ? <PaletteMosaic colors={paletteColors} className="size-full" /> : img(CARD_IMAGES.palette, "contain"),
+    light: scheme?.image ? img(scheme.image) : sphere ? <LightSphere {...sphere} size={30} /> : img(CARD_IMAGES.light, "contain"),
+  };
+
   return (
     // En la fila del compositor sin @container: la contención haría de esta caja el ancla de las ventanas.
     <div className={clsx("flex flex-col gap-2", variant === "grid" && "@container")}>
       {variant === "row" ? (
       <div className="hide-scrollbar flex gap-1.5 overflow-x-auto">
         {lead}
-        {hasFilm && <RowCard thumb={<Clapperboard className="size-4" />} label={names.film} value={filmValue} active={filmValue !== t.cinema.auto} selected={open === "film"} onClick={() => setOpen("film")} />}
-        {hasCamera && <RowCard thumb={<Camera className="size-4" />} label={names.camera} value={cameraValue} active={cameraValue !== t.cinema.auto} selected={open === "camera"} onClick={() => setOpen("camera")} />}
+        {hasFilm && <RowCard thumb={thumbs.film} label={names.film} value={filmValue} active={filmValue !== t.cinema.auto} selected={open === "film"} onClick={() => setOpen("film")} />}
+        {hasCamera && <RowCard thumb={thumbs.camera} label={names.camera} value={cameraValue} active={cameraValue !== t.cinema.auto} selected={open === "camera"} onClick={() => setOpen("camera")} />}
         {hasPalette && (
           <RowCard
-            thumb={paletteColors ? <PaletteMosaic colors={paletteColors} className="size-full" /> : <Palette className="size-4" />}
+            thumb={thumbs.palette}
             label={names.palette}
             value={paletteName}
             active={!!paletteColors}
@@ -120,7 +131,7 @@ export function CinemaControls(props: ControlsProps) {
         )}
         {hasLight && (
           <RowCard
-            thumb={sphere ? <LightSphere {...sphere} size={30} /> : <Lightbulb className="size-4" />}
+            thumb={thumbs.light}
             label={names.light}
             value={lightName}
             active={!!sphere}
@@ -131,11 +142,11 @@ export function CinemaControls(props: ControlsProps) {
       </div>
       ) : (
       <div className="grid grid-cols-2 gap-2 @sm:grid-cols-4">
-        {hasFilm && <Card icon={<Clapperboard className="size-4" />} label={t.cinema.filmSetup} value={filmValue} active={filmValue !== t.cinema.auto} onClick={() => setOpen("film")} />}
-        {hasCamera && <Card icon={<Camera className="size-4" />} label={t.cinema.camera} value={cameraValue} active={cameraValue !== t.cinema.auto} onClick={() => setOpen("camera")} />}
+        {hasFilm && <Card thumb={thumbs.film} label={t.cinema.filmSetup} value={filmValue} active={filmValue !== t.cinema.auto} onClick={() => setOpen("film")} />}
+        {hasCamera && <Card thumb={thumbs.camera} label={t.cinema.camera} value={cameraValue} active={cameraValue !== t.cinema.auto} onClick={() => setOpen("camera")} />}
         {hasPalette && (
           <Card
-            icon={<Palette className="size-4" />}
+            thumb={thumbs.palette}
             label={t.cinema.palette}
             value={catalogPalette?.name ?? palette?.name ?? t.cinema.auto}
             active={!!paletteColors}
@@ -145,7 +156,7 @@ export function CinemaControls(props: ControlsProps) {
         )}
         {hasLight && (
           <Card
-            icon={sphere ? <LightSphere {...sphere} size={16} /> : <Lightbulb className="size-4" />}
+            thumb={thumbs.light}
             label={t.cinema.lighting}
             value={scheme ? pick(scheme.label) : (lighting?.name ?? t.cinema.auto)}
             active={!!sphere}
@@ -213,22 +224,22 @@ function RowCard({ thumb, label, value, active, selected, onClick }: { thumb: Re
   );
 }
 
-function Card({ icon, label, value, active, onClick, visual }: { icon: React.ReactNode; label: string; value: string; active: boolean; onClick: () => void; visual?: React.ReactNode }) {
+function Card({ thumb, label, value, active, onClick, visual }: { thumb: ReactNode; label: string; value: string; active: boolean; onClick: () => void; visual?: ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={clsx(
-        "flex min-w-0 flex-col rounded-2xl border bg-surface-3 px-3 py-2.5 text-left transition-colors hover:bg-surface-4",
+        "flex min-w-0 items-center gap-2.5 rounded-2xl border bg-surface-3 py-2 pr-3 pl-2 text-left transition-colors hover:bg-surface-4",
         active ? "border-lime/40" : "border-line",
       )}
     >
-      <span className="flex items-center gap-1.5 text-[12px] text-fg-3">
-        <span className={clsx("flex shrink-0 items-center", active && "text-lime")}>{icon}</span>
-        <span className="truncate">{label}</span>
+      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-5">{thumb}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12px] text-fg-3">{label}</span>
+        <span className={clsx("block truncate text-[14px] font-semibold", active ? "text-fg" : "text-fg-2")}>{value}</span>
+        {visual}
       </span>
-      <span className={clsx("mt-0.5 truncate text-[14px] font-semibold", active ? "text-fg" : "text-fg-2")}>{value}</span>
-      {visual}
     </button>
   );
 }
@@ -316,7 +327,7 @@ export function HashMovementMenu({ textareaRef, above, ...props }: CinemaProps &
           onMouseEnter={() => setActive(i)}
           className={clsx("flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left", i === active ? "bg-surface-4" : "")}
         >
-          <m.icon className="size-4 shrink-0 text-fg-2" />
+          {m.image ? <CinemaImg src={m.image} className="size-7 shrink-0 rounded-md" /> : <m.icon className="size-4 shrink-0 text-fg-2" />}
           <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{pick(m.label)}</span>
           {movements.includes(m.value) && <span className="text-[11px] text-lime">{movements.indexOf(m.value) + 1}</span>}
         </button>

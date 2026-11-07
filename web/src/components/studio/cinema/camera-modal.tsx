@@ -5,7 +5,7 @@ import { ArrowDownAZ, Camera, LayoutGrid, Move3d, RotateCcw, Search, Wand2, X } 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { APERTURES, CAMERAS, LENSES, MOVEMENTS, findOption, type CinemaKey, type Movement, type MovementGroup, type Option } from "./data";
-import { ApertureBar, CinemaModal, GhostButton, ModalTab, PrimaryButton } from "./previews";
+import { ApertureBar, CinemaImg, CinemaModal, GhostButton, ModalTab, PrimaryButton } from "./previews";
 
 type Props = {
   keys: CinemaKey[];
@@ -102,9 +102,10 @@ function Setup({ keys, values, setValue }: Pick<Props, "keys" | "values" | "setV
   );
 }
 
-const ROW = 44;
+const ROW = 96;
 
-/** Columna tipo rueda: la opción elegida queda centrada y resaltada; «Auto» es la primera. */
+/** Columna tipo rueda, como la de Higgsfield: fichas redondeadas con la foto del producto y su nombre; la elegida
+ * queda centrada y resaltada. «Auto» es la primera. */
 function Wheel({ label, list, value, onChange }: { label: string; list: Option[]; value?: string; onChange: (v: string | undefined) => void }) {
   const { t, pick } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
@@ -117,29 +118,35 @@ function Wheel({ label, list, value, onChange }: { label: string; list: Option[]
     <div className="min-w-0">
       <p className="mb-2 text-center text-[11px] font-semibold tracking-[0.14em] text-fg-3 uppercase">{label}</p>
       <div className="relative overflow-hidden rounded-2xl border border-line bg-surface-3">
-        <span aria-hidden className="pointer-events-none absolute inset-x-2 top-1/2 z-0 -translate-y-1/2 rounded-xl border border-lime/40 bg-lime/5" style={{ height: ROW }} />
         <div
           ref={ref}
-          className="hide-scrollbar relative z-10 snap-y snap-mandatory overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_30%,black_70%,transparent)]"
-          style={{ height: ROW * 5, paddingBlock: ROW * 2 }}
+          className="hide-scrollbar relative snap-y snap-mandatory overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_28%,black_72%,transparent)]"
+          style={{ height: ROW * 3, paddingBlock: ROW }}
         >
           {items.map((o, i) => {
             const active = i === index;
             const Icon = o?.icon ?? Wand2;
             return (
-              <button
-                key={o?.value ?? "auto"}
-                type="button"
-                onClick={() => onChange(o?.value)}
-                className={clsx(
-                  "flex w-full snap-center items-center justify-center gap-1.5 px-2 text-center transition-all",
-                  active ? "text-[14px] font-semibold text-lime" : "text-[12px] text-fg-3 hover:text-fg-2",
-                )}
-                style={{ height: ROW }}
-              >
-                <Icon className="hidden size-3.5 shrink-0 sm:block" />
-                <span className="truncate">{o ? pick(o.label) : t.cinema.auto}</span>
-              </button>
+              <div key={o?.value ?? "auto"} className="flex snap-center items-center justify-center px-1.5 sm:px-3" style={{ height: ROW }}>
+                <button
+                  type="button"
+                  onClick={() => onChange(o?.value)}
+                  aria-pressed={active}
+                  className={clsx(
+                    "flex h-[84px] w-full max-w-40 flex-col items-center justify-center gap-1 rounded-[30px] border-2 px-2 text-center transition-all",
+                    active ? "border-fg bg-surface-5 text-fg" : "border-line bg-surface-4/60 text-fg-3 hover:text-fg-2",
+                  )}
+                >
+                  {o?.image ? (
+                    <CinemaImg src={o.image} fit="contain" className={clsx("h-11 w-full drop-shadow-[0_6px_10px_rgba(0,0,0,0.6)] transition-opacity", !active && "opacity-60")} />
+                  ) : (
+                    <span className="flex h-11 items-center">
+                      <Icon className="size-6" />
+                    </span>
+                  )}
+                  <span className={clsx("w-full truncate text-[12px] leading-tight", active && "font-semibold")}>{o ? pick(o.label) : t.cinema.auto}</span>
+                </button>
+              </div>
             );
           })}
         </div>
@@ -190,7 +197,7 @@ function Movements({ movements, setMovements }: { movements: string[]; setMoveme
 function TileGrid({ list, movements, onToggle }: { list: Movement[]; movements: string[]; onToggle: (v: string) => void }) {
   const { pick } = useI18n();
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+    <div className="grid grid-cols-3 gap-x-2 gap-y-3 sm:grid-cols-4">
       {list.map((m) => {
         const n = movements.indexOf(m.value);
         return (
@@ -198,17 +205,25 @@ function TileGrid({ list, movements, onToggle }: { list: Movement[]; movements: 
             key={m.value}
             type="button"
             onClick={() => onToggle(m.value)}
-            className={clsx(
-              "relative flex flex-col items-start gap-1.5 rounded-2xl border-2 p-3 text-left transition-colors",
-              n >= 0 ? "border-lime/70 bg-lime/10" : "border-transparent bg-surface-3 hover:bg-surface-4",
-            )}
+            title={pick(m.desc)}
+            className="group relative flex flex-col items-center gap-1.5 text-center"
           >
-            <span className={clsx("flex size-9 items-center justify-center rounded-xl", n >= 0 ? "bg-lime text-ink" : "bg-surface-5 text-fg")}>
-              <m.icon className="size-[18px]" />
+            <span
+              className={clsx(
+                "block aspect-square w-full overflow-hidden rounded-2xl border-2 bg-surface-3 transition-colors",
+                n >= 0 ? "border-lime" : "border-transparent group-hover:border-line-2",
+              )}
+            >
+              {m.image ? (
+                <CinemaImg src={m.image} className="size-full transition-transform duration-300 group-hover:scale-105" />
+              ) : (
+                <span className="flex size-full items-center justify-center text-fg-2">
+                  <m.icon className="size-7" />
+                </span>
+              )}
             </span>
-            <span className="text-[13px] leading-tight font-semibold">{pick(m.label)}</span>
-            <span className="line-clamp-2 text-[11px] leading-snug text-fg-3">{pick(m.desc)}</span>
-            {n >= 0 && <span className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-full bg-lime text-[12px] font-bold text-ink">{n + 1}</span>}
+            <span className={clsx("w-full truncate text-[13px] leading-tight font-semibold", n >= 0 ? "text-lime" : "text-fg")}>{pick(m.label)}</span>
+            {n >= 0 && <span className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-full bg-lime text-[12px] font-bold text-ink shadow">{n + 1}</span>}
           </button>
         );
       })}

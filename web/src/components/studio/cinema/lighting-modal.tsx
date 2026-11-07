@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { LIGHTS, LIGHTS_KEY, LIGHT_DIRECTIONS, MAX_LIGHTS, loadStored, newId, saveStored, type CustomLighting, type LightSource } from "./data";
 import { Hex } from "./palette-modal";
-import { CinemaModal, GhostButton, LightSphere, PrimaryButton } from "./previews";
+import { CinemaImg, CinemaModal, GhostButton, LightSphere, PrimaryButton } from "./previews";
 
 type Props = {
   value?: string;
@@ -79,7 +79,7 @@ export function LightingModal({ value, custom, onPick, onClose }: Props) {
             </div>
           ))}
           {LIGHTS.map((s) => (
-            <SchemeTile key={s.value} name={tr(s.label)} desc={tr(s.desc)} {...s.preview} active={value === s.value} onClick={() => pick(s.value)} />
+            <SchemeTile key={s.value} name={tr(s.label)} desc={tr(s.desc)} image={s.image} {...s.preview} active={value === s.value} onClick={() => pick(s.value)} />
           ))}
         </div>
       )}
@@ -87,14 +87,18 @@ export function LightingModal({ value, custom, onPick, onClose }: Props) {
   );
 }
 
-function SchemeTile({ name, desc, lights, backdrop, dark, active, onClick }: { name: string; desc?: string; lights: LightSource[]; backdrop?: string; dark?: boolean; active: boolean; onClick: () => void }) {
+function SchemeTile({ name, desc, image, lights, backdrop, dark, active, onClick }: { name: string; desc?: string; image?: string; lights: LightSource[]; backdrop?: string; dark?: boolean; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={clsx("flex w-full flex-col overflow-hidden rounded-2xl border-2 bg-surface-3 text-left transition-colors", active ? "border-lime/80" : "border-transparent hover:border-line-2")}
     >
-      <LightSphere lights={lights} backdrop={backdrop ?? "#0e0f11"} dark={dark} size={64} className="h-28 w-full rounded-none" />
+      {image ? (
+        <CinemaImg src={image} className="h-28 w-full" />
+      ) : (
+        <LightSphere lights={lights} backdrop={backdrop ?? "#0e0f11"} dark={dark} size={64} className="h-28 w-full rounded-none" />
+      )}
       <span className="px-2.5 pt-2 pb-2.5">
         <span className="flex items-center gap-1.5 text-[13px] font-semibold">
           {active && <Check className="size-3.5 shrink-0 text-lime" />}

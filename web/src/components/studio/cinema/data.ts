@@ -82,52 +82,67 @@ export function cinemaKeysOf(schema: { properties?: Record<string, unknown> }): 
   return keys.length >= 3 ? keys : [];
 }
 
-export type Option = { value: string; label: L; desc: L; icon: LucideIcon; tone?: string };
+export type Option = { value: string; label: L; desc: L; icon: LucideIcon; tone?: string; image?: string };
 
-export const GENRES: Option[] = [
+/** Imágenes de Cinema Studio en `public/cinema/<grupo>/<valor>.webp`: fotogramas (género, época, tempo, luz,
+ * movimiento) y productos con fondo transparente (cámaras, lentes, aperturas). */
+export type CinemaImageGroup = "genre" | "era" | "pacing" | "gear" | "movement" | "light";
+export const cinemaImage = (group: CinemaImageGroup, value: string) => `/cinema/${group}/${value}.webp`;
+
+/** Miniaturas por defecto de las cuatro tarjetas del compositor. */
+export const CARD_IMAGES = {
+  film: "/cinema/cards/film-setup.webp",
+  camera: "/cinema/cards/camera.webp",
+  palette: "/cinema/cards/color-palette.webp",
+  light: "/cinema/cards/lighting.webp",
+} as const;
+
+const withImages = <T extends Option>(group: CinemaImageGroup, list: T[]): T[] => list.map((o) => ({ ...o, image: cinemaImage(group, o.value) }));
+
+export const GENRES: Option[] = withImages("genre", [
   { value: "epic", label: l("Épico", "Epic"), desc: l("Gran escala, héroes y paisajes amplios", "Grand scale, heroes and vast landscapes"), icon: Mountain, tone: "from-amber-500/50 via-orange-900/40 to-sky-900/50" },
   { value: "drama", label: l("Drama", "Drama"), desc: l("Personajes, emoción y conflicto íntimo", "Characters, emotion and intimate conflict"), icon: Drama, tone: "from-rose-900/60 via-stone-900/40 to-stone-800/40" },
   { value: "noir", label: l("Noir", "Noir"), desc: l("Sombras duras, crimen y misterio", "Hard shadows, crime and mystery"), icon: Moon, tone: "from-zinc-200/30 via-zinc-800/60 to-black" },
   { value: "comedy", label: l("Comedia", "Comedy"), desc: l("Ritmo ligero, situaciones y humor", "Light rhythm, situations and humor"), icon: Laugh, tone: "from-yellow-400/40 via-pink-500/30 to-sky-500/30" },
   { value: "horror", label: l("Terror", "Horror"), desc: l("Tensión, miedo y lo que no se ve", "Tension, fear and what you can't see"), icon: Ghost, tone: "from-red-950/80 via-black to-emerald-950/50" },
   { value: "action", label: l("Acción", "Action"), desc: l("Persecuciones, golpes y adrenalina", "Chases, hits and adrenaline"), icon: Flame, tone: "from-orange-500/50 via-red-800/40 to-zinc-900/60" },
-];
+]);
 
-export const ERAS: Option[] = [
+export const ERAS: Option[] = withImages("era", [
   { value: "1960s", label: l("Años 60", "1960s"), desc: l("Color saturado y estética de estudio clásico", "Saturated color and classic studio look"), icon: Film },
   { value: "1980s", label: l("Años 80", "1980s"), desc: l("Neón, humo y grano de blockbuster", "Neon, haze and blockbuster grain"), icon: Sparkles },
   { value: "1990s", label: l("Años 90", "1990s"), desc: l("Cine independiente, tonos fríos y verdosos", "Indie cinema, cool greenish tones"), icon: Video },
   { value: "2000s", label: l("Años 2000", "2000s"), desc: l("Digital temprano, alto contraste y desaturado", "Early digital, high contrast, desaturated"), icon: Projector },
   { value: "2020s", label: l("Años 2020", "2020s"), desc: l("Digital limpio y moderno", "Clean modern digital"), icon: Camera },
-];
+]);
 
-export const PACINGS: Option[] = [
+export const PACINGS: Option[] = withImages("pacing", [
   { value: "chaotic", label: l("Caótico", "Chaotic"), desc: l("Cortes rápidos e irregulares, energía nerviosa", "Fast, irregular cuts and nervous energy"), icon: Shuffle, tone: "from-fuchsia-600/40 via-red-700/30 to-yellow-500/30" },
   { value: "dynamic", label: l("Dinámico", "Dynamic"), desc: l("Montaje ágil con un ritmo constante", "Brisk editing with a steady beat"), icon: Activity, tone: "from-lime-500/40 via-emerald-800/30 to-sky-800/40" },
   { value: "calm", label: l("Calmado", "Calm"), desc: l("Planos largos y transiciones suaves", "Long takes and gentle transitions"), icon: Waves, tone: "from-sky-500/40 via-indigo-900/40 to-slate-900/50" },
   { value: "single-shot", label: l("Plano único", "Single shot"), desc: l("Un solo plano continuo, sin cortes", "One continuous shot, no cuts"), icon: InfinityIcon, tone: "from-violet-500/40 via-slate-800/40 to-zinc-900/60" },
-];
+]);
 
-export const CAMERAS: Option[] = [
+export const CAMERAS: Option[] = withImages("gear", [
   { value: "modern", label: l("Digital moderna", "Modern digital"), desc: l("Sensor nítido y limpio", "Sharp, clean sensor"), icon: Camera },
   { value: "35mm-film", label: l("Película 35 mm", "35mm film"), desc: l("Grano fino y color orgánico", "Fine grain and organic color"), icon: Film },
   { value: "8mm-film", label: l("Película 8 mm", "8mm film"), desc: l("Casero: grano fuerte y viñeta", "Home movie: heavy grain and vignette"), icon: Projector },
   { value: "dv-camcorder", label: l("Videocámara DV", "DV camcorder"), desc: l("Video doméstico de los 2000", "2000s home video"), icon: Video },
-];
+]);
 
-export const LENSES: Option[] = [
+export const LENSES: Option[] = withImages("gear", [
   { value: "clean-sharp", label: l("Limpio y nítido", "Clean sharp"), desc: l("Sin distorsión ni destellos", "No distortion or flares"), icon: Circle },
   { value: "anamorphic", label: l("Anamórfico", "Anamorphic"), desc: l("Destellos horizontales y bokeh ovalado", "Horizontal flares and oval bokeh"), icon: RectangleHorizontal },
   { value: "vintage-anamorphic", label: l("Anamórfico antiguo", "Vintage anamorphic"), desc: l("Anamórfico con aberraciones suaves", "Anamorphic with soft aberrations"), icon: Scan },
   { value: "warm-vintage", label: l("Antiguo cálido", "Warm vintage"), desc: l("Óptica antigua, cálida y de bajo contraste", "Old glass, warm and low contrast"), icon: Sunset },
   { value: "halation-vintage", label: l("Antiguo con halo", "Halation vintage"), desc: l("Halo brillante alrededor de las luces", "Glowing halo around highlights"), icon: Sun },
-];
+]);
 
-export const APERTURES: Option[] = [
+export const APERTURES: Option[] = withImages("gear", [
   { value: "f14-wide-open", label: l("f/1.4", "f/1.4"), desc: l("Muy abierto: fondo muy desenfocado", "Wide open: very blurred background"), icon: Circle },
   { value: "f4-moderate", label: l("f/4", "f/4"), desc: l("Desenfoque moderado", "Moderate blur"), icon: Circle },
   { value: "f11-deep-focus", label: l("f/11", "f/11"), desc: l("Foco profundo: todo nítido", "Deep focus: everything sharp"), icon: Circle },
-];
+]);
 
 /** Desenfoque (px) del primer plano y del fondo para dibujar la profundidad de campo de cada apertura. */
 export const APERTURE_BLUR: Record<string, number> = { "f14-wide-open": 5, "f4-moderate": 2, "f11-deep-focus": 0 };
@@ -135,7 +150,7 @@ export const APERTURE_BLUR: Record<string, number> = { "f14-wide-open": 5, "f4-m
 export type MovementGroup = "pan" | "dolly" | "crane" | "zoom" | "special";
 export type Movement = Option & { group: MovementGroup };
 
-const mv = (value: string, group: MovementGroup, icon: LucideIcon, label: L, desc: L): Movement => ({ value, group, icon, label, desc });
+const mv = (value: string, group: MovementGroup, icon: LucideIcon, label: L, desc: L): Movement => ({ value, group, icon, label, desc, image: cinemaImage("movement", value) });
 
 export const MOVEMENTS: Movement[] = [
   mv("static-shot", "special", Anchor, l("Plano fijo", "Static shot"), l("La cámara no se mueve", "The camera stays still")),
@@ -179,7 +194,7 @@ export type LightDirection = (typeof LIGHT_DIRECTIONS)[number];
 export type LightSource = { color: string; brightness: number; diffuse: number; direction: LightDirection };
 export type LightPreview = { lights: LightSource[]; backdrop?: string; dark?: boolean };
 
-export const LIGHTS: (Option & { preview: LightPreview })[] = [
+export const LIGHTS: (Option & { preview: LightPreview })[] = withImages("light", [
   {
     value: "silhouette",
     label: l("Silueta", "Silhouette"),
@@ -222,7 +237,7 @@ export const LIGHTS: (Option & { preview: LightPreview })[] = [
     icon: Sparkles,
     preview: { lights: [{ color: "#ffd2b0", brightness: 65, diffuse: 80, direction: "left" }, { color: "#b9d4ff", brightness: 60, diffuse: 80, direction: "right" }] },
   },
-];
+]);
 
 export type CustomPalette = { id: string; name: string; colors: string[] };
 export type CustomLighting = { id: string; name: string; lights: LightSource[] };

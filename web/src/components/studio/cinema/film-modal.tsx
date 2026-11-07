@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, Clapperboard, Gauge, History, RotateCcw, Wan
 import { useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { ERAS, GENRES, PACINGS, findOption, type CinemaKey, type Option } from "./data";
-import { CinemaModal, GhostButton, ModalTab, PrimaryButton } from "./previews";
+import { CinemaImg, CinemaModal, GhostButton, ModalTab, PrimaryButton } from "./previews";
 
 type Props = {
   keys: CinemaKey[];
@@ -72,34 +72,49 @@ export function FilmModal({ keys, values, setValue, onClose }: Props) {
   );
 }
 
-/** Carrusel con «Auto» primero: anterior/siguiente cambian el valor y la vista grande muestra la opción. */
+/** Carrusel con «Auto» primero: el fotograma elegido al centro y sus vecinos asomando a los lados, como en
+ * Higgsfield; anterior/siguiente (o un clic en un vecino) cambian el valor. */
 function Carousel({ list, value, onChange }: { list: Option[]; value?: string; onChange: (v: string | undefined) => void }) {
   const { t, pick } = useI18n();
   const items: (Option | null)[] = [null, ...list];
   const index = Math.max(0, items.findIndex((o) => (o ? o.value === value : value === undefined)));
   const go = (i: number) => onChange(items[(i + items.length) % items.length]?.value);
   const cur = items[index];
-  const Icon = cur?.icon ?? Wand2;
+  const prev = items[(index - 1 + items.length) % items.length];
+  const next = items[(index + 1) % items.length];
   return (
     <div>
-      <div className="flex items-stretch gap-2">
-        <NavButton onClick={() => go(index - 1)} label={t.cinema.prev}>
-          <ChevronLeft className="size-5" />
-        </NavButton>
-        <div
-          className={clsx(
-            "grain relative flex h-56 min-w-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-2xl border border-line bg-gradient-to-br px-6 text-center",
-            cur?.tone ?? "from-surface-5 via-surface-3 to-surface-2",
-          )}
+      <div className="relative flex h-52 items-center justify-center overflow-hidden sm:h-60">
+        <button
+          type="button"
+          onClick={() => go(index - 1)}
+          aria-label={`${t.cinema.prev}: ${prev ? pick(prev.label) : t.cinema.auto}`}
+          className="absolute top-1/2 left-0 h-[62%] w-[24%] -translate-x-1/3 -translate-y-1/2 overflow-hidden rounded-2xl border border-line opacity-50 transition-opacity hover:opacity-80"
         >
-          <Icon className="size-14 text-white/90 drop-shadow" strokeWidth={1.4} />
-          <p className="headline mt-3 text-[30px] text-lime drop-shadow">{cur ? pick(cur.label) : t.cinema.auto}</p>
-          {cur && <p className="mt-1 max-w-sm text-sm text-white/80">{pick(cur.desc)}</p>}
+          <Frame option={prev} />
+        </button>
+        <div className="relative z-10 h-full w-[64%] overflow-hidden rounded-[22px] border-2 border-line-2 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.9)]">
+          <Frame option={cur} alt={cur ? pick(cur.label) : undefined} big />
         </div>
+        <button
+          type="button"
+          onClick={() => go(index + 1)}
+          aria-label={`${t.cinema.next}: ${next ? pick(next.label) : t.cinema.auto}`}
+          className="absolute top-1/2 right-0 h-[62%] w-[24%] translate-x-1/3 -translate-y-1/2 overflow-hidden rounded-2xl border border-line opacity-50 transition-opacity hover:opacity-80"
+        >
+          <Frame option={next} />
+        </button>
+      </div>
+      <div className="mt-4 flex items-center justify-center gap-2">
+        <NavButton onClick={() => go(index - 1)} label={t.cinema.prev}>
+          <ChevronLeft className="size-4" />
+        </NavButton>
+        <p className="min-w-28 rounded-full border border-line-2 bg-surface-4 px-4 py-1.5 text-center text-[14px] font-semibold text-fg">{cur ? pick(cur.label) : t.cinema.auto}</p>
         <NavButton onClick={() => go(index + 1)} label={t.cinema.next}>
-          <ChevronRight className="size-5" />
+          <ChevronRight className="size-4" />
         </NavButton>
       </div>
+      <p className="mt-1.5 min-h-5 text-center text-sm text-fg-3">{cur ? pick(cur.desc) : " "}</p>
       <div className="mt-3 flex flex-wrap justify-center gap-1.5">
         {items.map((o, i) => (
           <button
@@ -107,11 +122,11 @@ function Carousel({ list, value, onChange }: { list: Option[]; value?: string; o
             type="button"
             onClick={() => go(i)}
             className={clsx(
-              "flex h-8 items-center gap-1.5 rounded-lg border-2 px-2.5 text-xs font-semibold transition-colors",
+              "flex h-8 items-center gap-1.5 rounded-lg border-2 pr-2.5 pl-1 text-xs font-semibold transition-colors",
               i === index ? "border-lime/70 bg-lime/10 text-lime" : "border-transparent bg-glass text-fg hover:bg-white/10",
             )}
           >
-            {o ? <o.icon className="size-3.5" /> : <Wand2 className="size-3.5" />}
+            {o?.image ? <CinemaImg src={o.image} className="h-5 w-7 rounded" /> : <Wand2 className="mx-1 size-3.5" />}
             {o ? pick(o.label) : t.cinema.auto}
           </button>
         ))}
@@ -120,9 +135,19 @@ function Carousel({ list, value, onChange }: { list: Option[]; value?: string; o
   );
 }
 
+/** Fotograma de una opción; «Auto» (sin opción) es un degradado abstracto. */
+function Frame({ option, alt, big }: { option: Option | null | undefined; alt?: string; big?: boolean }) {
+  if (option?.image) return <CinemaImg src={option.image} alt={alt} className="size-full" />;
+  return (
+    <span className="grain flex size-full items-center justify-center bg-gradient-to-br from-lime/45 via-emerald-800/40 to-amber-400/35">
+      <Wand2 className={clsx("text-white/90 drop-shadow", big ? "size-12" : "size-6")} strokeWidth={1.4} />
+    </span>
+  );
+}
+
 function NavButton({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
   return (
-    <button type="button" onClick={onClick} aria-label={label} className="flex w-10 shrink-0 items-center justify-center rounded-2xl border border-line bg-surface-3 text-fg-2 hover:bg-surface-4 hover:text-fg">
+    <button type="button" onClick={onClick} aria-label={label} className="flex size-8 shrink-0 items-center justify-center rounded-full border border-line bg-surface-3 text-fg-2 hover:bg-surface-4 hover:text-fg">
       {children}
     </button>
   );
@@ -137,9 +162,12 @@ function EraRuler({ value, onChange }: { value?: string; onChange: (v: string | 
   const pos = (era: string) => ((parseInt(era, 10) - 1960) / 60) * 100;
   return (
     <div>
-      <div className="mb-5 flex min-h-24 flex-col items-center justify-center text-center">
-        <p className="headline text-[44px] leading-none text-lime">{cur ? pick(cur.label) : t.cinema.auto}</p>
-        <p className="mt-2 text-sm text-fg-2">{cur ? pick(cur.desc) : " "}</p>
+      <div className="mb-4 flex flex-col items-center text-center">
+        <div className="aspect-video w-full max-w-64 overflow-hidden rounded-[22px] border-2 border-line-2 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.9)]">
+          <Frame option={cur} alt={cur ? pick(cur.label) : undefined} big />
+        </div>
+        <p className="headline mt-3 text-[30px] leading-none text-lime">{cur ? pick(cur.label) : t.cinema.auto}</p>
+        <p className="mt-2 min-h-5 text-sm text-fg-2">{cur ? pick(cur.desc) : " "}</p>
       </div>
       <div className="flex items-center gap-3">
         <button
@@ -193,11 +221,11 @@ function EraRuler({ value, onChange }: { value?: string; onChange: (v: string | 
             type="button"
             onClick={() => onChange(e.value)}
             className={clsx(
-              "flex flex-col items-center gap-1 rounded-xl border-2 px-1 py-2 text-[11px] font-semibold",
+              "flex flex-col items-center gap-1 rounded-xl border-2 p-1 pb-1.5 text-[11px] font-semibold",
               e.value === value ? "border-lime/70 bg-lime/10 text-lime" : "border-transparent bg-glass text-fg-2 hover:bg-white/10",
             )}
           >
-            <e.icon className="size-4" />
+            {e.image ? <CinemaImg src={e.image} className="h-9 w-full rounded-lg" /> : <e.icon className="size-4" />}
             {e.value}
           </button>
         ))}

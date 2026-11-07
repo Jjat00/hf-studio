@@ -47,6 +47,23 @@ export function LightSphere({ lights, backdrop, dark, size = 72, className }: Li
   );
 }
 
+/** Imagen de Cinema Studio: `cover` para fotogramas y `contain` para productos con fondo transparente. Sin `alt`
+ * es decorativa (cuando el botón ya muestra el nombre). */
+export function CinemaImg({ src, alt = "", fit = "cover", className }: { src: string; alt?: string; fit?: "cover" | "contain"; className?: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      aria-hidden={alt ? undefined : true}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      className={clsx("select-none", fit === "cover" ? "object-cover" : "object-contain", className)}
+    />
+  );
+}
+
 /** Tres figuras a distintas distancias: la apertura decide cuánto se desenfocan la de delante y la del fondo. */
 export function ApertureBar({ value }: { value?: string }) {
   const blur = value ? (APERTURE_BLUR[value] ?? 2) : 2;
