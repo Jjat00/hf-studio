@@ -65,7 +65,7 @@ export function CinemaHome() {
         <div className="thin-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div className="sticky top-0 z-20 flex items-center gap-2 px-3 pt-3 md:hidden">{menuButton}</div>
           {error && <p className="mx-4 mt-4 rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>}
-          {view === "home" && <HomeView projects={projects} onCreate={createProject} onAll={() => go("projects")} />}
+          {view === "home" && <HomeView projects={projects} onCreate={createProject} onAll={() => go("projects")} onGenerations={() => go("generations")} />}
           {view === "generations" && <MyGenerations />}
           {view === "favorites" && <MyGenerations favorites />}
           {view === "elements" && <ElementLibrary />}
@@ -264,9 +264,22 @@ function ProjectGrid({ projects, onCreate, limit }: { projects: ProjectSummary[]
   );
 }
 
-function HomeView({ projects, onCreate, onAll }: { projects: ProjectSummary[] | null; onCreate: (name: string) => Promise<void>; onAll: () => void }) {
+function HomeView({
+  projects,
+  onCreate,
+  onAll,
+  onGenerations,
+}: {
+  projects: ProjectSummary[] | null;
+  onCreate: (name: string) => Promise<void>;
+  onAll: () => void;
+  onGenerations: () => void;
+}) {
   const { t } = useI18n();
   const cs = t.cinemaStudio;
+  // Lo que se lanza desde aquí aparece al momento (con su carga) y se actualiza solo hasta tener el resultado.
+  const generations = useGenerations();
+  const latest = generations.items.slice(0, 8);
   const [recent, setRecent] = useState<Generation[]>([]);
   useEffect(() => {
     studio
@@ -306,8 +319,16 @@ function HomeView({ projects, onCreate, onAll }: { projects: ProjectSummary[] | 
       )}
       <h1 className="headline bg-gradient-to-b from-white to-white/55 bg-clip-text text-center text-[34px] leading-none text-transparent uppercase sm:text-[52px]">{cs.hero}</h1>
       <div className="mt-8 w-full max-w-[880px]">
-        <Composer panelsBelow />
+        <Composer panelsBelow onGenerated={generations.add} />
       </div>
+      {latest.length > 0 && (
+        <div className="mt-12 w-full">
+          <button type="button" onClick={onGenerations} className="mb-4 flex items-center gap-1 text-[18px] font-semibold text-fg hover:text-lime">
+            {cs.recent} <ChevronRight className="size-5" />
+          </button>
+          <GenerationsGrid list={generations} items={latest} empty={cs.noGenerations} />
+        </div>
+      )}
       <div className="mt-16 w-full">
         <button type="button" onClick={onAll} className="mb-4 flex items-center gap-1 text-[18px] font-semibold text-fg hover:text-lime">
           {cs.myProjects} <ChevronRight className="size-5" />
