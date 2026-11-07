@@ -3992,11 +3992,29 @@ def create_app(
         cache: dict = app.state.factory_scripts
         key = (owner.id, idempotency_key) if idempotency_key else None
         if key:
-            entry = cache.setdefault(key, {"lock": asyncio.Lock(), "result": None})
+            entry = cache.setdefault(key, {"lock": asyncio.Lock(), "result": None, "error": None})
             async with entry["lock"]:
                 if entry["result"] is not None:
                     return {**entry["result"], "deduplicated": True}
-                result = await run_factory_script(jobs, body)
+                if entry["error"] is not None:
+                    # Ese intento ya pudo gastar tokens (o quedó incierto): no se repite con la misma clave. Un nuevo
+                    # intento es una nueva aprobación con otra clave.
+                    status, code, message = entry["error"]
+                    raise ServiceError(
+                        status, code, f"{message} (already attempted with this Idempotency-Key)"
+                    )
+                try:
+                    result = await run_factory_script(jobs, body)
+                except ServiceError as exc:
+                    entry["error"] = (exc.status, exc.code, exc.message)
+                    raise
+                except Exception as exc:
+                    entry["error"] = (
+                        502,
+                        "script_uncertain",
+                        f"The script request ended unexpectedly: {exc}",
+                    )
+                    raise
                 entry["result"] = result
                 if len(cache) > 200:  # solo las últimas peticiones: basta para reintentos
                     for old in list(cache)[:50]:

@@ -171,6 +171,7 @@ def test_structured_output_schema_has_no_unsupported_constraints():
 class FakeClaude:
     def __init__(self):
         self.requests: list = []
+        self.stop = "end_turn"  # "max_tokens": la respuesta se corta (gasta tokens y falla)
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
@@ -188,7 +189,7 @@ class FakeClaude:
             ("content_block_delta", {"type": "content_block_delta", "index": 0,
                                      "delta": {"type": "text_delta", "text": text}}),
             ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            ("message_delta", {"type": "message_delta", "delta": {"stop_reason": self.stop, "stop_sequence": None},
                                "usage": {"output_tokens": 2000}}),
             ("message_stop", {"type": "message_stop"}),
         ]  # fmt: skip
@@ -467,3 +468,22 @@ async def test_a_timeout_kills_the_whole_process_tree(tmp_path):
     except ProcessLookupError:
         alive = False
     assert not alive
+
+
+async def test_a_failed_paid_script_is_not_charged_again_with_the_same_key(env):
+    _, http, claude = env
+    ask = {"topic": "La Luna", "episodes": 1}
+    quote = (await http.post("/v1/factory/scripts/estimate", json=ask)).json()
+    claude.stop = "max_tokens"  # Claude gasta tokens y la salida se corta
+    calls = len(claude.requests)
+    first = await http.post("/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"]},
+                            headers={"Idempotency-Key": "k1"})  # fmt: skip
+    again = await http.post("/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"]},
+                            headers={"Idempotency-Key": "k1"})  # fmt: skip
+    assert first.status_code == again.status_code and first.status_code >= 400
+    assert "already attempted" in again.json()["error"]["message"]
+    assert len(claude.requests) == calls + 1  # el reintento con la misma clave no vuelve a llamar a Claude
+    claude.stop = "end_turn"
+    fresh = await http.post("/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"]},
+                            headers={"Idempotency-Key": "k2"})  # fmt: skip
+    assert fresh.status_code == 200 and len(claude.requests) == calls + 2

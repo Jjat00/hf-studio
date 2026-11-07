@@ -245,8 +245,10 @@ export function ContentFactory() {
     // La misma petición reintentada lleva la misma clave: si la primera llegó, no se vuelve a cobrar.
     if (scriptKey.current?.ask !== scriptAskKey) scriptKey.current = { ask: scriptAskKey, key: crypto.randomUUID() };
     try {
-      const r = await studio.factoryScripts({ ...scriptAsk, max_usd: scriptMax }, scriptKey.current.key);
+      const key = scriptKey.current.key;
+      // Tras este intento (bien o mal) la clave no se reutiliza: volver a pulsar es una nueva aprobación.
       scriptKey.current = null;
+      const r = await studio.factoryScripts({ ...scriptAsk, max_usd: scriptMax }, key);
       setScripts(r.episodes.map((s) => ({ ...s, scenes: s.scenes.map((sc) => ({ ...sc, visual: { ...sc.visual, items: sc.visual.items ?? [] } })) })));
       setScriptCost(r.cost_usd);
       setActive(0);
