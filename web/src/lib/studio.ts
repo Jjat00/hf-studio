@@ -350,13 +350,15 @@ export const studio = {
     call<ChatSummary>(`/v1/chats/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }),
   deleteChat: (id: string) => call<void>(`/v1/chats/${id}`, { method: "DELETE" }),
   /** Anota la generación lanzada desde una propuesta: el agente sabrá cómo terminó. */
-  /** `autoUsd`: la lanzó la generación automática; su precio cuenta contra el tope del chat. */
-  linkProposal: (chatId: string, proposalId: string, jobId: string, autoUsd?: number | null) =>
+  linkProposal: (chatId: string, proposalId: string, jobId: string) =>
     call<ChatProposal>(`/v1/chats/${chatId}/proposals/${proposalId}/job`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId, ...(autoUsd ? { auto_usd: autoUsd } : {}) }),
+      body: JSON.stringify({ job_id: jobId }),
     }),
+  /** Generación automática: el servidor cotiza, comprueba el tope del chat y lanza lo que falta de la propuesta. */
+  autoProposal: (chatId: string, proposalId: string) =>
+    call<{ proposal: ChatProposal; auto_spent_usd: number }>(`/v1/chats/${chatId}/proposals/${proposalId}/auto`, { method: "POST" }),
   /** Envía un mensaje y entrega cada evento del stream (text, tool, proposal, usage, error, done). */
   skills: () => call<{ skills: SkillSummary[] }>("/v1/skills"),
   skill: (slug: string) => call<Skill>(`/v1/skills/${encodeURIComponent(slug)}`),

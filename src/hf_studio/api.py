@@ -421,9 +421,6 @@ class ChatMessageIn(BaseModel):
 
 class ProposalJobIn(BaseModel):
     job_id: str = Field(max_length=36)
-    auto_usd: float | None = Field(
-        None, ge=0, description="Lanzada por la generación automática: su precio cuenta contra el tope"
-    )
 
 
 class EstimateIn(BaseModel):
@@ -525,6 +522,9 @@ def create_app(
         app.state.worker.router = app.state.router
         app.state.tasks = set()
         app.state.chats_busy = set()
+        # Un candado por chat para escribir sus propuestas (vincular, generar en automático, guardar un turno):
+        # ninguna escritura pisa a otra ni el tope automático se reparte dos veces.
+        app.state.chat_locks = {}
         app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
         async with app.state.sessions() as s:
@@ -2342,25 +2342,92 @@ def create_app(
         chat_id: str, proposal_id: str, body: ProposalJobIn, session: Session, owner: Owner
     ) -> dict:
         """Anota la generación que el usuario lanzó desde una propuesta: el agente sabrá cómo terminó."""
-        chat = await get_owned_chat(session, owner, chat_id)
-        if proposal_id not in chat.proposals:
-            raise ServiceError(404, "not_found", "Proposal not found")
+        await get_owned_chat(session, owner, chat_id)
         await get_owned_job(session, owner, body.job_id)
-        proposals = dict(chat.proposals)
-        p = proposals[proposal_id]
-        jobs = list(
-            dict.fromkeys([*(p.get("job_ids") or ([p["job_id"]] if p.get("job_id") else [])), body.job_id])
-        )
-        if len(jobs) > max(1, int(p.get("variations") or 1)):
-            raise ServiceError(
-                409, "proposal_complete", "All the generations of this proposal were already launched"
-            )
-        proposals[proposal_id] = {**p, "job_id": jobs[0], "job_ids": jobs, "reported": None}
-        chat.proposals = proposals
-        if body.auto_usd and chat.auto_budget_usd:
-            chat.auto_spent_usd = round((chat.auto_spent_usd or 0) + body.auto_usd, 4)
-        await session.commit()
-        return proposals[proposal_id]
+        async with chat_lock(chat_id):
+            chat = await session.get(Chat, chat_id, populate_existing=True)
+            if chat is None or proposal_id not in chat.proposals:
+                raise ServiceError(404, "not_found", "Proposal not found")
+            proposals = dict(chat.proposals)
+            p = proposals[proposal_id]
+            jobs = list(dict.fromkeys([*proposal_jobs(p), body.job_id]))
+            if len(jobs) > max(1, int(p.get("variations") or 1)):
+                raise ServiceError(
+                    409, "proposal_complete", "All the generations of this proposal were already launched"
+                )
+            proposals[proposal_id] = {**p, "job_id": jobs[0], "job_ids": jobs, "reported": None}
+            chat.proposals = proposals
+            await session.commit()
+            return proposals[proposal_id]
+
+    def chat_lock(chat_id: str) -> asyncio.Lock:
+        locks: dict[str, asyncio.Lock] = app.state.chat_locks
+        return locks.setdefault(chat_id, asyncio.Lock())
+
+    def proposal_jobs(p: dict) -> list[str]:
+        return list(p.get("job_ids") or ([p["job_id"]] if p.get("job_id") else []))
+
+    @app.post("/v1/chats/{chat_id}/proposals/{proposal_id}/auto", tags=["supercomputer"])
+    async def auto_generate_proposal(
+        chat_id: str, proposal_id: str, request: Request, session: Session, owner: Owner, catalog: CatalogDep
+    ) -> dict:
+        """Generación automática: lanza las generaciones que faltan de una propuesta guardada si su compromiso
+        total (precio o retención inicial, lo mayor, cotizado aquí) cabe en lo que queda del tope del chat. Todo o
+        nada, bajo el candado del chat; cada posición tiene su clave de idempotencia y solo lo creado cuenta contra
+        el tope, así que repetir la petición no lanza ni cobra dos veces."""
+        await get_owned_chat(session, owner, chat_id)
+        async with chat_lock(chat_id):
+            chat = await session.get(Chat, chat_id, populate_existing=True)
+            if chat is None or proposal_id not in (chat.proposals or {}):
+                raise ServiceError(404, "not_found", "Proposal not found")
+            if not chat.auto_budget_usd:
+                raise ServiceError(409, "auto_off", "Auto-generation is off for this chat")
+            p = chat.proposals[proposal_id]
+            inputs = p.get("inputs") or [p["input"]]
+            done = proposal_jobs(p)
+            model = check_input(catalog, p["model"], inputs[0])
+            pending = []
+            for i in range(len(done), len(inputs)):
+                plan = await make_plan(request, session, owner, model, inputs[i], {})
+                best = plan.best
+                if best is None or best.usd is None:
+                    raise ServiceError(
+                        409, "auto_unknown_price", "This proposal has no known price; generate it by hand"
+                    )
+                pending.append((i, plan, best.usd, best.reserve_usd))
+            commit_usd = round(sum(max(usd, reserve or 0) for _, _, usd, reserve in pending), 4)
+            left = round(chat.auto_budget_usd - (chat.auto_spent_usd or 0), 4)
+            if commit_usd > left + 1e-9:
+                raise ServiceError(
+                    409,
+                    "auto_budget_exceeded",
+                    f"Needs {commit_usd} USD and the chat has {max(left, 0)} USD left",
+                )
+            jobs, spent = list(done), 0.0
+            for i, plan, usd, reserve in pending:
+                stored, approved_usd, approved_reserve = authorize(plan, usd, reserve, False)
+                job, created = await create_generation(
+                    session, settings, catalog, owner, p["model"], inputs[i], f"auto:{chat.id}:{proposal_id}:{i}",
+                    allow_duplicate=True, plan=stored, max_usd=approved_usd, max_reserve_usd=approved_reserve,
+                    commit=False,
+                )  # fmt: skip
+                if created:
+                    job.project_id = chat.project_id
+                    spent += max(usd, reserve or 0)
+                if job.id not in jobs:
+                    jobs.append(job.id)
+            proposals = dict(chat.proposals)
+            proposals[proposal_id] = {
+                **p,
+                "job_id": jobs[0] if jobs else None,
+                "job_ids": jobs,
+                "reported": None,
+            }
+            chat.proposals = proposals
+            chat.auto_spent_usd = round((chat.auto_spent_usd or 0) + spent, 4)
+            await session.commit()
+        request.app.state.worker.wake()
+        return {"proposal": proposals[proposal_id], "auto_spent_usd": chat.auto_spent_usd}
 
     async def generation_updates(session: AsyncSession, proposals: dict) -> tuple[list[str], dict]:
         """Novedades de las generaciones lanzadas desde propuestas que el agente aún no conoce."""
@@ -2563,12 +2630,24 @@ def create_app(
         busy.add(chat_key)
 
         async def save(turn: sc.Turn) -> Chat | None:
-            async with app.state.sessions() as s:
+            async with chat_lock(chat_key), app.state.sessions() as s:
                 row = await s.get(Chat, chat_key)
                 if row is None:
                     return None
                 row.messages = [*history, *turn.messages]
-                row.proposals = {**proposals, **{p["tool_use_id"]: p for p in turn.proposals}}
+                # Sobre lo vigente: los vínculos hechos mientras Claude respondía se conservan; del inicio del turno
+                # solo se trae lo que el agente ya sabe de cada generación.
+                merged = dict(row.proposals or {})
+                for pid, p in proposals.items():
+                    if pid in merged:
+                        reported = {
+                            **(merged[pid].get("reported_jobs") or {}),
+                            **(p.get("reported_jobs") or {}),
+                        }
+                        ids = proposal_jobs(merged[pid])
+                        merged[pid] = {**merged[pid], "reported_jobs": reported,
+                                       "reported": reported.get(ids[0]) if ids else None}  # fmt: skip
+                row.proposals = {**merged, **{p["tool_use_id"]: p for p in turn.proposals}}
                 row.cost_usd = (row.cost_usd or 0) + turn.cost_usd
                 row.model = model
                 row.updated_at = utcnow()

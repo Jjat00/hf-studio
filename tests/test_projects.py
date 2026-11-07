@@ -61,3 +61,68 @@ async def test_a_project_chat_sends_the_brief_and_the_auto_budget(chat_env):  # 
     assert 'remaining_usd="3.00"' in head
     off = (await http.patch(f"/v1/chats/{chat['id']}", json={"auto_budget_usd": 0, "project_id": ""})).json()
     assert off["auto_budget_usd"] is None and off["project_id"] is None
+
+
+async def test_auto_generation_is_checked_and_reserved_on_the_server(chat_env):  # noqa: F811
+    from .test_supercomputer import PROPOSAL, tool
+
+    _, http, claude = chat_env
+    project = (await http.post("/v1/projects", json={"name": "Barcos"})).json()
+    chat = (await http.post("/v1/chats", json={"project_id": project["id"]})).json()
+    claude.script = [([tool("propose_generation", {**PROPOSAL, "variations": 2})], "tool_use")]
+    events = await send(http, chat["id"], "dos barcos")
+    pid = next(e["proposal"]["tool_use_id"] for e in events if e["type"] == "proposal")
+    url = f"/v1/chats/{chat['id']}/proposals/{pid}/auto"
+
+    assert (await http.post(url)).json()["error"]["code"] == "auto_off"
+    await http.patch(f"/v1/chats/{chat['id']}", json={"auto_budget_usd": 1})
+    over = await http.post(url)  # 2 × 0,71 no cabe en 1 USD: no se lanza nada
+    assert over.status_code == 409 and over.json()["error"]["code"] == "auto_budget_exceeded"
+    assert (await http.get("/v1/generations", params={"project": project["id"]})).json()["generations"] == []
+
+    await http.patch(f"/v1/chats/{chat['id']}", json={"auto_budget_usd": 2})
+    done = (await http.post(url)).json()
+    jobs = done["proposal"]["job_ids"]
+    assert len(jobs) == 2 and done["auto_spent_usd"] == 1.42
+    listed = (await http.get("/v1/generations", params={"project": project["id"]})).json()["generations"]
+    assert sorted(g["id"] for g in listed) == sorted(jobs)
+    again = (await http.post(url)).json()  # repetir no lanza ni cobra otra vez
+    assert again["proposal"]["job_ids"] == jobs and again["auto_spent_usd"] == 1.42
+    # Vincular a mano el mismo trabajo no suma al tope (el cliente ya no informa importes).
+    await http.post(f"/v1/chats/{chat['id']}/proposals/{pid}/job", json={"job_id": jobs[0], "auto_usd": 9})
+    assert (await http.get(f"/v1/chats/{chat['id']}")).json()["auto_spent_usd"] == 1.42
+
+
+async def test_a_link_made_while_the_agent_answers_is_kept(chat_env, tmp_path):  # noqa: F811
+    import json
+    import sqlite3
+
+    from .test_supercomputer import PROPOSAL, tool
+
+    _, http, claude = chat_env
+    claude.script = [([tool("propose_generation", PROPOSAL)], "tool_use")]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "un barco")
+    pid = next(e["proposal"]["tool_use_id"] for e in events if e["type"] == "proposal")
+
+    # Mientras Claude responde el mensaje siguiente, otra petición vincula una generación a la propuesta.
+    original = claude.__call__
+
+    def answer_and_link(request):
+        with sqlite3.connect(tmp_path / "c.db") as db:
+            (raw,) = db.execute("SELECT proposals FROM chats WHERE id = ?", (chat["id"],)).fetchone()
+            proposals = json.loads(raw)
+            proposals[pid] = {**proposals[pid], "job_id": "job-x", "job_ids": ["job-x"], "reported": None}
+            db.execute("UPDATE chats SET proposals = ? WHERE id = ?", (json.dumps(proposals), chat["id"]))
+        return original(request)
+
+    claude.__class__ = type("Linking", (claude.__class__,), {"__call__": lambda self, r: answer_and_link(r)})
+    await send(http, chat["id"], "otra cosa")
+    saved = (await http.get(f"/v1/chats/{chat['id']}")).json()
+    proposal = next(
+        part["proposal"]
+        for m in saved["messages"]
+        for part in m.get("parts", [])
+        if part.get("type") == "proposal"
+    )
+    assert proposal["job_ids"] == ["job-x"]

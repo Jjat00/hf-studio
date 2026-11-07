@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { ArrowLeft, Check, Folder, FolderPlus, MessageSquare, Pencil, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
 import { useGenerations } from "@/components/generations/use-generations";
 import { useI18n } from "@/components/i18n-provider";
@@ -29,10 +29,48 @@ export function ProjectView({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>("assets");
   const [folder, setFolder] = useState<string | undefined>(undefined);
   const [newFolder, setNewFolder] = useState<string | null>(null);
+  const [brief, setBrief] = useState<BriefDraft | null>(null);
 
   useEffect(() => {
-    studio.project(id).then(setProject, () => setMissing(true));
+    studio.project(id).then(
+      (pr) => {
+        setProject(pr);
+        setBrief({ text: pr.brief, saved: pr.brief, state: "saved" });
+      },
+      () => setMissing(true),
+    );
   }, [id]);
+
+  // Borrador del brief a nivel de proyecto: cambiar de pestaña no lo pierde. Se guarda un segundo después de dejar de
+  // escribir; si falla queda «Sin guardar» y se reintenta con el siguiente cambio o con el botón.
+  const pendingBrief = useRef<string | null>(null);
+  const saveBrief = useCallback(
+    async (text: string) => {
+      setBrief((b) => (b ? { ...b, state: "saving" } : b));
+      try {
+        const saved = await studio.updateProject(id, { brief: text });
+        pendingBrief.current = pendingBrief.current === text ? null : pendingBrief.current;
+        setProject(saved);
+        setBrief((b) => (b ? { ...b, saved: text, state: b.text === text ? "saved" : "unsaved" } : b));
+      } catch {
+        setBrief((b) => (b ? { ...b, state: "unsaved" } : b));
+      }
+    },
+    [id],
+  );
+  useEffect(() => {
+    if (!brief || brief.text === brief.saved || brief.state === "saving") return;
+    pendingBrief.current = brief.text;
+    const timer = setTimeout(() => void saveBrief(brief.text), 1000);
+    return () => clearTimeout(timer);
+  }, [brief, saveBrief]);
+  // Al salir del proyecto con cambios sin guardar, se envían igualmente.
+  useEffect(
+    () => () => {
+      if (pendingBrief.current !== null) void studio.updateProject(id, { brief: pendingBrief.current }).catch(() => undefined);
+    },
+    [id],
+  );
 
   if (missing) {
     return (
@@ -165,7 +203,13 @@ export function ProjectView({ id }: { id: string }) {
           </div>
         </div>
       )}
-      {tab === "brief" && <BriefEditor project={project} onSaved={setProject} />}
+      {tab === "brief" && brief && (
+        <BriefEditor
+          draft={brief}
+          onChange={(text) => setBrief((b) => (b ? { ...b, text, state: text === b.saved ? "saved" : "unsaved" } : b))}
+          onRetry={() => void saveBrief(brief.text)}
+        />
+      )}
       {tab === "settings" && (
         <Settings
           project={project}
@@ -369,49 +413,36 @@ function Assets({ project, folder, onCover }: { project: Project; folder?: strin
   );
 }
 
-/** Brief en Markdown: se guarda solo un segundo después de dejar de escribir. */
-function BriefEditor({ project, onSaved }: { project: Project; onSaved: (p: Project) => void }) {
+type BriefDraft = { text: string; saved: string; state: "saved" | "saving" | "unsaved" };
+
+/** Brief en Markdown: el borrador vive en ProjectView, que lo guarda solo. */
+function BriefEditor({ draft, onChange, onRetry }: { draft: BriefDraft; onChange: (text: string) => void; onRetry: () => void }) {
   const { t } = useI18n();
   const b = t.projects.brief;
-  const [text, setText] = useState(project.brief);
-  const [state, setState] = useState<"saved" | "saving" | "unsaved">("saved");
   const [preview, setPreview] = useState(false);
-  const latest = useRef(project.brief);
-
-  useEffect(() => {
-    if (text === latest.current) return;
-    setState("unsaved");
-    const timer = setTimeout(async () => {
-      setState("saving");
-      try {
-        const saved = await studio.updateProject(project.id, { brief: text });
-        latest.current = text;
-        onSaved(saved);
-        setState("saved");
-      } catch {
-        setState("unsaved");
-      }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [text, project.id, onSaved]);
-
   return (
     <div className="mt-5 max-w-4xl">
       <div className="mb-2 flex items-center gap-3 text-xs text-fg-3">
         <span>{b.hint}</span>
-        <span className={clsx("ml-auto", state === "unsaved" && "text-warning")}>{b[state]}</span>
+        {draft.state === "unsaved" ? (
+          <button type="button" onClick={onRetry} className="ml-auto text-warning hover:underline">
+            {b.unsaved} · {b.retry}
+          </button>
+        ) : (
+          <span className="ml-auto">{b[draft.state]}</span>
+        )}
         <button type="button" onClick={() => setPreview(!preview)} className="rounded-lg bg-surface-4 px-2.5 py-1 font-medium text-fg-2 hover:text-fg">
           {preview ? <Pencil className="size-3.5" /> : "Markdown"}
         </button>
       </div>
       {preview ? (
         <div className="rounded-2xl border border-line bg-surface-2 p-5 text-[15px] leading-relaxed">
-          <Markdown text={text} />
+          <Markdown text={draft.text} />
         </div>
       ) : (
         <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+          value={draft.text}
+          onChange={(e) => onChange(e.target.value)}
           rows={24}
           maxLength={50000}
           className="thin-scrollbar w-full rounded-2xl border border-line-2 bg-surface-2 p-5 font-mono text-[14px] leading-relaxed outline-none focus:border-lime/50"

@@ -495,7 +495,7 @@ export function Supercomputer() {
       projectId: chatProject,
       left,
       fresh,
-      onSpent: (usd) => setChat((c) => (c ? { ...c, auto_spent_usd: (c.auto_spent_usd ?? 0) + usd } : c)),
+      onSpent: (spentUsd) => setChat((c) => (c ? { ...c, auto_spent_usd: Math.max(c.auto_spent_usd ?? 0, spentUsd) } : c)),
     }),
     [chatProject, left, fresh],
   );
@@ -931,7 +931,9 @@ export function Supercomputer() {
                 {pending?.role === "user" && <UserBubble m={pending} />}
                 {draft && chat && (
                   <div className="space-y-3">
-                    <Parts chatId={chat.id} parts={draft.parts} />
+                    <ChatAutoContext.Provider value={{ ...autoValue, draft: true }}>
+                      <Parts chatId={chat.id} parts={draft.parts} />
+                    </ChatAutoContext.Provider>
                     {draft.status && (
                       <p className="flex items-center gap-2 text-sm text-fg-3">
                         <Loader2 className="size-4 animate-spin text-lime" /> {draft.status}

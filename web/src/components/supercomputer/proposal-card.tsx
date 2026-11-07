@@ -157,7 +157,10 @@ export type ChatAuto = {
   /** Lo que queda del tope de generación automática (null: apagada). */
   left: number | null;
   fresh: Set<string>;
-  onSpent: (usd: number) => void;
+  /** Lo gastado en automático según el servidor tras lanzar una propuesta. */
+  onSpent: (spentUsd: number) => void;
+  /** Tarjeta del turno en curso: la propuesta aún no está guardada, así que no se puede lanzar todavía. */
+  draft?: boolean;
 };
 export const ChatAutoContext = createContext<ChatAuto>({ projectId: null, left: null, fresh: new Set(), onSpent: () => {} });
 
@@ -222,10 +225,10 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
 
   const priceOf = (i: number) => (pieces ? estimates?.[i] : estimate) ?? null;
 
-  async function generate(automatic = false) {
-    if (!estimates?.length) return;
+  async function generate() {
+    if (!estimates?.length || auto.draft) return;
     const known = estimates.every((e) => costAllowsDirectSubmit(e));
-    if (!known && (automatic || !window.confirm(s.confirmUnknown))) return;
+    if (!known && !window.confirm(s.confirmUnknown)) return;
     setBusy(true);
     setError(null);
     key.current ||= crypto.randomUUID();
@@ -244,11 +247,10 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
           count > 1,
           auto.projectId,
         );
-        const paid = automatic ? (priceOf(i)?.usd ?? null) : null;
-        await studio.linkProposal(chatId, proposal.tool_use_id, g.id, paid).catch(() => {});
-        if (paid) auto.onSpent(paid);
         onUpdate(g);
         setJobIds((prev) => (prev.includes(g.id) ? prev : [...prev, g.id]));
+        // Sin anotarla, el agente no sabría cómo terminó: se avisa en vez de callarlo.
+        await studio.linkProposal(chatId, proposal.tool_use_id, g.id).catch(() => setError(s.linkFailed));
       }
     } catch (e) {
       if (e instanceof StudioError && (e.code === "cost_changed" || e.code === "reserve_not_approved")) {
@@ -261,10 +263,24 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
     }
   }
 
-  // Generación automática: una propuesta recién llegada cuyo total conocido cabe en lo que queda se lanza sola, una vez.
-  const launchAuto = useEffectEvent(() => void generate(true));
+  // Generación automática: una propuesta de esta sesión, ya guardada, cuyo total conocido parece caber en lo que queda
+  // se pide al servidor, que cotiza, reserva el tope y la lanza (o la rechaza) de forma atómica e idempotente.
+  async function runAuto() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await studio.autoProposal(chatId, proposal.tool_use_id);
+      setJobIds(r.proposal.job_ids ?? []);
+      auto.onSpent(r.auto_spent_usd);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const launchAuto = useEffectEvent(() => void runAuto());
   useEffect(() => {
-    if (!estimates?.length || jobIds.length || auto.left == null || !auto.fresh.has(proposal.tool_use_id)) return;
+    if (auto.draft || !estimates?.length || jobIds.length || auto.left == null || !auto.fresh.has(proposal.tool_use_id)) return;
     if (!estimates.every((e) => costAllowsDirectSubmit(e))) return;
     const each = Array.from({ length: count }, (_, i) => (pieces ? estimates[i] : estimates[0])?.usd ?? null);
     if (each.some((u) => u == null)) return;
@@ -397,7 +413,8 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
           <button
             type="button"
             onClick={() => void generate()}
-            disabled={busy || quoting || !estimate}
+            disabled={busy || quoting || !estimate || auto.draft}
+            title={auto.draft ? s.waitTurn : undefined}
             className="flex h-9 items-center gap-1.5 rounded-xl bg-lime px-3.5 text-sm font-semibold text-ink transition hover:brightness-105 disabled:opacity-50"
           >
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}

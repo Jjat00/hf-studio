@@ -415,7 +415,7 @@ const es = {
     back: "Proyectos",
     notFound: "No se encontró este proyecto.",
     tabs: { assets: "Generaciones", brief: "Brief", settings: "Ajustes" },
-    brief: { saved: "Guardado", saving: "Guardando…", unsaved: "Sin guardar", hint: "Markdown. Supercomputer lo lee como contexto en los chats de este proyecto." },
+    brief: { saved: "Guardado", saving: "Guardando…", unsaved: "Sin guardar", retry: "Reintentar", hint: "Markdown. Supercomputer lo lee como contexto en los chats de este proyecto." },
     settings: {
       name: "Nombre",
       description: "Descripción",
@@ -984,6 +984,8 @@ const es = {
     autoGenBudget: "Tope (USD)",
     autoGenSpent: (spent: string, budget: string) => `Lanzado: ${spent} de ${budget}`,
     autoGenApply: "Activar",
+    waitTurn: "Espera a que termine la respuesta",
+    linkFailed: "Se generó, pero no se pudo anotar en el chat: el agente no sabrá cómo terminó.",
     autoGenStop: "Apagar",
     chatOptions: "Proyecto y generación automática",
     modeHints: {
@@ -1610,7 +1612,7 @@ const en: Dict = {
     back: "Projects",
     notFound: "Project not found.",
     tabs: { assets: "Generations", brief: "Brief", settings: "Settings" },
-    brief: { saved: "Saved", saving: "Saving…", unsaved: "Unsaved", hint: "Markdown. Supercomputer reads it as context in this project's chats." },
+    brief: { saved: "Saved", saving: "Saving…", unsaved: "Unsaved", retry: "Retry", hint: "Markdown. Supercomputer reads it as context in this project's chats." },
     settings: {
       name: "Name",
       description: "Description",
@@ -2178,6 +2180,8 @@ const en: Dict = {
     autoGenBudget: "Budget (USD)",
     autoGenSpent: (spent: string, budget: string) => `Launched: ${spent} of ${budget}`,
     autoGenApply: "Turn on",
+    waitTurn: "Wait for the answer to finish",
+    linkFailed: "It was generated, but could not be noted in the chat: the agent will not know how it ended.",
     autoGenStop: "Turn off",
     chatOptions: "Project and auto-generation",
     modeHints: {
