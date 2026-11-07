@@ -90,7 +90,9 @@ export function useGenerations({
   // Un solo planificador de sondeos: cada (re)programación sube `epoch` y cualquier ciclo anterior (también uno con
   // una lectura en vuelo) se detiene al ver que ya no es el vigente. Desmontar sube `epoch` y no deja nada vivo.
   const epoch = useRef(0);
+  const mounted = useRef(false); // un `add` que llega tras desmontar (respuesta tardía) no reactiva nada
   const schedule = useCallback((delay: number) => {
+    if (!mounted.current) return;
     const mine = ++epoch.current;
     if (timer.current) clearTimeout(timer.current);
     const tick = async () => {
@@ -107,8 +109,10 @@ export function useGenerations({
     visible.current = `${hidden}|${favorite}|${project ?? ""}|${folder ?? ""}`;
     latestRefresh.current = refresh;
     invalidate();
+    mounted.current = true;
     schedule(0);
     return () => {
+      mounted.current = false;
       epoch.current += 1;
       if (timer.current) clearTimeout(timer.current);
     };
