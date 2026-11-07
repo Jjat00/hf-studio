@@ -25,6 +25,7 @@ function useDocDraft(onSaved: (doc: ProjectDoc) => void, untitled: string) {
   const latest = useRef(new Map<string, Draft>());
   const server = useRef(new Map<string, { version: number; draft: Draft }>());
   const inFlight = useRef(new Set<string>());
+  const conflicts = useRef(new Set<string>()); // documentos en conflicto hasta recargarlos o guardar bien
 
   const same = (a: Draft | undefined | null, b: Draft | undefined | null) =>
     !!a && !!b && a.title === b.title && a.kind === b.kind && a.markdown === b.markdown;
@@ -43,10 +44,13 @@ function useDocDraft(onSaved: (doc: ProjectDoc) => void, untitled: string) {
           try {
             const saved = await studio.updateDocument(id, { ...next, title: next.title.trim() || untitled, base_version: base.version });
             server.current.set(id, { version: saved.version, draft: next });
+            conflicts.current.delete(id);
             onSaved(saved);
             if (mine()) setDoc(saved);
           } catch (e) {
-            if (mine()) setState(e instanceof StudioError && e.status === 409 ? "conflict" : "unsaved");
+            const conflict = e instanceof StudioError && e.status === 409;
+            if (conflict) conflicts.current.add(id);
+            if (mine()) setState(conflict ? "conflict" : "unsaved");
             return;
           }
         }
@@ -72,11 +76,14 @@ function useDocDraft(onSaved: (doc: ProjectDoc) => void, untitled: string) {
       const local = latest.current.get(d.id);
       const busy = inFlight.current.has(d.id) || (!!local && !!known && !same(local, known.draft));
       if (!force && known && (busy || d.version < known.version)) {
+        // Lo leído es más nuevo que la base de un borrador sin guardar: el servidor cambió, es un conflicto.
+        if (busy && d.version > known.version) conflicts.current.add(d.id);
         setDoc((x) => (x?.id === d.id && x.version >= d.version ? x : { ...d, version: known.version }));
         setDraft(local ?? known.draft);
-        setState(inFlight.current.has(d.id) ? "saving" : busy ? "unsaved" : "saved");
+        setState(conflicts.current.has(d.id) ? "conflict" : inFlight.current.has(d.id) ? "saving" : busy ? "unsaved" : "saved");
         return;
       }
+      conflicts.current.delete(d.id);
       const value = { title: d.title, kind: d.kind, markdown: d.markdown };
       server.current.set(d.id, { version: d.version, draft: value });
       latest.current.set(d.id, value);
