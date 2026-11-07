@@ -515,3 +515,38 @@ def test_diagram_edges_survive_the_job_round_trip():
     no_alias = Script.model_validate(script).model_dump(exclude_none=True)
     assert build_composition(no_alias, STYLES["lab"], [SceneTime(i, 1.0) for i in range(12)], [], "es",
                              12.0).count('class="dg-edge"') == 2  # fmt: skip
+
+
+def test_a_huge_constant_curve_gets_a_drawable_range():
+    import numpy as np
+
+    from hf_studio.factory_math import auto_range, svg_path
+
+    for value in (1e18, 1e300, float("inf")):
+        lo, hi = auto_range([np.full(50, value)])
+        assert hi > lo
+        svg_path(np.linspace(-5, 5, 50), np.full(50, value), (-5.0, 5.0, lo, hi), 400, 300)
+    lo, hi = auto_range([np.full(50, 1e9 * 1e9 / 1e9)])
+    assert hi > lo
+    svg_path(
+        np.linspace(0, 1, 3), np.zeros(3), (0.0, 0.0, 1.0, 1.0), 10, 10
+    )  # marco sin área: no divide por cero
+
+
+async def test_a_paused_research_turn_stops_instead_of_continuing():
+    import httpx2
+
+    from hf_studio.factory_script import ScriptError, write_scripts
+
+    sent: list[dict] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"},
+                               content=_sse([{"type": "text", "text": "Buscando…"}], "pause_turn", 4))  # fmt: skip
+
+    with pytest.raises(ScriptError) as err:
+        await write_scripts("sk", "La FFT", "lab", 60, 1, "es", base_url="https://api.anthropic.test",
+                            http_client_factory=lambda: httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+                            format_id="quick-explainer", research=True)  # fmt: skip
+    assert err.value.code == "script_incomplete" and len(sent) == 1  # nunca una segunda llamada

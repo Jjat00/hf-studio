@@ -210,16 +210,25 @@ def sample(expr: Expr, x0: float, x1: float, n: int = 240, t: float = 0.0) -> tu
     return xs, ys
 
 
+LIMIT = 1e12  # |y| mayor no se dibuja
+
+
 def auto_range(values: list[np.ndarray]) -> tuple[float, float]:
     """Rango vertical que no deja que una asíntota (tan, 1/x) aplaste la curva: percentiles y un margen."""
-    finite = np.concatenate([v[np.isfinite(v)] for v in values]) if values else np.array([])
+    # Solo valores que el trazo puede dibujar (svg_path descarta |y| > 1e12): sin ellos, un rango por defecto.
+    finite = (
+        np.concatenate([v[np.isfinite(v) & (np.abs(v) <= LIMIT)] for v in values]) if values else np.array([])
+    )
     if finite.size == 0:
         return -1.0, 1.0
     lo, hi = float(np.percentile(finite, 2)), float(np.percentile(finite, 98))
-    if hi - lo < 1e-9:
-        lo, hi = lo - 1, hi + 1
+    if not hi - lo > max(1e-9, abs(hi) * 1e-9):
+        # Curva constante (también enorme: sumar 1 a 1e18 no la mueve): margen relativo a su magnitud.
+        delta = max(1.0, abs(hi) * 0.1)
+        lo, hi = lo - delta, hi + delta
     pad = (hi - lo) * 0.12
-    return lo - pad, hi + pad
+    lo, hi = lo - pad, hi + pad
+    return (lo, hi) if math.isfinite(lo) and math.isfinite(hi) and hi > lo else (-1.0, 1.0)
 
 
 def svg_path(
@@ -234,6 +243,8 @@ def svg_path(
     asíntota); con él, recorta al marco y nunca corta, para que todas las versiones animadas tengan los mismos
     comandos (WAAPI interpola `d` solo así)."""
     x0, x1, y0, y1 = box
+    if not (x1 > x0 and y1 > y0):  # un marco sin área no se puede dibujar: se ensancha
+        x1, y1 = max(x1, x0 + 1.0), max(y1, y0 + 1.0)
     sx = w / (x1 - x0)
     sy = h / (y1 - y0)
     parts: list[str] = []

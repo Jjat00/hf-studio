@@ -751,7 +751,8 @@ async def write_scripts(
     research: bool = False,
 ) -> dict:
     """Una llamada a Claude (con búsqueda web si `research`). Devuelve {series_title, episodes, sources, cost_usd,
-    usage, model, searches}."""
+    usage, model, searches}. Hace una sola llamada (la que cubre la cotización aprobada): si la búsqueda se pausa,
+    se detiene en vez de continuar."""
     if format_id == CUSTOM and not (custom or "").strip():
         raise ScriptError(422, "format_required", "Describe the custom format")
     client = anthropic.AsyncAnthropic(
@@ -783,18 +784,20 @@ async def write_scripts(
     searches = 0
     try:
         # En streaming: un guion largo tarda; sin stream la conexión puede cortarse a mitad. Con búsqueda, el bucle
-        # del servidor puede pausar el turno (`pause_turn`): se reanuda una vez como mucho.
-        for _ in range(2):
-            async with client.messages.stream(**request) as stream:
-                response = await stream.get_final_message()
-            cost += usage_usd(model, response.usage)
-            tokens["input_tokens"] += response.usage.input_tokens or 0
-            tokens["output_tokens"] += response.usage.output_tokens or 0
-            used = getattr(getattr(response.usage, "server_tool_use", None), "web_search_requests", 0)
-            searches += used or 0
-            if response.stop_reason != "pause_turn":
-                break
-            request["messages"] = [*request["messages"], {"role": "assistant", "content": response.content}]
+        # del servidor puede pausar el turno (`pause_turn`): no se reanuda (ver abajo).
+        async with client.messages.stream(**request) as stream:
+            response = await stream.get_final_message()
+        cost += usage_usd(model, response.usage)
+        tokens["input_tokens"] += response.usage.input_tokens or 0
+        tokens["output_tokens"] += response.usage.output_tokens or 0
+        used = getattr(getattr(response.usage, "server_tool_use", None), "web_search_requests", 0)
+        searches += used or 0
+        if response.stop_reason == "pause_turn":
+            # Una pausa del bucle de búsqueda no se continúa: la continuación relee todo lo acumulado y podría
+            # pasarse del tope aprobado. Se detiene con lo gastado (una sola llamada, la que cubre la cotización).
+            raise ScriptError(
+                502, "script_incomplete", "The web research took too long; try again or turn off web search"
+            )
     except anthropic.APIStatusError as exc:
         raise ScriptError(502, "claude_error", f"Claude API error {exc.status_code}: {exc.message}") from None
     except anthropic.APIConnectionError as exc:
