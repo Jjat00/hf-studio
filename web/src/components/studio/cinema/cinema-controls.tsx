@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { Camera, Clapperboard, Lightbulb, Palette } from "lucide-react";
-import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import {
   APERTURES,
@@ -28,7 +28,7 @@ import { CameraModal, Sequence } from "./camera-modal";
 import { FilmModal } from "./film-modal";
 import { LightingModal } from "./lighting-modal";
 import { PaletteModal } from "./palette-modal";
-import { LightSphere, PaletteStrip } from "./previews";
+import { LightSphere, PaletteMosaic, PaletteStrip } from "./previews";
 
 export type CinemaProps = {
   keys: CinemaKey[];
@@ -46,11 +46,29 @@ function useSetMovements({ setValue, setExtra }: Pick<CinemaProps, "setValue" | 
   };
 }
 
+export type CinemaPanel = "film" | "camera" | "palette" | "light";
+
+type ControlsProps = CinemaProps & {
+  /** `grid`: tarjetas en rejilla (Video). `row`: una fila, como el compositor de Cinema Studio. */
+  variant?: "grid" | "row";
+  /** Nombres de las tarjetas (Cinema Studio usa los de Higgsfield). */
+  names?: { film: string; camera: string; palette: string; light: string };
+  /** Tarjeta al principio de la fila (References). */
+  lead?: ReactNode;
+  /** Ventana abierta, controlada desde fuera (p. ej. el botón de movimiento del compositor). */
+  open?: CinemaPanel | null;
+  onOpenChange?: (panel: CinemaPanel | null) => void;
+  cameraTab?: "setup" | "movement";
+};
+
 /** Barra de dirección de Cinema Studio: película, cámara, paleta e iluminación, cada una con su ventana. */
-export function CinemaControls(props: CinemaProps) {
-  const { keys, values, setValue, extra, setExtra } = props;
+export function CinemaControls(props: ControlsProps) {
+  const { keys, values, setValue, extra, setExtra, variant = "grid", lead } = props;
   const { t, pick } = useI18n();
-  const [open, setOpen] = useState<"film" | "camera" | "palette" | "light" | null>(null);
+  const [ownOpen, setOwnOpen] = useState<CinemaPanel | null>(null);
+  const open = props.open !== undefined ? props.open : ownOpen;
+  const setOpen = props.onOpenChange ?? setOwnOpen;
+  const names = props.names ?? { film: t.cinema.filmSetup, camera: t.cinema.camera, palette: t.cinema.palette, light: t.cinema.lighting };
   const setMovements = useSetMovements(props);
   const movements = movementsOf(values, extra);
   const palette = customPaletteOf(values, extra);
@@ -79,8 +97,39 @@ export function CinemaControls(props: CinemaProps) {
   const scheme = findOption(LIGHTS, values.light) as (typeof LIGHTS)[number] | undefined;
   const sphere = scheme?.preview ?? (lighting ? { lights: lighting.lights } : null);
 
+  const paletteName = catalogPalette?.name ?? palette?.name ?? t.cinema.auto;
+  const lightName = scheme ? pick(scheme.label) : (lighting?.name ?? t.cinema.auto);
+
   return (
-    <div className="@container flex flex-col gap-2">
+    // En la fila del compositor sin @container: la contención haría de esta caja el ancla de las ventanas.
+    <div className={clsx("flex flex-col gap-2", variant === "grid" && "@container")}>
+      {variant === "row" ? (
+      <div className="hide-scrollbar flex gap-1.5 overflow-x-auto">
+        {lead}
+        {hasFilm && <RowCard thumb={<Clapperboard className="size-4" />} label={names.film} value={filmValue} active={filmValue !== t.cinema.auto} selected={open === "film"} onClick={() => setOpen("film")} />}
+        {hasCamera && <RowCard thumb={<Camera className="size-4" />} label={names.camera} value={cameraValue} active={cameraValue !== t.cinema.auto} selected={open === "camera"} onClick={() => setOpen("camera")} />}
+        {hasPalette && (
+          <RowCard
+            thumb={paletteColors ? <PaletteMosaic colors={paletteColors} className="size-full" /> : <Palette className="size-4" />}
+            label={names.palette}
+            value={paletteName}
+            active={!!paletteColors}
+            selected={open === "palette"}
+            onClick={() => setOpen("palette")}
+          />
+        )}
+        {hasLight && (
+          <RowCard
+            thumb={sphere ? <LightSphere {...sphere} size={30} /> : <Lightbulb className="size-4" />}
+            label={names.light}
+            value={lightName}
+            active={!!sphere}
+            selected={open === "light"}
+            onClick={() => setOpen("light")}
+          />
+        )}
+      </div>
+      ) : (
       <div className="grid grid-cols-2 gap-2 @sm:grid-cols-4">
         {hasFilm && <Card icon={<Clapperboard className="size-4" />} label={t.cinema.filmSetup} value={filmValue} active={filmValue !== t.cinema.auto} onClick={() => setOpen("film")} />}
         {hasCamera && <Card icon={<Camera className="size-4" />} label={t.cinema.camera} value={cameraValue} active={cameraValue !== t.cinema.auto} onClick={() => setOpen("camera")} />}
@@ -104,10 +153,11 @@ export function CinemaControls(props: CinemaProps) {
           />
         )}
       </div>
+      )}
 
       {movements.length > 1 && <Sequence compact movements={movements} setMovements={setMovements} />}
 
-      {extras.length > 0 && (
+      {variant === "grid" && extras.length > 0 && (
         <p className="rounded-xl border border-dashed border-line px-3 py-2 text-[11.5px] leading-snug text-fg-3">
           <span className="text-fg-2">{t.cinema.appended}</span> {extras.join(" ")}
         </p>
@@ -115,7 +165,7 @@ export function CinemaControls(props: CinemaProps) {
 
       {open === "film" && <FilmModal keys={keys} values={values} setValue={setValue} onClose={() => setOpen(null)} />}
       {open === "camera" && (
-        <CameraModal keys={keys} values={values} setValue={setValue} movements={movements} setMovements={setMovements} onClose={() => setOpen(null)} />
+        <CameraModal keys={keys} values={values} setValue={setValue} movements={movements} setMovements={setMovements} initialTab={props.cameraTab} onClose={() => setOpen(null)} />
       )}
       {open === "palette" && (
         <PaletteModal
@@ -143,6 +193,26 @@ export function CinemaControls(props: CinemaProps) {
   );
 }
 
+/** Tarjeta de la fila del compositor: miniatura, etiqueta pequeña en mono y el valor. */
+function RowCard({ thumb, label, value, active, selected, onClick }: { thumb: ReactNode; label: string; value: string; active: boolean; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        "flex h-12 min-w-[132px] flex-1 items-center gap-2.5 rounded-xl border py-1.5 pr-3 pl-1.5 text-left transition-colors hover:bg-surface-4",
+        selected ? "border-line-2 bg-surface-4" : "border-transparent bg-surface-3",
+      )}
+    >
+      <span className={clsx("flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-5", active ? "text-lime" : "text-fg-2")}>{thumb}</span>
+      <span className="min-w-0">
+        <span className="block truncate font-mono text-[10px] leading-tight text-fg-3">{label}</span>
+        <span className={clsx("block truncate text-[14px] leading-tight font-semibold", active ? "text-fg" : "text-fg-2")}>{value}</span>
+      </span>
+    </button>
+  );
+}
+
 function Card({ icon, label, value, active, onClick, visual }: { icon: React.ReactNode; label: string; value: string; active: boolean; onClick: () => void; visual?: React.ReactNode }) {
   return (
     <button
@@ -166,7 +236,7 @@ function Card({ icon, label, value, active, onClick, visual }: { icon: React.Rea
 type HashQuery = { start: number; end: number; text: string };
 
 /** Menú que aparece al escribir # en el prompt: el movimiento elegido se añade a la secuencia y el #texto se quita. */
-export function HashMovementMenu({ textareaRef, ...props }: CinemaProps & { textareaRef: RefObject<HTMLTextAreaElement | null> }) {
+export function HashMovementMenu({ textareaRef, above, ...props }: CinemaProps & { textareaRef: RefObject<HTMLTextAreaElement | null>; above?: boolean }) {
   const { values, setValue, extra } = props;
   const { t, pick } = useI18n();
   const [query, setQuery] = useState<HashQuery | null>(null);
@@ -235,7 +305,7 @@ export function HashMovementMenu({ textareaRef, ...props }: CinemaProps & { text
 
   if (!open) return null;
   return (
-    <div className="absolute inset-x-3 top-full z-30 mt-1 overflow-hidden rounded-2xl border border-line-2 bg-surface-2 p-1 shadow-2xl">
+    <div className={clsx("absolute inset-x-3 z-30 overflow-hidden rounded-2xl border border-line-2 bg-surface-2 p-1 shadow-2xl", above ? "bottom-full mb-1" : "top-full mt-1")}>
       <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold tracking-[0.12em] text-fg-3 uppercase">{t.cinema.hashTitle}</p>
       {list.map((m, i) => (
         <button

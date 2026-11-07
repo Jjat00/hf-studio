@@ -1,11 +1,7 @@
-import { ProjectView } from "@/components/projects/project-view";
-import { getDict } from "@/lib/i18n/server";
+import { redirect } from "next/navigation";
 
-export async function generateMetadata() {
-  return { title: `${(await getDict()).meta.projects} · HF Studio` };
-}
-
+/** Un proyecto se abre en su espacio de Cinema Studio. */
 export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <ProjectView id={id} />;
+  redirect(`/cinema/${id}`);
 }
