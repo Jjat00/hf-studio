@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import time
 import unicodedata
 from pathlib import Path
@@ -259,16 +260,30 @@ async def run_proc(
     *args: str, timeout: float, cwd: Path | None = None, env: dict | None = None
 ) -> tuple[int, str]:
     """Subproceso en su propio grupo: al vencer el plazo o cancelarse se mata entero (npx lanza Chrome)."""
+    windows = os.name == "nt"
+    group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if windows else {"start_new_session": True}
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=str(cwd) if cwd else None,
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
-        start_new_session=True,
+        **group,
     )
 
     def kill() -> None:
+        """Mata el árbol entero: en POSIX su grupo de procesos; en Windows con taskkill /T (hijos y nietos)."""
+        if windows:
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+            with contextlib.suppress(ProcessLookupError, OSError):
+                proc.kill()
+            return
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
 
@@ -308,6 +323,8 @@ class ContentFactoryJobs(BackgroundProvider):
         return model == FACTORY_MODEL
 
     async def produce(self, folder: Path, model: str, arguments: dict) -> tuple[str, str, str]:
+        # Absoluta: el render corre con otro `cwd` y `storage_dir` puede ser relativo (data/files por defecto).
+        folder = folder.resolve()
         script = Script.model_validate(arguments["script"]).model_dump(exclude_none=True)
         style = STYLES.get(arguments.get("style") or DEFAULT_STYLE, STYLES[DEFAULT_STYLE])
         voice = arguments["voice"]

@@ -155,10 +155,21 @@ export const studio = {
   /** Content Factory: estilos, plantillas y qué hace falta para escribir guiones y renderizar. */
   factory: (lang = "es") => call<FactoryInfo>(`/v1/factory?lang=${encodeURIComponent(lang)}`),
   /** Claude escribe el guion de cada episodio (solo cuesta tokens de Claude, `cost_usd`). */
-  factoryScripts: (body: { topic: string; style: string; duration_seconds: number; episodes: number; language: string }) =>
-    call<FactoryScripts>("/v1/factory/scripts", {
+  /** Lo máximo que puede costar escribir ese guion (no llama a Claude). */
+  factoryScriptEstimate: (body: { topic: string; style: string; duration_seconds: number; episodes: number; language: string }) =>
+    call<{ max_usd: number; model: string; available: boolean }>("/v1/factory/scripts/estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** Escribe el guion con el tope que vio el usuario (`max_usd`); la misma clave no vuelve a cobrar un reintento. */
+  factoryScripts: (
+    body: { topic: string; style: string; duration_seconds: number; episodes: number; language: string; max_usd: number },
+    idempotencyKey: string,
+  ) =>
+    call<FactoryScripts>("/v1/factory/scripts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(body),
     }),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),

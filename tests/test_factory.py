@@ -227,9 +227,27 @@ async def test_claude_writes_a_series_and_reports_its_cost(env):
     _, http, claude = env
     info = (await http.get("/v1/factory")).json()
     assert info["model"] == MODEL and info["scripts"]["available"] and len(info["styles"]) >= 8
-    r = await http.post("/v1/factory/scripts", json={"topic": "¿Qué pasaría si la Luna desapareciera?",
-                                                      "style": "orbital", "episodes": 2, "duration_seconds": 45})  # fmt: skip
+    ask = {
+        "topic": "¿Qué pasaría si la Luna desapareciera?",
+        "style": "orbital",
+        "episodes": 2,
+        "duration_seconds": 45,
+    }
+    calls = len(claude.requests)
+    unapproved = await http.post("/v1/factory/scripts", json=ask)  # sin tope aprobado no se llama a Claude
+    assert unapproved.status_code == 409 and unapproved.json()["error"]["code"] == "quote_required"
+    quote = (await http.post("/v1/factory/scripts/estimate", json=ask)).json()
+    assert quote["max_usd"] > 0 and len(claude.requests) == calls
+    low = await http.post("/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"] / 2})
+    assert low.status_code == 409 and len(claude.requests) == calls
+    r = await http.post(
+        "/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"]}, headers={"Idempotency-Key": "g1"}
+    )
     assert r.status_code == 200, r.text
+    again = await http.post(
+        "/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"]}, headers={"Idempotency-Key": "g1"}
+    )
+    assert again.json()["deduplicated"] is True and len(claude.requests) == calls + 1  # el reintento no cobra
     body = r.json()
     assert (
         len(body["episodes"]) == 2
@@ -241,7 +259,7 @@ async def test_claude_writes_a_series_and_reports_its_cost(env):
     assert sent["output_config"]["format"]["type"] == "json_schema" and sent["model"] == "claude-opus-5-5"
     assert sent["stream"] is True
     assert "2 episodes" in sent["messages"][0]["content"] and "Spanish" in sent["messages"][0]["content"]
-    bad = await http.post("/v1/factory/scripts", json={"topic": "algo", "style": "nope"})
+    bad = await http.post("/v1/factory/scripts", json={"topic": "algo", "style": "nope", "max_usd": 5})
     assert bad.status_code == 422
 
 
@@ -253,7 +271,7 @@ async def test_scripts_need_the_anthropic_key(tmp_path):
             await s.commit()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t",
                                      headers={"Authorization": "Bearer hfs_a"}) as http:  # fmt: skip
-            r = await http.post("/v1/factory/scripts", json={"topic": "La Luna"})
+            r = await http.post("/v1/factory/scripts", json={"topic": "La Luna", "max_usd": 5})
     assert r.status_code == 503 and r.json()["error"]["code"] == "anthropic_not_configured"
 
 
@@ -315,6 +333,8 @@ async def test_a_job_narrates_renders_mixes_and_cleans_up(env, monkeypatch):
         return [Word(w, 0.1 * i, 0.1 * i + 0.1) for i, w in enumerate(text.split())]
 
     async def fake_render(self, project, out, total):
+        # El render corre con otro cwd: proyecto y salida llegan como rutas absolutas.
+        assert project.is_absolute() and out.is_absolute()
         rendered["html"] = (project / "index.html").read_text()
         rendered["fonts"] = sorted(p.name for p in (project / "fonts").iterdir())
         code, msg = await fac.run_proc("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
@@ -421,3 +441,29 @@ async def test_render_smoke(tmp_path):
     from hf_studio.audio import duration
 
     assert out.stat().st_size > 0 and await duration(str(out)) == pytest.approx(2.0, abs=0.1)
+
+
+async def test_a_timeout_kills_the_whole_process_tree(tmp_path):
+    """El plazo mata al hijo y a su nieto (npx lanza Chrome), y siempre lo recoge."""
+    import asyncio
+    import os
+    import sys
+
+    from hf_studio.factory import run_proc
+
+    pidfile = tmp_path / "grandchild.pid"
+    code = (
+        "import subprocess, sys, time; "
+        f"p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        f"open({str(pidfile)!r}, 'w').write(str(p.pid)); time.sleep(60)"
+    )
+    rc, msg = await run_proc(sys.executable, "-c", code, timeout=1.5)
+    assert (rc, msg) == (124, "timeout")
+    await asyncio.sleep(0.3)
+    grandchild = int(pidfile.read_text())
+    try:
+        os.kill(grandchild, 0)
+        alive = True
+    except ProcessLookupError:
+        alive = False
+    assert not alive

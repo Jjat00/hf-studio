@@ -90,6 +90,7 @@ from .elevenlabs_audio import remote_model as audio_remote_model
 from .elevenlabs_audio import run as run_audio_service
 from .factory import ContentFactoryJobs, is_factory, renderer_problem
 from .factory_script import MAX_EPISODES, ScriptError, write_scripts
+from .factory_script import max_cost_usd as factory_max_cost
 from .factory_styles import STYLES as FACTORY_STYLES
 from .factory_styles import public_styles as factory_styles
 from .free_voices import FreeVoiceError, free_sample, free_voices
@@ -486,6 +487,11 @@ class FactoryScriptIn(BaseModel):
     duration_seconds: int = Field(60, ge=30, le=90, description="Duración aproximada de cada episodio")
     episodes: int = Field(1, ge=1, le=MAX_EPISODES, description="Episodios de la serie")
     language: str = Field("es", pattern=r"^[a-z]{2}$", description="Idioma del guion y la voz")
+    max_usd: float | None = Field(
+        None,
+        ge=0,
+        description="Tope aprobado (el `max_usd` de /v1/factory/scripts/estimate). Sin él no se escribe",
+    )
 
 
 class ApproveIn(BaseModel):
@@ -584,6 +590,7 @@ def create_app(
         # Un candado por chat para escribir sus propuestas (vincular, generar en automático, guardar un turno):
         # ninguna escritura pisa a otra ni el tope automático se reparte dos veces.
         app.state.chat_locks = {}
+        app.state.factory_scripts = {}  # guiones por (cliente, Idempotency-Key): un reintento no vuelve a cobrar
         app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
         async with app.state.sessions() as s:
@@ -3950,17 +3957,54 @@ def create_app(
             "elevenlabs": app.state.eleven.configured,
         }
 
+    def factory_script_max(body: FactoryScriptIn) -> float:
+        if body.style not in FACTORY_STYLES:
+            raise ServiceError(422, "unknown_style", f"Unknown style: {body.style}")
+        return factory_max_cost(body.topic, body.duration_seconds, body.episodes, body.language, body.style)
+
+    @app.post("/v1/factory/scripts/estimate", tags=["content factory"])
+    async def factory_scripts_estimate(body: FactoryScriptIn, _: Owner) -> dict:
+        """Lo máximo que puede costar escribir ese guion con Claude (no llama a Claude). Se aprueba pasándolo como
+        `max_usd` a /v1/factory/scripts."""
+        return {"max_usd": factory_script_max(body), "model": DEFAULT_CLAUDE,
+                "available": app.state.assistant_jobs.available}  # fmt: skip
+
     @app.post("/v1/factory/scripts", tags=["content factory"])
-    async def factory_scripts(body: FactoryScriptIn, _: Owner) -> dict:
-        """Claude escribe el guion (uno por episodio, con arco y cliffhanger en series). Solo cuesta tokens de Claude
-        (`cost_usd`, del uso real); el usuario puede editarlo antes de generar."""
+    async def factory_scripts(
+        body: FactoryScriptIn,
+        owner: Owner,
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> dict:
+        """Claude escribe el guion (uno por episodio, con arco y cliffhanger en series). Exige el tope aprobado
+        (`max_usd` ≥ el de /estimate); devuelve el coste real (`cost_usd`). Repetir la petición con la misma
+        Idempotency-Key devuelve el mismo guion sin volver a llamar a Claude."""
         jobs = app.state.assistant_jobs
         if not jobs.available:
             raise ServiceError(
                 503, "anthropic_not_configured", "Set ANTHROPIC_API_KEY in .env to write scripts"
             )
-        if body.style not in FACTORY_STYLES:
-            raise ServiceError(422, "unknown_style", f"Unknown style: {body.style}")
+        cap = factory_script_max(body)
+        if body.max_usd is None or body.max_usd + 1e-9 < cap:
+            raise ServiceError(
+                409, "quote_required", f"Writing this script can cost up to {cap} USD: approve it as max_usd",
+                {"max_usd": cap},
+            )  # fmt: skip
+        cache: dict = app.state.factory_scripts
+        key = (owner.id, idempotency_key) if idempotency_key else None
+        if key:
+            entry = cache.setdefault(key, {"lock": asyncio.Lock(), "result": None})
+            async with entry["lock"]:
+                if entry["result"] is not None:
+                    return {**entry["result"], "deduplicated": True}
+                result = await run_factory_script(jobs, body)
+                entry["result"] = result
+                if len(cache) > 200:  # solo las últimas peticiones: basta para reintentos
+                    for old in list(cache)[:50]:
+                        cache.pop(old, None)
+                return result
+        return await run_factory_script(jobs, body)
+
+    async def run_factory_script(jobs, body: FactoryScriptIn) -> dict:
         try:
             return await write_scripts(
                 jobs.api_key, body.topic, body.style, body.duration_seconds, body.episodes, body.language,

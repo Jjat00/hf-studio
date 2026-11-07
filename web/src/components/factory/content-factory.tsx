@@ -214,15 +214,39 @@ export function ContentFactory() {
   const total = current ? combine(current.list) : null;
   const confirming = confirmKey === inputsKey;
 
+  // Tope del guion: se cotiza (sin llamar a Claude) cada vez que cambia la petición y es lo que se aprueba al pulsar.
+  const scriptAsk = useMemo(
+    () => ({ topic: topic.trim(), style, duration_seconds: duration, episodes, language }),
+    [topic, style, duration, episodes, language],
+  );
+  const scriptAskKey = JSON.stringify(scriptAsk);
+  const [scriptQuote, setScriptQuote] = useState<{ key: string; max: number } | null>(null);
+  useEffect(() => {
+    if (scriptAsk.topic.length < 3) return;
+    const timer = setTimeout(() => {
+      studio.factoryScriptEstimate(scriptAsk).then(
+        (q) => setScriptQuote({ key: scriptAskKey, max: q.max_usd }),
+        () => setScriptQuote(null),
+      );
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [scriptAsk, scriptAskKey]);
+  const scriptMax = scriptQuote?.key === scriptAskKey ? scriptQuote.max : null;
+  const scriptKey = useRef<{ ask: string; key: string } | null>(null);
+
   async function write() {
     if (!topic.trim()) {
       setError(f.topicRequired);
       return;
     }
+    if (scriptMax === null) return;
     setWriting(true);
     setError(null);
+    // La misma petición reintentada lleva la misma clave: si la primera llegó, no se vuelve a cobrar.
+    if (scriptKey.current?.ask !== scriptAskKey) scriptKey.current = { ask: scriptAskKey, key: crypto.randomUUID() };
     try {
-      const r = await studio.factoryScripts({ topic: topic.trim(), style, duration_seconds: duration, episodes, language });
+      const r = await studio.factoryScripts({ ...scriptAsk, max_usd: scriptMax }, scriptKey.current.key);
+      scriptKey.current = null;
       setScripts(r.episodes.map((s) => ({ ...s, scenes: s.scenes.map((sc) => ({ ...sc, visual: { ...sc.visual, items: sc.visual.items ?? [] } })) })));
       setScriptCost(r.cost_usd);
       setActive(0);
@@ -462,11 +486,12 @@ export function ContentFactory() {
             <button
               type="button"
               onClick={write}
-              disabled={writing || !info?.scripts.available}
+              disabled={writing || !info?.scripts.available || scriptMax === null}
               className="flex h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-surface-4 text-[15px] font-semibold hover:bg-white/10 disabled:opacity-50"
             >
               {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4 text-lime" />}
               {writing ? f.writing : f.writeScript}
+              {!writing && scriptMax !== null && <span className="text-[13px] font-normal text-fg-3">{f.upTo(formatUsd(scriptMax))}</span>}
             </button>
             <button
               type="button"

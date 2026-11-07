@@ -44,6 +44,29 @@ MAX_SCENES = 20
 MAX_ITEMS = 6
 MAX_EPISODES = 5
 SCRIPT_MAX_TOKENS = 32000
+TOKENS_PER_EPISODE = 6000  # un episodio de 90 s con 14 escenas cabe con holgura
+
+
+def max_output_tokens(episodes: int) -> int:
+    return min(SCRIPT_MAX_TOKENS, TOKENS_PER_EPISODE * max(1, episodes))
+
+
+def max_cost_usd(
+    topic: str,
+    duration_seconds: int,
+    episodes: int,
+    language: str,
+    style_id: str,
+    model: str = DEFAULT_CLAUDE,
+) -> float:
+    """Tope de lo que puede costar escribir el guion: la entrada (prompt y sistema, ~4 caracteres por token, con
+    margen) más el máximo de salida permitido. El cobro real (`cost_usd`) suele ser bastante menor."""
+    price_in, price_out = CLAUDE_PRICES.get(model, CLAUDE_PRICES[DEFAULT_CLAUDE])
+    chars = len(SYSTEM) + len(build_prompt(topic, duration_seconds, episodes, language, style_id))
+    tokens_in = int(chars / 3) + 500
+    return round((tokens_in * price_in + max_output_tokens(episodes) * price_out) / 1_000_000, 4)
+
+
 # Palabras por segundo de un narrador neutro (edge-tts a velocidad normal ronda 2,5 en español).
 WORDS_PER_SECOND = {"es": 2.5, "en": 2.6}
 LANGUAGES = {
@@ -290,7 +313,7 @@ async def write_scripts(
         # En streaming: un guion de varios episodios tarda; sin stream la conexión puede cortarse a mitad.
         async with client.messages.stream(
             model=model,
-            max_tokens=SCRIPT_MAX_TOKENS,
+            max_tokens=max_output_tokens(episodes),
             system=SYSTEM,
             messages=[
                 {
