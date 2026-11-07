@@ -4,6 +4,7 @@ render simulados, y una prueba de humo del render real que se salta si falta Nod
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -487,3 +488,28 @@ async def test_a_failed_paid_script_is_not_charged_again_with_the_same_key(env):
     fresh = await http.post("/v1/factory/scripts", json={**ask, "max_usd": quote["max_usd"]},
                             headers={"Idempotency-Key": "k2"})  # fmt: skip
     assert fresh.status_code == 200 and len(claude.requests) == calls + 2
+
+
+async def test_a_cancelled_script_request_is_not_run_again_with_the_same_key(env, monkeypatch):
+    import hf_studio.api as api_module
+
+    _, http, _ = env
+    ask = {"topic": "La Luna", "episodes": 1}
+    quote = (await http.post("/v1/factory/scripts/estimate", json=ask)).json()
+    started, calls = asyncio.Event(), []
+
+    async def slow(*args, **kwargs):
+        calls.append(1)
+        started.set()
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(api_module, "write_scripts", slow)
+    body, headers = {**ask, "max_usd": quote["max_usd"]}, {"Idempotency-Key": "c1"}
+    task = asyncio.create_task(http.post("/v1/factory/scripts", json=body, headers=headers))
+    await started.wait()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    again = await http.post("/v1/factory/scripts", json=body, headers=headers)
+    assert again.status_code == 502 and again.json()["error"]["code"] == "script_uncertain"
+    assert len(calls) == 1  # la misma clave no vuelve a llamar a Claude tras una cancelación

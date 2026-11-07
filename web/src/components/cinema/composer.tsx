@@ -308,12 +308,13 @@ export function Composer({
   const videoKey = refs.filter((r) => r.kind === "video").map((r) => r.url).join("|");
   useEffect(() => {
     for (const url of videoKey ? videoKey.split("|") : []) {
-      probeDuration(url).then((secs) => secs && setVideoSecs((prev) => (prev[url] ? prev : { ...prev, [url]: secs })));
+      // -1: no se pudo medir (Genjutsu no envía sin saber si cumple su mínimo).
+      probeDuration(url).then((secs) => setVideoSecs((prev) => (prev[url] ? prev : { ...prev, [url]: secs || -1 })));
     }
   }, [videoKey]);
   const videoUrls = videoKey ? videoKey.split("|") : [];
   const hints: Record<string, number> = {};
-  if (videoUrls.length && videoUrls.every((u) => videoSecs[u])) hints.input_video_seconds = videoUrls.reduce((n, u) => n + videoSecs[u], 0);
+  if (videoUrls.length && videoUrls.every((u) => videoSecs[u] > 0)) hints.input_video_seconds = videoUrls.reduce((n, u) => n + videoSecs[u], 0);
   const hintsKey = JSON.stringify(hints);
 
   const count = useNative ? 1 : batch;
@@ -360,9 +361,11 @@ export function Composer({
       return;
     }
     const source = isGenjutsu && !ready.id.includes("genjutsu-light/") ? listOf(values.video_url)[0] : undefined;
-    if (source && videoSecs[source] && videoSecs[source] < 4) {
-      setError(c.videoTooShort);
-      return;
+    if (source) {
+      const secs = videoSecs[source];
+      if (secs === undefined) return setError(c.videoMeasuring);
+      if (secs < 0) return setError(c.videoUnmeasurable);
+      if (secs < 4) return setError(c.videoTooShort);
     }
     if (!costAllowsDirectSubmit(unit) && !confirming) {
       setConfirmUnknown(`${estimateKey}|${count}`);

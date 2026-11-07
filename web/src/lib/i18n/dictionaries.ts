@@ -829,6 +829,8 @@ const es = {
       pickStyle: "Elegir",
       missing: (what: string) => `Falta: ${what}`,
       videoTooShort: "El video de origen debe durar al menos 4 segundos",
+      videoMeasuring: "Midiendo la duración del video… vuelve a pulsar en un momento",
+      videoUnmeasurable: "No se pudo medir la duración del video: súbelo de nuevo (debe durar al menos 4 segundos)",
     },
   },
   skills: {
@@ -2296,6 +2298,8 @@ const en: Dict = {
       pickStyle: "Pick",
       missing: (what: string) => `Missing: ${what}`,
       videoTooShort: "The source video must be at least 4 seconds long",
+      videoMeasuring: "Measuring the video length… press again in a moment",
+      videoUnmeasurable: "Could not measure the video length: upload it again (it must be at least 4 seconds)",
     },
   },
   skills: {

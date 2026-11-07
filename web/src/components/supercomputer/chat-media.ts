@@ -21,6 +21,8 @@ export type ChatMedia = {
   ready: boolean;
   /** Adjunto del compositor, sin enviar. */
   pending?: boolean;
+  /** La generación falló o se canceló: guarda su número para no recorrer los demás, pero no se puede citar. */
+  failed?: boolean;
 };
 
 const WORDS: Record<"es" | "en", Record<MediaKind, string>> = {
@@ -55,12 +57,14 @@ function partsMedia(parts: ChatPart[], launched: Record<string, string[]>, jobs:
     const label = modelLabel(p.proposal.model_title).name;
     for (const id of ids) {
       const g = jobs[id];
-      if (g?.terminal && g.status !== "completed") continue; // falló o se canceló: no deja nada que citar
+      // Una que falló o se canceló conserva su número (no se puede citar): así las demás no se recorren y una mención
+      // ya escrita nunca pasa a señalar otro medio.
+      const failed = Boolean(g?.terminal && g.status !== "completed");
       const o = g?.status === "completed" ? g.outputs.find((x) => x.kind === "video" || x.kind === "image" || x.kind === "audio") : undefined;
       if (g?.status === "completed" && !o) continue;
       const kind: MediaKind = o ? kindOf(o.url, o.content_type || `${o.kind}/`) : p.proposal.output;
       const type = o?.content_type && o.content_type.startsWith(`${kind}/`) ? o.content_type : DEFAULT_TYPE[kind];
-      out.push({ kind, url: o?.url ?? `job:${id}`, src: o ? outputSrc(o) : "", content_type: type, label, ready: Boolean(o) });
+      out.push({ kind, url: o?.url ?? `job:${id}`, src: o ? outputSrc(o) : "", content_type: type, label, ready: Boolean(o), failed });
     }
   }
 }

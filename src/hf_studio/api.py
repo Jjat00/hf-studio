@@ -4021,11 +4021,11 @@ def create_app(
                 except ServiceError as exc:
                     entry["error"] = (exc.status, exc.code, exc.message)
                     raise
-                except Exception as exc:
+                except BaseException as exc:  # también una cancelación: la llamada pudo gastar tokens
                     entry["error"] = (
                         502,
                         "script_uncertain",
-                        f"The script request ended unexpectedly: {exc}",
+                        f"The script request ended unexpectedly: {exc!r}",
                     )
                     raise
                 entry["result"] = result
