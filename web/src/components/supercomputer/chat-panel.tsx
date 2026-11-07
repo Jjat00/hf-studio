@@ -12,6 +12,7 @@ import {
   History,
   ImageIcon,
   Loader2,
+  Music,
   Paperclip,
   Plus,
   SlidersHorizontal,
@@ -20,7 +21,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { Lightbox, type Viewable } from "@/components/lightbox";
 import { Logo } from "@/components/logo";
@@ -39,7 +40,8 @@ import {
   type SkillSummary,
 } from "@/lib/studio";
 import { useActiveProject } from "@/lib/project";
-import type { ProjectSummary, StudioElement } from "@/lib/types";
+import type { Generation, ProjectSummary, StudioElement } from "@/lib/types";
+import { citedRefs, collectChatMedia, mediaName, MENTION, type ChatMedia } from "./chat-media";
 import { ElementProposalCard } from "./element-card";
 import { ChatAutoContext, ProposalCard, type ChatAuto } from "./proposal-card";
 
@@ -218,6 +220,20 @@ function Thumb({ url, video, className, onOpen }: { url: string; video: boolean;
   );
 }
 
+/** El texto del usuario con las citas a medios del chat (@imagen2, @video1) resaltadas. */
+function withMentions(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(MENTION)) {
+    const at = m.index ?? 0;
+    if (at > 0 && !/\s/.test(text[at - 1])) continue;
+    out.push(text.slice(last, at), <span key={at} className="font-medium text-lime">{m[0]}</span>);
+    last = at + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+
 function UserBubble({ m }: { m: Extract<ChatMessage, { role: "user" }> }) {
   const [open, setOpen] = useState<number | null>(null);
   const items: Viewable[] = m.attachments.map((url) => ({ src: url, kind: isVideo(url) ? "video" : "image" }));
@@ -240,7 +256,7 @@ function UserBubble({ m }: { m: Extract<ChatMessage, { role: "user" }> }) {
           ))}
         </div>
       )}
-      <p className="max-w-[85%] rounded-2xl rounded-br-md bg-surface-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-fg">{m.text}</p>
+      <p className="max-w-[85%] rounded-2xl rounded-br-md bg-surface-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap text-fg">{withMentions(m.text)}</p>
     </div>
   );
 }
@@ -270,7 +286,7 @@ export type ChatPanelProps = {
  * automática que el usuario fijó).
  */
 export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onActivity, greeting, suggestions, quickActions, quickActionsTitle, placeholder }: ChatPanelProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const s = t.supercomputer;
   const panel = variant === "panel";
 
@@ -298,7 +314,7 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
   // Menú de skills: la palabra «/algo» que se está escribiendo (sin la barra) y la opción marcada.
   const [slash, setSlash] = useState<{ query: string; start: number; end: number } | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
-  // Menú de elementos (solo en `panel`): la palabra «@algo» que se está escribiendo.
+  // Menú «@»: los medios del chat (@imagen2, @video1) y, en `panel`, los elementos. La palabra «@algo» que se escribe.
   const [elements, setElements] = useState<StudioElement[] | null>(null);
   const [at, setAt] = useState<{ query: string; start: number; end: number } | null>(null);
   const [atIndex, setAtIndex] = useState(0);
@@ -315,6 +331,16 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
   const [budgetDraft, setBudgetDraft] = useState("");
   const [askBudget, setAskBudget] = useState(false);
   const [fresh] = useState(() => new Set<string>()); // propuestas llegadas en esta sesión (mutable a propósito)
+  // Generaciones lanzadas desde las propuestas (las de esta sesión aún no vienen en el chat guardado) y su estado.
+  const [launched, setLaunched] = useState<Record<string, string[]>>({});
+  const [jobs, setJobs] = useState<Record<string, Generation>>({});
+  const onJobs = useCallback((proposalId: string, ids: string[], states: Record<string, Generation>) => {
+    setLaunched((prev) => (prev[proposalId]?.join() === ids.join() ? prev : { ...prev, [proposalId]: ids }));
+    setJobs((prev) => {
+      const changed = Object.values(states).filter((g) => prev[g.id]?.status !== g.status || prev[g.id]?.outputs.length !== g.outputs.length);
+      return changed.length ? { ...prev, ...Object.fromEntries(changed.map((g) => [g.id, g])) } : prev;
+    });
+  }, []);
   // Sin chat elegido (chat nuevo) no se muestra ni se reutiliza el anterior.
   const current = chatId && chat?.id === chatId ? chat : null;
 
@@ -338,9 +364,36 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
         .sort((a, b) => Number(!a.slug.startsWith(slash.query)) - Number(!b.slug.startsWith(slash.query)))
         .slice(0, 8)
     : [];
-  const atMatches = at
-    ? (elements ?? []).filter((el) => el.name.includes(at.query.toLowerCase())).slice(0, 8)
+  const media = useMemo(
+    () =>
+      collectChatMedia({
+        messages: current?.messages ?? [],
+        pending,
+        draftParts: draft?.parts ?? null,
+        composer: attachments,
+        launched,
+        jobs,
+        attachedLabel: s.chatMediaAttached,
+        pendingLabel: s.chatMediaPending,
+      }),
+    [current?.messages, pending, draft?.parts, attachments, launched, jobs, s.chatMediaAttached, s.chatMediaPending],
+  );
+  const atQuery = at?.query.toLowerCase() ?? "";
+  const mediaMatches: ChatMedia[] = at
+    ? media
+        .filter((m) => m.ready && [mediaName(m, locale), mediaName(m, locale === "en" ? "es" : "en")].some((n) => n.startsWith(atQuery) || (atQuery && n.includes(atQuery))))
+        .slice(-20)
+        .reverse() // lo más reciente arriba
     : [];
+  const elementMatches = at && panel ? (elements ?? []).filter((el) => el.name.includes(atQuery)).slice(0, 8) : [];
+  const atMatches: ({ type: "media"; media: ChatMedia } | { type: "element"; element: StudioElement })[] = [
+    ...mediaMatches.map((m) => ({ type: "media" as const, media: m })),
+    ...elementMatches.map((el) => ({ type: "element" as const, element: el })),
+  ];
+  const atWord = (i: number) => {
+    const item = atMatches[i] ?? atMatches[0];
+    return item.type === "media" ? `@${mediaName(item.media, locale)}` : item.element.mention;
+  };
 
   function updateMenus(value: string, caret: number) {
     const before = value.slice(0, caret);
@@ -349,9 +402,9 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
       setSlash({ query: m[2], start: caret - m[2].length - 1, end: caret });
       setSlashIndex(0);
     } else setSlash(null);
-    const a = panel ? /(^|\s)@([\w]*)$/.exec(before) : null;
+    const a = /(^|\s)@([\w]*)$/.exec(before);
     if (a) {
-      if (elements === null) studio.elements().then((r) => setElements(r.elements), () => setElements([]));
+      if (panel && elements === null) studio.elements().then((r) => setElements(r.elements), () => setElements([]));
       setAt({ query: a[2], start: caret - a[2].length - 1, end: caret });
       setAtIndex(0);
     } else setAt(null);
@@ -481,10 +534,11 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
     setText("");
     const sent = attachments;
     const docs = documents;
+    const refs = citedRefs(body, media); // con la numeración que el usuario ve ahora mismo
     setAttachments([]);
     setDocuments([]);
     setNotice(null);
-    setPending({ role: "user", text: body, attachments: sent.map((a) => a.url), documents: docs.map((d) => d.name) });
+    setPending({ role: "user", text: body, attachments: sent.map((a) => a.url), attachment_kinds: sent.map((a) => a.content_type.split("/")[0]), documents: docs.map((d) => d.name) });
     setDraft({ parts: [], status: s.thinking });
     setCost(null);
     const controller = new AbortController();
@@ -499,7 +553,7 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
       }
       await studio.sendChat(
         target.id,
-        { text: body, mode, model: model || undefined, attachments: sent, documents: docs },
+        { text: body, mode, model: model || undefined, attachments: sent, documents: docs, ...(refs.length ? { refs } : {}) },
         onEvent,
         controller.signal,
       );
@@ -533,8 +587,9 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
       left,
       fresh,
       onSpent: (spentUsd) => setChat((c) => (c ? { ...c, auto_spent_usd: Math.max(c.auto_spent_usd ?? 0, spentUsd) } : c)),
+      onJobs,
     }),
-    [chatProject, left, fresh],
+    [chatProject, left, fresh, onJobs],
   );
 
   useEffect(() => {
@@ -804,20 +859,63 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
         </div>
       )}
       {at && (
-        <div className="mb-2 overflow-hidden rounded-xl border border-line-2 bg-surface-1">
-          <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">
-            {s.director.elementsMenu}
-            <a href="/elements" className="font-normal tracking-normal text-fg-3 normal-case hover:text-fg">
-              {s.director.manageElements}
-            </a>
-          </div>
-          {elements === null ? (
-            <Loader2 className="mx-3 mb-2 size-4 animate-spin text-fg-3" />
-          ) : atMatches.length === 0 ? (
-            <p className="px-3 pb-2 text-sm text-fg-3">{s.director.noElements}</p>
-          ) : (
-            <ul role="listbox" aria-label={s.director.elementsMenu}>
-              {atMatches.map((el, i) => (
+        <div className="thin-scrollbar mb-2 max-h-80 overflow-y-auto rounded-xl border border-line-2 bg-surface-1">
+          <ul role="listbox" aria-label={s.chatMediaMenu}>
+            <li role="presentation" className="px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">
+              {s.chatMediaMenu}
+            </li>
+            {mediaMatches.length === 0 && (
+              <li role="presentation" className="px-3 pb-2 text-sm text-fg-3">
+                {s.noChatMedia}
+              </li>
+            )}
+            {mediaMatches.map((m, i) => (
+              <li key={`${m.kind}${m.n}`} role="option" aria-selected={i === atIndex}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => at && replaceWord(at, `@${mediaName(m, locale)}`)}
+                  onMouseEnter={() => setAtIndex(i)}
+                  className={clsx("flex w-full items-center gap-2 px-3 py-1.5 text-left", i === atIndex ? "bg-surface-4" : "hover:bg-surface-3")}
+                >
+                  <span className="relative size-7 shrink-0 overflow-hidden rounded-md bg-surface-4">
+                    {m.kind === "video" ? (
+                      <video src={m.src} className="size-full object-cover" muted playsInline preload="metadata" />
+                    ) : m.kind === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.src} alt="" className="size-full object-cover" />
+                    ) : null}
+                    {m.kind === "video" && <Film className="absolute right-0.5 bottom-0.5 size-3 text-white drop-shadow" />}
+                    {m.kind === "audio" && <Music className="m-auto mt-1.5 size-4 text-fg-3" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-mono text-sm text-fg">@{mediaName(m, locale)}</span>
+                    <span className="block truncate text-xs text-fg-3">{m.label}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+            {panel && (
+              <li role="presentation" className="flex items-center justify-between border-t border-line px-3 pt-2 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">
+                {s.director.elementsMenu}
+                <a href="/elements" className="font-normal tracking-normal text-fg-3 normal-case hover:text-fg">
+                  {s.director.manageElements}
+                </a>
+              </li>
+            )}
+            {panel && elements === null && (
+              <li role="presentation">
+                <Loader2 className="mx-3 mb-2 size-4 animate-spin text-fg-3" />
+              </li>
+            )}
+            {panel && elements !== null && elementMatches.length === 0 && (
+              <li role="presentation" className="px-3 pb-2 text-sm text-fg-3">
+                {s.director.noElements}
+              </li>
+            )}
+            {elementMatches.map((el, j) => {
+              const i = mediaMatches.length + j;
+              return (
                 <li key={el.id} role="option" aria-selected={i === atIndex}>
                   <button
                     type="button"
@@ -836,9 +934,9 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
                     </span>
                   </button>
                 </li>
-              ))}
-            </ul>
-          )}
+              );
+            })}
+          </ul>
         </div>
       )}
       <textarea
@@ -874,7 +972,7 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
             if ((e.key === "Enter" || e.key === "Tab") && !e.nativeEvent.isComposing) {
               e.preventDefault();
               if (menu === "slash" && slash) replaceWord(slash, `/${(slashMatches[slashIndex] ?? slashMatches[0]).slug}`);
-              if (menu === "at" && at) replaceWord(at, (atMatches[atIndex] ?? atMatches[0]).mention);
+              if (menu === "at" && at) replaceWord(at, atWord(atIndex));
               return;
             }
           }

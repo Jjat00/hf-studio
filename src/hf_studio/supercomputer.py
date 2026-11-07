@@ -31,6 +31,8 @@ from .space_assistant import CLAUDE_PRICES, DEFAULT_CLAUDE
 MAX_TOKENS = 32000
 MAX_ROUNDS = 10  # llamadas a Claude por mensaje del usuario (herramientas incluidas)
 MAX_ATTACHMENTS = 6
+MAX_REFS = 10  # medios del chat citados con @imagenN, @videoN, @audioN en un mensaje
+REF_NAME = r"^(imagen|image|video|audio)[1-9][0-9]{0,2}$"
 MODES = ("ask", "auto")
 EFFORTS = ("low", "medium", "high")
 
@@ -142,6 +144,10 @@ fields of its schema, and refer to them in the prompt by role and order ("the wo
 jacket from image 2"). Never invent or alter a URL. The user's saved elements (recurring characters, products \
 or places) come from `list_elements`: on Kling 3.0 models put their ids in the `elements` field and cite each \
 as @name in the prompt; on other models, describe them instead.
+The user may also cite media already in this chat (their attachments and the results of generations launched \
+from your proposals) as @imagenN / @imageN, @videoN or @audioN. Each message that cites them carries a \
+<chat_media> block with the URL behind each name (and you see the cited images): use those exact URLs as \
+references or inputs when you propose, and keep the user's names when you talk about them.
 
 You never generate anything yourself and you never say a generation has started: only the user's click on a \
 proposal does that, after they see the price. Never invent model ids, fields or prices: use the tools.
@@ -757,9 +763,11 @@ def user_content(
     skills: list[tuple[str, str, list[str]]] | None = None,
     documents: list[dict] | None = None,
     context: list[str] | None = None,
+    refs: list[dict] | None = None,
 ) -> list[dict]:
     """Bloques del mensaje del usuario: modo, hora actual, novedades de sus generaciones, adjuntos (las imágenes
-    también como imagen, para que Claude las vea) y el texto."""
+    también como imagen, para que Claude las vea), los medios del chat que cita con @imagenN (qué URL es cada
+    nombre, y las imágenes citadas que no viajan ya como adjunto) y el texto."""
     head = f"<studio_mode>{mode}</studio_mode>"
     if now:
         head += f"\n<studio_time>{now}</studio_time>"
@@ -775,6 +783,16 @@ def user_content(
         blocks.append(
             {"type": "text", "text": f"Attached {kind} ({a.get('filename') or 'file'}): {a['url']}"}
         )
+    if refs:
+        attached = {a["url"] for a in attachments[:MAX_ATTACHMENTS]}
+        lines, seen = [], set()
+        for r in refs[:MAX_REFS]:
+            kind = (r.get("content_type") or "").split("/")[0] or "file"
+            lines.append(f"@{r['name']} = {r['url']} ({kind})")
+            if kind == "image" and r["url"] not in attached and r["url"] not in seen:
+                seen.add(r["url"])
+                blocks.append({"type": "image", "source": {"type": "url", "url": r["url"]}})
+        blocks.append({"type": "text", "text": "<chat_media>\n" + "\n".join(lines) + "\n</chat_media>"})
     for slug, body, files in skills or []:  # las que el usuario llamó con /nombre
         blocks.append({"type": "text", "text": skill_block(slug, body, files)})
     for doc in (documents or [])[:MAX_DOCUMENTS]:  # archivos de texto que el usuario adjuntó (.md, .txt)
@@ -1039,6 +1057,10 @@ def visible_messages(messages: list[dict], proposals: dict[str, dict]) -> list[d
             ]  # fmt: skip
             documents = [t.split('"', 2)[1] for t in texts[1:-1] if t.startswith('<document name="')]
             item = {"role": "user", "text": texts[-1] if texts else "", "attachments": attachments}
+            if attachments:  # tipo de cada adjunto («Attached video (…): URL»), para numerarlos en la UI
+                item["attachment_kinds"] = [
+                    t.split(" ", 2)[1] for t in texts[1:-1] if t.startswith("Attached ") and ": " in t
+                ]  # fmt: skip
             if documents:
                 item["documents"] = documents
             out.append(item)

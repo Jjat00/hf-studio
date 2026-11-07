@@ -268,6 +268,67 @@ async def test_attachments_must_be_your_own_files_and_images_are_shown_to_claude
     assert events[-1]["chat"]["messages"][0]["attachments"] == [url]
 
 
+async def test_chat_media_cited_with_at_reach_claude_with_their_urls(env):
+    app, http, claude = env
+    chat = (await http.post("/v1/chats", json={})).json()
+    img, clip = "https://cdn.test/ref.png", "https://cdn.test/out.mp4"
+    refs = [
+        {"name": "imagen1", "url": img, "content_type": "image/png"},
+        {"name": "video1", "url": clip, "content_type": "video/mp4"},
+    ]
+    res = await http.post(f"/v1/chats/{chat['id']}/messages", json={"text": "anima @imagen1", "refs": refs})
+    assert res.status_code == 422 and res.json()["error"]["code"] == "untrusted_source"
+    async with app.state.sessions() as s:
+        owner = (await s.execute(select(ApiClient))).scalar_one()
+        s.add(Upload(owner_id=owner.id, filename="ref.png", content_type="image/png", size=10, url=img))
+        s.add(Job(owner_id=owner.id, model=T2V, input=VIDEO, input_hash="h", status="completed",
+                  outputs=[{"kind": "video", "url": clip}]))  # fmt: skip
+        await s.commit()
+    events = await send(http, chat["id"], "anima @imagen1 como @video1", refs=refs)
+    content = claude.requests[-1]["messages"][0]["content"]
+    assert {"type": "image", "source": {"type": "url", "url": img}} in content
+    assert not any(b.get("source", {}).get("url") == clip for b in content)  # los videos solo por URL
+    mapping = next(b["text"] for b in content if b.get("text", "").startswith("<chat_media>"))
+    assert f"@imagen1 = {img} (image)" in mapping and f"@video1 = {clip} (video)" in mapping
+    assert content[-1]["text"] == "anima @imagen1 como @video1"
+    assert events[-1]["chat"]["messages"][0] == {
+        "role": "user",
+        "text": "anima @imagen1 como @video1",
+        "attachments": [],
+    }
+
+    # Un adjunto del mismo mensaje no se manda dos veces como imagen.
+    await send(http, chat["id"], "otra vez @imagen1", refs=refs[:1],
+               attachments=[{"url": img, "content_type": "image/png", "filename": "ref.png"}])  # fmt: skip
+    last = claude.requests[-1]["messages"][-1]["content"]
+    assert sum(1 for b in last if b.get("type") == "image") == 1
+
+    # Nombres raros y demasiadas citas se rechazan antes de llamar a Claude.
+    calls = len(claude.requests)
+    bad = await http.post(f"/v1/chats/{chat['id']}/messages",
+                          json={"text": "x", "refs": [{"name": "foto1", "url": img}]})  # fmt: skip
+    assert bad.status_code == 422
+    many = [{"name": f"imagen{i}", "url": img, "content_type": "image/png"} for i in range(1, 12)]
+    assert (
+        await http.post(f"/v1/chats/{chat['id']}/messages", json={"text": "x", "refs": many})
+    ).status_code == 422
+    assert len(claude.requests) == calls
+
+
+def test_visible_messages_keep_the_kind_of_each_attachment():
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": "<studio_mode>ask</studio_mode>"},
+        {"type": "text", "text": "Attached image (a.png): https://cdn.test/a.png"},
+        {"type": "text", "text": "Attached video (b.mp4): https://cdn.test/b"},
+        {"type": "text", "text": "<chat_media>\n@imagen1 = https://cdn.test/a.png (image)\n</chat_media>"},
+        {"type": "text", "text": "hola @imagen1"},
+    ]}]  # fmt: skip
+    assert visible_messages(messages, {}) == [{
+        "role": "user", "text": "hola @imagen1", "attachments": ["https://cdn.test/a.png", "https://cdn.test/b"],
+        "attachment_kinds": ["image", "video"],
+    }]  # fmt: skip
+
+
 async def test_a_claude_error_is_reported_and_the_user_message_is_kept(env):
     app, http, _ = env
     app.state.assistant_jobs.http_client_factory = lambda: httpx2.AsyncClient(

@@ -12,6 +12,7 @@ import {
   Loader2,
   Minus,
   Music,
+  Palette,
   Plus,
   ScanEye,
   Search,
@@ -25,6 +26,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { RatioIcon } from "@/components/studio/controls";
+import { StylePicker } from "@/components/studio/style-picker";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { CATEGORIES, elementMention } from "@/components/studio/element-refs";
 import { CinemaControls, HashMovementMenu, type CinemaPanel } from "@/components/studio/cinema/cinema-controls";
@@ -34,15 +36,19 @@ import { probeDuration } from "@/lib/media";
 import { activeProject } from "@/lib/project";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
 import { apiSrc, costShort, fieldErrors, formatUsd, modelLabel, outputSrc, studio, StudioError, type Estimate } from "@/lib/studio";
-import type { ElementCategory, Generation, ModelDetail, ModelSummary, StudioElement } from "@/lib/types";
+import type { ElementCategory, Generation, ModelDetail, ModelStyle, ModelSummary, StudioElement } from "@/lib/types";
 
 type Mode = "video" | "image";
 type MediaKind = "image" | "video" | "audio";
 type MediaField = Extract<Field, { kind: "media" }>;
-type Panel = "refs" | CinemaPanel;
+type Panel = "refs" | "style" | CinemaPanel;
 type RefsTab = "uploads" | "elements" | "generations" | "liked";
 
 const CINEMA_PREFIX = "higgsfield/cinema-studio/";
+/** Genjutsu de Higgsfield (y su versión Light): motion transfer, object swap y restyle sobre un video de origen. */
+const GENJUTSU = /^higgsfield\/genjutsu(-light)?\//;
+const genjutsuRank = (id: string) =>
+  ["motion-transfer", "object-swap", "restyle"].findIndex((w) => id.includes(`/${w}/`)) * 2 + (id.includes("genjutsu-light/") ? 1 : 0);
 const DEFAULTS: Record<Mode, string> = { video: "higgsfield/cinema-studio/4.0", image: "higgsfield-ai/soul/cinema" };
 const MAX_BATCH = 4;
 
@@ -76,11 +82,12 @@ function menuModels(models: ModelSummary[], mode: Mode) {
       .filter((m) => m.output === "video" && !m.id.startsWith(CINEMA_PREFIX) && m.capabilities.includes("reference-to-video"))
       .sort((a, b) => featuredRank(a.id) - featuredRank(b.id) || a.id.localeCompare(b.id))
       .slice(0, 6);
-    return { cinematic, featured };
+    const genjutsu = models.filter((m) => m.output === "video" && GENJUTSU.test(m.id)).sort((a, b) => genjutsuRank(a.id) - genjutsuRank(b.id));
+    return { cinematic, featured, genjutsu };
   }
   const cinematic = models.filter((m) => m.id === DEFAULTS.image);
   const featured = models.filter((m) => m.output === "image" && m.id.startsWith("higgsfield-ai/soul/") && m.id !== DEFAULTS.image).slice(0, 4);
-  return { cinematic, featured };
+  return { cinematic, featured, genjutsu: [] as ModelSummary[] };
 }
 
 export type ComposerHandle = {
@@ -192,6 +199,21 @@ export function Composer({
   const refMax = media.reduce((n, f) => n + (f.multiple ? f.max : 1), 0);
   const refs = media.flatMap((f) => listOf(values[f.key]).map((url) => ({ url, kind: f.media, key: f.key })));
   const imageSlot = media.find((f) => f.media === "image" && f.multiple);
+  // Genjutsu: casillas propias (video de origen, imágenes) y, en Restyle, el estilo de su catálogo (`preset_id`).
+  const isGenjutsu = !!ready && GENJUTSU.test(ready.id);
+  const styleField = fields.find((f) => f.kind === "style");
+  const [styles, setStyles] = useState<{ model: string; list: ModelStyle[] } | null>(null);
+  useEffect(() => {
+    if (!styleField || !ready) return;
+    let alive = true;
+    studio.styles(ready.id).then((r) => alive && setStyles({ model: r.model, list: r.styles }), () => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [styleField, ready]);
+  const style = styleField && styles?.model === ready?.id ? styles?.list.find((x) => x.id === values[styleField.key]) : undefined;
+  const [missing, setMissing] = useState<string[]>([]);
+  const slotLabel = (f: MediaField) => (f.media === "video" ? c.sourceVideo : f.media === "image" ? c.refImages : f.label);
 
   /** Añade una URL a la casilla de su tipo; false si este modelo no la acepta o ya no cabe. */
   // Lo último que se puso en `values`, para añadir varias referencias seguidas (subidas) sin pisarse.
@@ -324,6 +346,24 @@ export function Composer({
       promptRef.current?.focus();
       return;
     }
+    // Lo obligatorio que falta (video de origen, imágenes, estilo) se marca antes de cotizar nada.
+    const required = new Set(ready.input_schema.required ?? []);
+    const lacking = [
+      ...media.filter((f) => (required.has(f.key) || (f.schema.minItems ?? 0) > 0) && listOf(values[f.key]).length === 0).map((f) => f.key),
+      ...(styleField?.required && !values[styleField.key] ? [styleField.key] : []),
+    ];
+    setMissing(lacking);
+    if (lacking.length) {
+      const names = lacking.map((k) => (k === styleField?.key ? c.style : slotLabel(media.find((f) => f.key === k)!)));
+      setError(c.missing(names.join(", ")));
+      if (lacking[0] === styleField?.key) setPanel("style");
+      return;
+    }
+    const source = isGenjutsu && !ready.id.includes("genjutsu-light/") ? listOf(values.video_url)[0] : undefined;
+    if (source && videoSecs[source] && videoSecs[source] < 4) {
+      setError(c.videoTooShort);
+      return;
+    }
     if (!costAllowsDirectSubmit(unit) && !confirming) {
       setConfirmUnknown(`${estimateKey}|${count}`);
       return;
@@ -429,14 +469,18 @@ export function Composer({
     });
   }
 
+  const lackingNow = missing.filter((k) => (k === styleField?.key ? !values[k] : listOf(values[k]).length === 0));
+
   const openPanel = (p: Panel | null, opts?: { tab?: RefsTab; cameraTab?: "setup" | "movement" }) => {
     if (opts?.tab) setRefsTab(opts.tab);
     setCameraTab(opts?.cameraTab);
     setPanel((cur) => (cur === p && !opts ? null : p));
   };
 
-  const { cinematic, featured } = menuModels(models, mode);
-  const modelTitle = ready ? modelLabel(ready.title).name : (models.find((m) => m.id === modelId)?.title.split(" — ")[0] ?? "…");
+  const { cinematic, featured, genjutsu } = menuModels(models, mode);
+  const label = ready ? modelLabel(ready.title) : null;
+  // Genjutsu: el nombre solo no distingue sus tres funciones («Genjutsu · Restyle»).
+  const modelTitle = label ? (isGenjutsu ? `${label.name} · ${label.workflow}` : label.name) : (models.find((m) => m.id === modelId)?.title.split(" — ")[0] ?? "…");
   const resolution = props.resolution?.enum as string[] | undefined;
   const ratios = props.aspect_ratio?.enum as string[] | undefined;
   const duration = props.duration;
@@ -502,14 +546,66 @@ export function Composer({
               setExtra={setExtra}
               lead={refsCard}
               names={{ film: c.filmSetup, camera: c.camera, palette: c.palette, light: c.lighting }}
-              open={panel === "refs" ? null : panel}
+              open={panel === "refs" || panel === "style" ? null : panel}
               onOpenChange={(p) => openPanel(p)}
               cameraTab={cameraTab}
             />
+          ) : isGenjutsu ? (
+            <div className="hide-scrollbar flex gap-1.5 overflow-x-auto">
+              {media.map((f) => {
+                const list = listOf(values[f.key]);
+                return (
+                  <SlotCard
+                    key={f.key}
+                    active={panel === "refs"}
+                    warn={lackingNow.includes(f.key)}
+                    onClick={() => openPanel("refs", { tab: "uploads" })}
+                    thumb={list[0] ? <RefThumb url={list[0]} kind={f.media} className="size-full" /> : <Plus className="size-4" />}
+                    caption={slotLabel(f)}
+                    value={f.multiple ? `${list.length}/${f.max}` : list.length ? "1/1" : "0/1"}
+                  />
+                );
+              })}
+              {styleField && (
+                <SlotCard
+                  active={panel === "style"}
+                  warn={lackingNow.includes(styleField.key)}
+                  onClick={() => openPanel("style")}
+                  thumb={
+                    style?.preview_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={style.preview_url} alt="" className="size-full object-cover" />
+                    ) : (
+                      <Palette className="size-4" />
+                    )
+                  }
+                  caption={c.style}
+                  value={style?.name ?? (values[styleField.key] ? String(values[styleField.key]).slice(0, 8) : c.pickStyle)}
+                />
+              )}
+            </div>
           ) : (
             refsCard && <div className="flex">{refsCard}</div>
           )}
         </CinemaAnchorContext.Provider>
+
+        {panel === "style" && styleField && ready && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setPanel(null)} />
+            <div className={clsx("absolute inset-x-0 z-50 overflow-hidden rounded-panel shadow-2xl", panelsBelow ? "top-full mt-2" : "bottom-full mb-2")}>
+              <StylePicker
+                key={`${ready.id}/style`}
+                model={ready.id}
+                value={values[styleField.key] as string | undefined}
+                onChange={(v) => {
+                  setValue(styleField.key, v);
+                  if (v) setPanel(null);
+                }}
+                error={lackingNow.includes(styleField.key) ? t.styles.required : undefined}
+              />
+            </div>
+          </>
+        )}
 
         {panel === "refs" && (
           <ReferencesPanel
@@ -581,7 +677,7 @@ export function Composer({
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submit();
               }}
               rows={2}
-              placeholder={mode === "video" ? c.placeholderVideo : c.placeholderImage}
+              placeholder={isGenjutsu ? c.placeholderGenjutsu : mode === "video" ? c.placeholderVideo : c.placeholderImage}
               className="thin-scrollbar max-h-40 min-h-12 w-full resize-none bg-transparent px-1 text-[15px] leading-relaxed text-fg outline-none placeholder:text-fg-4"
             />
             {at && (
@@ -655,12 +751,23 @@ export function Composer({
               >
                 {(close) => (
                   <ModelMenu
-                    cinematic={cinematic}
-                    featured={featured}
-                    groups={mode === "video" ? [c.cinematicModels, c.featuredModels] : [c.imageModels, c.featuredModels]}
+                    groups={
+                      mode === "video"
+                        ? [
+                            [c.cinematicModels, cinematic],
+                            [c.featuredModels, featured],
+                            [c.genjutsuModels, genjutsu],
+                          ]
+                        : [
+                            [c.imageModels, cinematic],
+                            [c.featuredModels, featured],
+                          ]
+                    }
                     selected={modelId}
                     onPick={(id) => {
                       keys.current = null;
+                      setMissing([]);
+                      setError(null);
                       setChosen((prev) => ({ ...prev, [mode]: id }));
                       close();
                     }}
@@ -887,15 +994,11 @@ function BatchStepper({ value, options, title, onChange }: { value: number; opti
 }
 
 function ModelMenu({
-  cinematic,
-  featured,
   groups,
   selected,
   onPick,
 }: {
-  cinematic: ModelSummary[];
-  featured: ModelSummary[];
-  groups: [string, string];
+  groups: [string, ModelSummary[]][];
   selected: string;
   onPick: (id: string) => void;
 }) {
@@ -903,10 +1006,7 @@ function ModelMenu({
   const c = t.cinemaStudio.composer;
   const [q, setQ] = useState("");
   const match = (m: ModelSummary) => !q || m.title.toLowerCase().includes(q.toLowerCase()) || m.id.includes(q.toLowerCase());
-  const lists: [string, ModelSummary[]][] = [
-    [groups[0], cinematic.filter(match)],
-    [groups[1], featured.filter(match)],
-  ];
+  const lists = groups.map(([title, list]) => [title, list.filter(match)] as const);
   return (
     <div className="max-h-[min(60vh,460px)] overflow-y-auto">
       <label className="flex items-center gap-2 border-b border-line px-2.5 py-2">
@@ -944,6 +1044,26 @@ function ModelMenu({
         ),
       )}
     </div>
+  );
+}
+
+/** Tarjeta de la fila de arriba (Genjutsu): una casilla de entrada o el estilo, con su miniatura y su estado. */
+function SlotCard({ active, warn, onClick, thumb, caption, value }: { active: boolean; warn: boolean; onClick: () => void; thumb: ReactNode; caption: string; value: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        "flex h-12 min-w-[118px] shrink-0 items-center gap-2.5 rounded-xl border py-1.5 pr-3 pl-1.5 text-left transition-colors hover:bg-surface-4",
+        warn ? "border-danger/60 bg-surface-3" : active ? "border-line-2 bg-surface-4" : "border-transparent bg-surface-3",
+      )}
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-5 text-fg-2">{thumb}</span>
+      <span className="min-w-0">
+        <span className={clsx("block truncate font-mono text-[10px] leading-tight", warn ? "text-danger" : "text-fg-3")}>{caption}</span>
+        <span className="block max-w-32 truncate text-[14px] leading-tight font-semibold text-fg">{value}</span>
+      </span>
+    </button>
   );
 }
 

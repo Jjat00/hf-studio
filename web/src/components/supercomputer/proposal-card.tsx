@@ -161,6 +161,8 @@ export type ChatAuto = {
   onSpent: (spentUsd: number) => void;
   /** Tarjeta del turno en curso: la propuesta aún no está guardada, así que no se puede lanzar todavía. */
   draft?: boolean;
+  /** Generaciones de cada propuesta y su estado: el chat numera sus resultados para citarlos con @imagenN. */
+  onJobs?: (proposalId: string, ids: string[], jobs: Record<string, Generation>) => void;
 };
 export const ChatAutoContext = createContext<ChatAuto>({ projectId: null, left: null, fresh: new Set(), onSpent: () => {} });
 
@@ -197,6 +199,10 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   const pending = count - jobIds.length;
 
   const onUpdate = useCallback((g: Generation) => setJobs((prev) => ({ ...prev, [g.id]: g })), []);
+  const { onJobs } = auto;
+  useEffect(() => {
+    if (jobIds.length) onJobs?.(proposal.tool_use_id, jobIds, jobs);
+  }, [onJobs, proposal.tool_use_id, jobIds, jobs]);
 
   async function quote() {
     setQuoting(true);

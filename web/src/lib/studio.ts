@@ -729,7 +729,14 @@ export type ChatPart =
   | { type: "proposal"; proposal: ChatProposal }
   | { type: "question"; question: ChatQuestion }
   | { type: "sources"; sources: { url: string; title: string }[] };
-export type ChatMessage = { role: "user"; text: string; attachments: string[]; documents?: string[] } | { role: "assistant"; parts: ChatPart[] };
+export type ChatMessage = {
+  role: "user";
+  text: string;
+  attachments: string[];
+  /** Tipo de cada adjunto (image, video…), en el mismo orden. */
+  attachment_kinds?: string[];
+  documents?: string[];
+} | { role: "assistant"; parts: ChatPart[] };
 export type Chat = ChatSummary & { messages: ChatMessage[] };
 export type ChatMode = "ask" | "auto";
 export type ChatMessageBody = {
@@ -740,6 +747,8 @@ export type ChatMessageBody = {
   attachments?: { url: string; content_type?: string | null; filename?: string | null }[];
   /** Archivos de texto (.md, .txt) que viajan con el mensaje. */
   documents?: { name: string; content: string }[];
+  /** Medios del chat citados en el texto con @imagenN, @videoN o @audioN: qué URL es cada nombre. */
+  refs?: { name: string; url: string; content_type?: string | null }[];
 };
 export type ChatEvent =
   | { type: "text"; text: string }

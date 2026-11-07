@@ -414,6 +414,14 @@ class ChatAttachment(BaseModel):
     filename: str | None = Field(None, max_length=255)
 
 
+class ChatRef(BaseModel):
+    name: str = Field(
+        pattern=sc.REF_NAME, description="Nombre con que el usuario lo cita, sin @: imagen2, video1"
+    )
+    url: str = Field(max_length=2000, description="Subida propia o salida de una generación propia")
+    content_type: str | None = Field(None, max_length=100)
+
+
 class ChatMessageIn(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     mode: Literal["ask", "auto"] = Field("ask", description="ask: aclara antes de proponer; auto: propone ya")
@@ -421,6 +429,11 @@ class ChatMessageIn(BaseModel):
     model: Literal[tuple(CLAUDE_PRICES)] | None = None  # type: ignore[valid-type]
     attachments: list[ChatAttachment] = Field(default_factory=list, max_length=sc.MAX_ATTACHMENTS)
     documents: list[ChatDocument] = Field(default_factory=list, max_length=sc.MAX_DOCUMENTS)
+    refs: list[ChatRef] = Field(
+        default_factory=list,
+        max_length=sc.MAX_REFS,
+        description="Medios del chat citados con @imagenN, @videoN",
+    )
     timezone: str | None = Field(
         None,
         max_length=64,
@@ -3367,7 +3380,7 @@ def create_app(
         busy: set[str] = app.state.chats_busy
         if chat.id in busy:
             raise ServiceError(409, "chat_busy", "This chat is still answering")
-        for a in body.attachments:
+        for a in [*body.attachments, *body.refs]:
             if not await trusted_media(session, owner, a.url):
                 raise ServiceError(
                     422, "untrusted_source", "Attach files from /v1/uploads or your generations"
@@ -3390,7 +3403,7 @@ def create_app(
         user_msg = {"role": "user", "content": sc.user_content(
             body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now,
             [(slug, *bodies[slug]) for slug in called if slug in bodies],
-            [d.model_dump() for d in body.documents], context)}  # fmt: skip
+            [d.model_dump() for d in body.documents], context, [r.model_dump() for r in body.refs])}  # fmt: skip
         history = sc.with_user_turn(sc.strip_images(chat.messages), user_msg)
         first = not chat.messages
         chat_key, owner_id, project_key = chat.id, owner.id, chat.project_id
