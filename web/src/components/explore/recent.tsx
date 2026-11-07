@@ -20,7 +20,7 @@ export function Recent() {
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {items.slice(0, 8).map((g) => (
-          <GenerationCard key={g.id} g={g} layout="grid" onDelete={remove} />
+          <GenerationCard key={g.id} g={g} layout="grid" onDelete={remove} gallery={items.slice(0, 8)} />
         ))}
       </div>
     </section>

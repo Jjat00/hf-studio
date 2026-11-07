@@ -725,7 +725,7 @@ export function InfluencerStudio({ initialTab }: { initialTab: "create" | "motio
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {history.map((g) => (
-                <GenerationCard key={g.id} g={g} layout="grid" onDelete={removeOne} />
+                <GenerationCard key={g.id} g={g} layout="grid" onDelete={removeOne} gallery={history} />
               ))}
             </div>
           )}

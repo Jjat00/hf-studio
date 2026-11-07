@@ -162,6 +162,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
                       layout="grid"
                       models={models}
                       onReuse={reuse}
+                      gallery={shown}
                       onDelete={remove}
                       onFavorite={(x) => void setFavorite([x.id], !x.favorite).catch(() => undefined)}
                     />

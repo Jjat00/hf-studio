@@ -548,12 +548,12 @@ export function Studio({ output }: { output: "video" | "image" }) {
               itemKey={(g) => g.id}
               maxColumns={columns}
               minColumnWidth={200}
-              render={(g) => <GenerationCard g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} />}
+              render={(g) => <GenerationCard g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} gallery={history} />}
             />
           ) : (
             <div className="flex flex-col gap-3">
               {history.map((g) => (
-                <GenerationCard key={g.id} g={g} layout="list" models={byId} onReuse={reuse} onDelete={remove} />
+                <GenerationCard key={g.id} g={g} layout="list" models={byId} onReuse={reuse} onDelete={remove} gallery={history} />
               ))}
             </div>
           )}

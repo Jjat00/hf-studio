@@ -7,41 +7,43 @@ import { useI18n } from "@/components/i18n-provider";
 import { outputSrc } from "@/lib/studio";
 import type { Output } from "@/lib/types";
 
-/** Visor a pantalla completa de los resultados de una generación: Esc cierra, las flechas cambian de resultado. */
-export function MediaViewer({
-  outputs,
-  start = 0,
-  title,
-  caption,
-  onClose,
-}: {
-  outputs: Output[];
-  start?: number;
-  title: string;
-  caption?: string;
-  onClose: () => void;
-}) {
+/** Un resultado en el visor, con el modelo y el prompt de la generación de la que sale. */
+export type ViewerItem = { key: string; out: Output; title: string; caption?: string };
+
+/** Visor a pantalla completa: Esc cierra y las flechas (botones o ← →) pasan al resultado anterior o siguiente,
+ * también de otras generaciones si el visor recibe la lista entera. */
+export function MediaViewer({ items, start, onClose }: { items: ViewerItem[]; start: string; onClose: () => void }) {
   const { t } = useI18n();
-  const [index, setIndex] = useState(start);
-  const count = outputs.length;
-  const out = outputs[index];
+  // Se sigue la clave, no la posición: el sondeo del historial puede añadir o quitar generaciones con el visor abierto.
+  const [current, setCurrent] = useState(start);
+  const found = items.findIndex((x) => x.key === current);
+  const index = found >= 0 ? found : 0;
+  const count = items.length;
+  const item = items[index];
+  const go = (step: number) => {
+    if (count) setCurrent(items[(index + step + count) % count].key);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowRight") setIndex((i) => (i + 1) % count);
-      else if (e.key === "ArrowLeft") setIndex((i) => (i - 1 + count) % count);
+      else if (e.key === "ArrowRight" && count) setCurrent(items[(index + 1) % count].key);
+      else if (e.key === "ArrowLeft" && count) setCurrent(items[(index - 1 + count) % count].key);
     };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [items, index, count, onClose]);
+
+  useEffect(() => {
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = overflow;
-      window.removeEventListener("keydown", onKey);
     };
-  }, [count, onClose]);
+  }, []);
 
-  if (!out) return null;
+  if (!item) return null;
+  const { out, title, caption } = item;
   const src = outputSrc(out);
   const nav = "flex size-11 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20";
 
@@ -77,7 +79,7 @@ export function MediaViewer({
           <audio key={src} src={src} controls autoPlay className="w-full max-w-xl" onClick={(e) => e.stopPropagation()} />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt={caption ?? title} className="max-h-full max-w-full rounded-xl object-contain" onClick={(e) => e.stopPropagation()} />
+          <img key={src} src={src} alt={caption ?? title} className="max-h-full max-w-full rounded-xl object-contain" onClick={(e) => e.stopPropagation()} />
         )}
         {count > 1 && (
           <>
@@ -86,7 +88,7 @@ export function MediaViewer({
               aria-label={t.generation.previous}
               onClick={(e) => {
                 e.stopPropagation();
-                setIndex((i) => (i - 1 + count) % count);
+                go(-1);
               }}
               className={`${nav} absolute left-3 top-1/2 -translate-y-1/2`}
             >
@@ -97,7 +99,7 @@ export function MediaViewer({
               aria-label={t.generation.next}
               onClick={(e) => {
                 e.stopPropagation();
-                setIndex((i) => (i + 1) % count);
+                go(1);
               }}
               className={`${nav} absolute right-3 top-1/2 -translate-y-1/2`}
             >

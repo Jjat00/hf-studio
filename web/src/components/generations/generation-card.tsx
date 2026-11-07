@@ -3,8 +3,8 @@
 import clsx from "clsx";
 import { AlertTriangle, AudioLines, Ban, Bookmark, Check, Copy, Download, Info, Loader2, Play, RotateCcw, ShieldAlert, Star, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { MediaViewer } from "@/components/generations/media-viewer";
+import { useCallback, useEffect, useState } from "react";
+import { MediaViewer, type ViewerItem } from "@/components/generations/media-viewer";
 import { ReuseMenu } from "@/components/generations/reuse-menu";
 import { FinalizeDraft } from "@/components/generations/finalize-draft";
 import { useI18n } from "@/components/i18n-provider";
@@ -103,6 +103,16 @@ export function modelName(id: string, locale: Locale, models?: Map<string, Model
   return workflow ? `${name} · ${workflowLabel(workflow, locale)}` : name;
 }
 
+/** Resultados visibles (imagen o video) de las generaciones terminadas, en orden, para el visor grande. */
+function viewerItems(list: Generation[], locale: Locale, models?: Map<string, ModelSummary>): ViewerItem[] {
+  return list.flatMap((x) => {
+    if (x.status !== "completed") return [];
+    const caption = typeof x.input.prompt === "string" && x.input.prompt ? x.input.prompt : undefined;
+    const title = modelName(x.model, locale, models);
+    return x.outputs.flatMap((out, j) => (out.kind === "audio" ? [] : [{ key: `${x.id}:${j}`, out, title, caption }]));
+  });
+}
+
 export function GenerationCard({
   g,
   layout,
@@ -110,6 +120,7 @@ export function GenerationCard({
   onReuse,
   onDelete,
   onFavorite,
+  gallery,
 }: {
   g: Generation;
   layout: "grid" | "list";
@@ -118,6 +129,8 @@ export function GenerationCard({
   onDelete?: (id: string) => void;
   /** Marca o desmarca la generación como favorita (estrella). */
   onFavorite?: (g: Generation) => void;
+  /** Generaciones de la lista en que está la tarjeta: el visor grande pasa de una a otra con las flechas. */
+  gallery?: Generation[];
 }) {
   const { t, locale } = useI18n();
   const STAGE = t.generation.stage;
@@ -125,6 +138,7 @@ export function GenerationCard({
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [viewing, setViewing] = useState(false);
+  const close = useCallback(() => setViewing(false), []);
 
   async function saveAsPreset() {
     const title = window.prompt(t.generation.presetName, prompt.slice(0, 40) || t.generation.myPreset);
@@ -212,12 +226,7 @@ export function GenerationCard({
         </span>
       )}
       {viewing && (
-        <MediaViewer
-          outputs={g.outputs}
-          title={modelName(g.model, locale, models)}
-          caption={prompt || undefined}
-          onClose={() => setViewing(false)}
-        />
+        <MediaViewer items={viewerItems(gallery?.some((x) => x.id === g.id) ? gallery : [g], locale, models)} start={`${g.id}:0`} onClose={close} />
       )}
     </div>
   );
