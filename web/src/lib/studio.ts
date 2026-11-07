@@ -152,6 +152,15 @@ export const studio = {
   providers: () => call<{ providers: ProviderInfo[] }>("/v1/providers"),
   /** Gasto por día, proveedor y modelo; `days` 0 = todo. `utcOffset` en minutos (Bogotá = -300). */
   usage: (days: number, utcOffset: number) => call<Usage>(`/v1/usage?days=${days}&utc_offset=${utcOffset}`),
+  /** Content Factory: estilos, plantillas y qué hace falta para escribir guiones y renderizar. */
+  factory: (lang = "es") => call<FactoryInfo>(`/v1/factory?lang=${encodeURIComponent(lang)}`),
+  /** Claude escribe el guion de cada episodio (solo cuesta tokens de Claude, `cost_usd`). */
+  factoryScripts: (body: { topic: string; style: string; duration_seconds: number; episodes: number; language: string }) =>
+    call<FactoryScripts>("/v1/factory/scripts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   voiceStatus: () => call<VoiceStatus>("/v1/voice/status"),
   freeVoices: (lang = "es") => call<{ voices: FreeVoice[] }>(`/v1/voice/free-voices?lang=${encodeURIComponent(lang)}`),
   /** URL del MP3 de una voz gratis diciendo el texto (gratis, se guarda en caché en el servidor). */
@@ -494,6 +503,58 @@ export const studio = {
       body: form,
     });
   },
+};
+
+/** Modelo del catálogo que renderiza los cortos de Content Factory. */
+export const FACTORY_MODEL = "hf-studio/content-factory";
+
+export type FactoryLayout = "title" | "counter" | "timer" | "map" | "chart" | "comparison" | "list" | "quote" | "scale" | "timeline" | "closing";
+export type FactoryItem = { label: string; value?: number; note?: string; lat?: number; lon?: number };
+export type FactoryVisual = {
+  layout: FactoryLayout;
+  headline: string;
+  kicker?: string;
+  value?: number;
+  from_value?: number;
+  unit?: string;
+  prefix?: string;
+  items: FactoryItem[];
+};
+export type FactoryScene = { narration: string; visual: FactoryVisual };
+/** Guion de un episodio (lo que recibe `hf-studio/content-factory` en `script`). */
+export type FactoryScript = {
+  title: string;
+  hook?: string;
+  scenes: FactoryScene[];
+  cliffhanger?: string;
+  episode?: number;
+  episodes?: number;
+  series_title?: string;
+};
+export type FactoryStyle = {
+  id: string;
+  name: string;
+  names: { es: string; en: string };
+  description: string;
+  descriptions: { es: string; en: string };
+  colors: string[];
+  preview: string;
+};
+export type FactoryInfo = {
+  model: string;
+  styles: FactoryStyle[];
+  layouts: FactoryLayout[];
+  max_episodes: number;
+  renderer: { available: boolean; reason: string | null };
+  scripts: { available: boolean; model: string };
+  elevenlabs: boolean;
+};
+export type FactoryScripts = {
+  series_title: string;
+  episodes: FactoryScript[];
+  cost_usd: number;
+  usage: { input_tokens: number; output_tokens: number };
+  model: string;
 };
 
 /** Costo normalizado por la API: exacto, aproximado por fórmula, solo fórmula o no disponible. */

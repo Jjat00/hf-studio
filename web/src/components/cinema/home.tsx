@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowDownAZ, AtSign, ChevronRight, Clock, FolderOpen, FolderPlus, Heart, Home, Layers, Loader2, Plus, Search, Sparkles } from "lucide-react";
+import { ArrowDownAZ, AtSign, ChevronRight, Clock, FolderOpen, Factory, FolderPlus, Heart, Home, Layers, Loader2, Plus, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -105,6 +105,7 @@ function HomeSidebar({
         <SideItem icon={<Sparkles className="size-4" />} label={cs.myGenerations} active={view === "generations"} onClick={() => onView("generations")} />
         <SideItem icon={<AtSign className="size-4" />} label={cs.myElements} active={view === "elements"} onClick={() => onView("elements")} />
         <SideItem icon={<Heart className="size-4" />} label={cs.myFavorites} active={view === "favorites"} onClick={() => onView("favorites")} />
+        <SideItem icon={<Factory className="size-4" />} label={t.nav.factory} href="/factory" />
       </nav>
 
       <div className="mt-6 flex items-center gap-1 px-2 pb-1">

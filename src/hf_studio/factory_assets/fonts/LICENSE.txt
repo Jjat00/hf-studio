@@ -1,0 +1,8 @@
+Fonts bundled for Content Factory renders (subset to Latin, converted to WOFF2). All are licensed under the
+SIL Open Font License 1.1 (https://openfontlicense.org):
+
+- Anton (Vernon Adams)
+- Geist (Vercel)
+- JetBrains Mono (JetBrains)
+- Poppins (Indian Type Foundry)
+- Liberation Serif (Red Hat, version 2.x)
