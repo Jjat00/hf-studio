@@ -1086,7 +1086,7 @@ function RefThumb({ url, kind, className }: { url: string; kind: MediaKind; clas
   );
 }
 
-type Item = { id: string; url: string; kind: MediaKind; source?: string; label: string };
+type Item = { id: string; url: string; kind: MediaKind; source?: string; label: string; upload?: boolean };
 
 /**
  * Panel de References, anclado encima del compositor: subidas, elementos, generaciones y favoritas. Las generaciones
@@ -1153,7 +1153,18 @@ function ReferencesPanel({
         });
     const load: Promise<Item[]> =
       tab === "uploads"
-        ? studio.uploads(60).then((r) => r.uploads.map((u) => ({ id: u.id, url: u.url, kind: kindOf(u.content_type, u.url), label: u.filename || u.url })))
+        ? studio.uploads(100).then((r) => {
+            // La misma subida repetida (mismo nombre y tamaño) sale una vez: la más reciente.
+            const seen = new Set<string>();
+            return r.uploads
+              .filter((u) => {
+                const sig = `${u.filename ?? ""}|${u.size}`;
+                if (seen.has(sig)) return false;
+                seen.add(sig);
+                return true;
+              })
+              .map((u) => ({ id: u.id, url: u.url, kind: kindOf(u.content_type, u.url), label: u.filename || u.url, upload: true }));
+          })
         : studio.list(100, false, tab === "liked").then((r) => fromGens(r.generations));
     load.then(
       (list) => setItems((prev) => ({ ...prev, [tab]: list })),
@@ -1163,6 +1174,16 @@ function ReferencesPanel({
 
   const chosen = new Set(refs.map((r) => r.url));
   const list = (items[tab] ?? null)?.filter((it) => kinds.includes(it.kind) && (kind === "all" || it.kind === kind)) ?? null;
+
+  /** Quita una subida de la lista (las repetidas de tanto reintentar). No cambia generaciones ya hechas. */
+  async function removeUpload(it: Item) {
+    try {
+      await studio.deleteUpload(it.id);
+      setItems((prev) => ({ ...prev, uploads: prev.uploads?.filter((x) => x.id !== it.id) ?? null }));
+    } catch {
+      /* si falla, sigue en la lista */
+    }
+  }
 
   async function toggle(it: Item) {
     const url = it.source ? added[it.source] : it.url;
@@ -1327,6 +1348,28 @@ function ReferencesPanel({
                         {busy === it.id && (
                           <span className="absolute inset-0 flex items-center justify-center bg-black/50">
                             <Loader2 className="size-5 animate-spin text-lime" />
+                          </span>
+                        )}
+                        {it.upload && !on && (
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-label={c.removeUpload}
+                            title={c.removeUpload}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void removeUpload(it);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void removeUpload(it);
+                              }
+                            }}
+                            className="absolute top-1.5 left-1.5 flex size-6 items-center justify-center rounded-full bg-black/70 text-white/80 hover:bg-danger hover:text-white"
+                          >
+                            <X className="size-3.5" />
                           </span>
                         )}
                       </button>

@@ -78,8 +78,26 @@ export function fieldErrors(e: unknown): { path: string; message: string }[] | n
   return e instanceof StudioError && Array.isArray(e.details) ? e.details : null;
 }
 
+/** Un corte de red (el servidor de desarrollo recargándose, una reconexión) da «Failed to fetch». Se reintenta solo
+ * lo que es seguro repetir: lecturas, cotizaciones y peticiones con Idempotency-Key (el servidor deduplica). */
+async function fetchRetrying(url: string, init?: RequestInit): Promise<Response> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const headers = new Headers(init?.headers);
+  const safe = method === "GET" || headers.has("Idempotency-Key") || url.endsWith("/v1/estimate") || url.includes("/estimate");
+  const streamed = typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      const network = e instanceof TypeError && !(init?.signal?.aborted ?? false);
+      if (!network || !safe || streamed || attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+  }
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, init);
+  const res = await fetchRetrying(BASE + path, init);
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as ApiErrorBody;
     throw new StudioError(
@@ -504,6 +522,8 @@ export const studio = {
     }),
   cancelRun: (id: string, runId: string) => call<SpaceRun>(`/v1/spaces/${id}/runs/${runId}/cancel`, { method: "POST" }),
   /** Archivos subidos antes (los más recientes primero). */
+  /** Quita una subida de la lista (las generaciones que la usaron no cambian). */
+  deleteUpload: (id: string) => call<void>(`/v1/uploads/${id}`, { method: "DELETE" }),
   uploads: (limit = 60) =>
     call<{ uploads: { id: string; url: string; content_type: string; size: number; filename: string | null; created_at: string }[] }>(`/v1/uploads?limit=${limit}`),
   upload: async (file: File) => {

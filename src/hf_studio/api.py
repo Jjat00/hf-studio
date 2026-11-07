@@ -1127,6 +1127,15 @@ def create_app(
             for u in rows
         ]}  # fmt: skip
 
+    @app.delete("/v1/uploads/{upload_id}", tags=["archivos"], status_code=204)
+    async def delete_upload(upload_id: str, session: Session, owner: Owner) -> None:
+        """Quita una subida de la lista del cliente (p. ej. repetidas). Las generaciones que la usaron no cambian."""
+        row = await session.get(Upload, upload_id)
+        if row is None or row.owner_id != owner.id:
+            raise ServiceError(404, "not_found", "Upload not found")
+        await session.delete(row)
+        await session.commit()
+
     @app.post("/v1/generations", tags=["generaciones"], status_code=202)
     async def create(
         body: GenerationIn,

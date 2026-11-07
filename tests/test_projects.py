@@ -162,3 +162,13 @@ async def test_changing_the_budget_waits_for_an_auto_run_in_progress(chat_env): 
         router.plan = original
     # Orden coherente: primero la generación (con su tope), después el apagado que reinicia lo gastado.
     assert (await http.get(f"/v1/chats/{chat['id']}")).json()["auto_spent_usd"] == 0
+
+
+async def test_an_upload_can_be_removed_from_the_list(env):  # noqa: F811
+    _, http, _ = env
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    up = (await http.post("/v1/uploads", files={"file": ("a.png", png, "image/png")})).json()
+    assert any(u["id"] == up["id"] for u in (await http.get("/v1/uploads")).json()["uploads"])
+    assert (await http.delete(f"/v1/uploads/{up['id']}")).status_code == 204
+    assert all(u["id"] != up["id"] for u in (await http.get("/v1/uploads")).json()["uploads"])
+    assert (await http.delete(f"/v1/uploads/{up['id']}")).status_code == 404

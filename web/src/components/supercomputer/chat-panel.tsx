@@ -378,9 +378,30 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
       }),
     [current?.messages, pending, draft?.parts, attachments, launched, jobs, s.chatMediaAttached, s.chatMediaPending],
   );
+  // Medios ocultos del menú @ en este chat (repetidos de tanto reintentar): conservan su número, solo no se ofrecen.
+  const hiddenKey = `hfs.chat.hidden.${current?.id ?? "new"}`;
+  const [hidden, setHidden] = useState<{ key: string; urls: string[] }>({ key: "", urls: [] });
+  const hiddenUrls = useMemo(() => {
+    if (hidden.key === hiddenKey) return new Set(hidden.urls);
+    try {
+      return new Set<string>(JSON.parse(window.localStorage.getItem(hiddenKey) ?? "[]") as string[]);
+    } catch {
+      return new Set<string>();
+    }
+  }, [hidden, hiddenKey]);
+  function hideMedia(url: string) {
+    const urls = [...hiddenUrls, url];
+    try {
+      window.localStorage.setItem(hiddenKey, JSON.stringify(urls));
+    } catch {
+      /* sin almacenamiento: se oculta solo en esta sesión */
+    }
+    setHidden({ key: hiddenKey, urls });
+  }
   const atQuery = at?.query.toLowerCase() ?? "";
   const mediaMatches: ChatMedia[] = at
     ? media
+        .filter((m) => !hiddenUrls.has(m.url))
         .filter((m) => m.ready && [mediaName(m, locale), mediaName(m, locale === "en" ? "es" : "en")].some((n) => n.startsWith(atQuery) || (atQuery && n.includes(atQuery))))
         .slice(-20)
         .reverse() // lo más reciente arriba
@@ -888,9 +909,23 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
                     {m.kind === "video" && <Film className="absolute right-0.5 bottom-0.5 size-3 text-white drop-shadow" />}
                     {m.kind === "audio" && <Music className="m-auto mt-1.5 size-4 text-fg-3" />}
                   </span>
-                  <span className="min-w-0">
+                  <span className="min-w-0 flex-1">
                     <span className="block font-mono text-sm text-fg">@{mediaName(m, locale)}</span>
                     <span className="block truncate text-xs text-fg-3">{m.label}</span>
+                  </span>
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={s.hideChatMedia}
+                    title={s.hideChatMedia}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      hideMedia(m.url);
+                    }}
+                    className="rounded-md p-1 text-fg-4 hover:bg-surface-5 hover:text-fg"
+                  >
+                    <X className="size-3.5" />
                   </span>
                 </button>
               </li>
