@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { useEffect } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { X } from "lucide-react";
 import { APERTURE_BLUR, type LightDirection, type LightPreview } from "./data";
 
@@ -88,6 +88,10 @@ export function PaletteMosaic({ colors, className }: { colors: string[]; classNa
   );
 }
 
+/** Dentro del compositor de Cinema Studio las ventanas se abren ancladas justo encima de él (mismo ancho), como en
+ * Higgsfield, en vez de centradas. El compositor debe ser el ancestro posicionado más cercano. */
+export const CinemaAnchorContext = createContext<"above" | "below" | null>(null);
+
 /** Ventana modal de la barra de dirección: escape y clic fuera cierran; a pantalla casi completa en móvil. */
 export function CinemaModal({
   title,
@@ -106,26 +110,33 @@ export function CinemaModal({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const anchored = useContext(CinemaAnchorContext);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", esc);
     const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (!anchored) document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", esc);
       document.body.style.overflow = prev;
     };
-  }, [onClose]);
+  }, [onClose, anchored]);
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" onClick={onClose}>
+    <div
+      className={anchored ? "contents" : "fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4"}
+      onClick={anchored ? undefined : onClose}
+    >
+      {anchored && <div className="fixed inset-0 z-40" onClick={onClose} />}
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
         className={clsx(
-          "flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-panel border border-line bg-surface-2 shadow-2xl sm:max-h-[86vh] sm:rounded-panel",
-          wide ? "sm:max-w-4xl" : "sm:max-w-2xl",
+          "flex w-full flex-col overflow-hidden border border-line bg-surface-2 shadow-2xl",
+          anchored
+            ? clsx("absolute inset-x-0 z-50 max-h-[min(70dvh,600px)] rounded-panel", anchored === "below" ? "top-full mt-2" : "bottom-full mb-2")
+            : clsx("max-h-[92dvh] rounded-t-panel sm:max-h-[86vh] sm:rounded-panel", wide ? "sm:max-w-4xl" : "sm:max-w-2xl"),
         )}
       >
         <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">

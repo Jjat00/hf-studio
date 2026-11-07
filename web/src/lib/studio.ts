@@ -118,6 +118,8 @@ export const studio = {
     allowDuplicate = false,
     // Proyecto donde se guarda: sin indicarlo, el proyecto activo (null: ninguno).
     projectId: string | null = activeProject(),
+    // Carpeta del proyecto (opcional).
+    folderId: string | null = null,
   ) =>
     call<Generation>("/v1/generations", {
       method: "POST",
@@ -132,6 +134,7 @@ export const studio = {
         ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
         ...(allowDuplicate ? { allow_duplicate: true } : {}),
         ...(projectId ? { project_id: projectId } : {}),
+        ...(projectId && folderId ? { folder_id: folderId } : {}),
       }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
@@ -465,6 +468,9 @@ export const studio = {
       body: JSON.stringify(body),
     }),
   cancelRun: (id: string, runId: string) => call<SpaceRun>(`/v1/spaces/${id}/runs/${runId}/cancel`, { method: "POST" }),
+  /** Archivos subidos antes (los más recientes primero). */
+  uploads: (limit = 60) =>
+    call<{ uploads: { id: string; url: string; content_type: string; size: number; filename: string | null; created_at: string }[] }>(`/v1/uploads?limit=${limit}`),
   upload: async (file: File) => {
     const form = new FormData();
     form.append("file", file);

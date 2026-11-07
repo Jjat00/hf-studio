@@ -32,8 +32,8 @@ const PRIMARY: Item[] = [
   { href: "/mcp", label: "mcp", match: (p) => p.startsWith("/mcp") },
 ];
 const PRODUCTS: Item[] = [
+  { href: "/cinema", label: "cinema", badge: "new", match: (p) => p.startsWith("/cinema") || p.startsWith("/projects") },
   { href: "/supercomputer", label: "supercomputer", badge: "new", match: (p) => p.startsWith("/supercomputer") },
-  { href: "/projects", label: "projects", badge: "new", match: (p) => p.startsWith("/projects") },
   { href: "/video?tab=genjutsu", label: "genjutsu", badge: "top", match: (p, q) => p.startsWith("/video") && tabIs(q, "genjutsu") },
   { href: "/spaces", label: "spaces", badge: "new", match: (p) => p.startsWith("/spaces") || p.startsWith("/flows") },
   { href: "/influencer", label: "influencer", badge: "new", match: (p) => p.startsWith("/influencer") },
@@ -280,7 +280,7 @@ function ActiveProjectPill() {
   if (!project) return null;
   return (
     <span className="flex h-8 max-w-48 items-center rounded-lg bg-lime/10 text-sm font-medium text-lime">
-      <Link href={`/projects/${project.id}`} title={t.projects.activeHint} className="flex min-w-0 items-center gap-1.5 pl-2.5">
+      <Link href={`/cinema/${project.id}`} title={t.projects.activeHint} className="flex min-w-0 items-center gap-1.5 pl-2.5">
         <FolderOpen className="size-4 shrink-0" />
         <span className="truncate">{project.name}</span>
       </Link>

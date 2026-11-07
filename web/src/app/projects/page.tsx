@@ -1,10 +1,6 @@
-import { ProjectList } from "@/components/projects/project-list";
-import { getDict } from "@/lib/i18n/server";
+import { redirect } from "next/navigation";
 
-export async function generateMetadata() {
-  return { title: `${(await getDict()).meta.projects} · HF Studio` };
-}
-
+/** Los proyectos viven ahora en Cinema Studio. */
 export default function ProjectsPage() {
-  return <ProjectList />;
+  redirect("/cinema");
 }
