@@ -130,6 +130,10 @@ class Job(Base):
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Marcada como favorita en la biblioteca (filtro «Favoritas»).
     favorite: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    # Proyecto y carpeta de la biblioteca (`projects`, `folders`); sin clave foránea porque se añadieron con
+    # ALTER TABLE a bases existentes. Borrar un proyecto o una carpeta deja la generación suelta.
+    project_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    folder_id: Mapped[str | None] = mapped_column(String(36), index=True)
     # Bloqueo optimista: cada escritura exige la versión leída. Así un sondeo o webhook tardío no pisa un
     # trabajo que otro proceso ya movió (p. ej. al proveedor de respaldo) y no se envía dos veces.
     # Las actualizaciones directas (`update(Job)`) deben subirla a mano: `version=Job.version + 1`.
@@ -181,13 +185,56 @@ class Chat(Base):
     messages: Mapped[list] = mapped_column(JSON, default=list)
     proposals: Mapped[dict] = mapped_column(JSON, default=dict)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    # Proyecto del chat: el agente recibe su brief y lo que se genere desde aquí va a ese proyecto.
+    project_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    # Generación automática: las propuestas que quepan en lo que queda del tope se lanzan sin clic.
+    auto_budget_usd: Mapped[float | None] = mapped_column(Float)
+    auto_spent_usd: Mapped[float] = mapped_column(Float, default=0.0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
     def summary(self) -> dict:
         return {"id": self.id, "title": self.title, "model": self.model, "cost_usd": round(self.cost_usd, 6),
+                "project_id": self.project_id, "auto_budget_usd": self.auto_budget_usd,
+                "auto_spent_usd": round(self.auto_spent_usd or 0, 4),
                 "created_at": self.created_at.replace(tzinfo=UTC).isoformat(),
                 "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+
+
+class Project(Base):
+    """Proyecto de la biblioteca (como en Cinema Studio): agrupa generaciones en carpetas y guarda un brief en
+    Markdown que Supercomputer lee como contexto en los chats del proyecto."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(300), default="")
+    brief: Mapped[str] = mapped_column(Text, default="")
+    cover: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    def out(self, full: bool = False) -> dict:
+        data = {"id": self.id, "name": self.name, "description": self.description, "cover": self.cover,
+                "created_at": self.created_at.replace(tzinfo=UTC).isoformat(),
+                "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+        return {**data, "brief": self.brief} if full else data
+
+
+class Folder(Base):
+    """Carpeta de un proyecto. Borrarla deja sus generaciones en el proyecto, sin carpeta."""
+
+    __tablename__ = "folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def out(self) -> dict:
+        return {"id": self.id, "project_id": self.project_id, "name": self.name}
 
 
 class Skill(Base):
@@ -282,8 +329,15 @@ ADDED_COLUMNS = {
         "max_reserve_usd": "FLOAT",
         "attempts_log": "JSON",
         "version": "INTEGER NOT NULL DEFAULT 1",
+        "project_id": "VARCHAR(36)",
+        "folder_id": "VARCHAR(36)",
     },
-    "elements": {"deleted_at": "DATETIME"},
+    "elements": {"deleted_at": "DATETIME", "category": "VARCHAR(20) NOT NULL DEFAULT 'other'"},
+    "chats": {
+        "project_id": "VARCHAR(36)",
+        "auto_budget_usd": "FLOAT",
+        "auto_spent_usd": "FLOAT NOT NULL DEFAULT 0",
+    },
     "uploads": {"source": "VARCHAR(80)"},
     "space_runs": {"idempotency_key": "VARCHAR(200)", "request_hash": "VARCHAR(64)"},
     "spaces": {"flow": "JSON"},
@@ -379,8 +433,9 @@ class Sound(Base):
 
 
 class Element(Base):
-    """Elemento de referencia (personaje, producto, lugar) para Kling 3.0 en APIMart y KIE: un nombre que se
-    cita en el prompt con `@nombre`, una descripción y de 2 a 4 imágenes. Las imágenes viven en local
+    """Elemento de referencia (personaje, lugar, prop): un nombre que se cita con `@nombre`, una descripción y
+    de 1 a 4 imágenes. En Kling 3.0 (APIMart y KIE) va por su id en `elements` y necesita 2 o más; en el resto
+    de modelos sus imágenes entran como referencias. Las imágenes viven en local
     (`storage_dir/elements/<id>/`); `images[].url` es su copia en Higgsfield, que caduca a los ~7 días y se
     renueva antes de usarla (`elements.fresh_urls`). Se comparten entre todos los clientes de la instalación."""
 
@@ -389,6 +444,8 @@ class Element(Base):
     id: Mapped[str] = mapped_column(String(16), primary_key=True)  # el_ + 12 hex
     name: Mapped[str] = mapped_column(String(32), unique=True)
     description: Mapped[str] = mapped_column(Text)
+    # character, location, prop u other: con qué pestaña sale en Elementos y cómo lo presenta el agente.
+    category: Mapped[str] = mapped_column(String(20), default="other", server_default=text("'other'"))
     images: Mapped[list] = mapped_column(JSON)  # [{file, content_type, url}]
     uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     created_by: Mapped[str] = mapped_column(ForeignKey("api_clients.id"))

@@ -1,7 +1,8 @@
-"""Elementos de HF Studio para Kling 3.0: personajes, productos o lugares reutilizables.
+"""Elementos de HF Studio: personajes, lugares o props reutilizables (como los de Cinema Studio).
 
 La API pública de Higgsfield no permite crear ni leer sus elementos (solo acepta ids decimales de la cuenta),
-así que HF Studio guarda los suyos: nombre, descripción y de 2 a 4 imágenes JPG o PNG. En una generación se
+así que HF Studio guarda los suyos: nombre, categoría, descripción y de 1 a 4 imágenes JPG o PNG. En cualquier
+modelo con referencias de imagen, la UI añade sus imágenes (con URLs vigentes, `fresh_urls`) a esas referencias. En una generación se
 pasan por su id (`el_…`) en el campo `elements` del modelo y se citan en el prompt con `@nombre`. Solo APIMart
 (`element_list`) y KIE (`kling_elements`) los aceptan, con las imágenes en línea; Higgsfield queda fuera.
 """
@@ -23,7 +24,9 @@ from .media import matches_type
 
 PREFIX = "el_"
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
-MIN_IMAGES, MAX_IMAGES = 2, 4
+MIN_IMAGES, MAX_IMAGES = 1, 4
+KLING_MIN_IMAGES = 2  # Kling 3.0 pide 2 a 4 imágenes por elemento
+CATEGORIES = ("character", "location", "prop", "other")
 MAX_PER_REQUEST = 3  # APIMart y KIE admiten hasta 3 elementos por tarea
 MAX_IMAGE_BYTES = 10 * 1024 * 1024  # límite de KIE por imagen
 CONTENT_TYPES = {"image/jpeg": ".jpg", "image/png": ".png"}  # KIE solo acepta JPG y PNG
@@ -79,6 +82,7 @@ def element_out(element: Element) -> dict:
         "name": element.name,
         "description": element.description,
         "mention": f"@{element.name}",
+        "category": element.category or "other",
         "images": [f"/v1/elements/{element.id}/images/{i}" for i in range(len(element.images))],
         "created_at": element.created_at.isoformat() + "Z",
     }
@@ -147,6 +151,12 @@ async def resolve(session: AsyncSession, values: list, storage: Path, upload) ->
     resolved = {}
     for element_id in ids:
         element = found[element_id]
+        if len(element.images) < KLING_MIN_IMAGES:
+            raise ElementError(
+                422,
+                "element_too_few_images",
+                f"@{element.name} needs at least 2 images to use it in Kling 3.0",
+            )
         resolved[element_id] = {
             "name": element.name,
             "description": element.description,

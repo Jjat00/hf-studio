@@ -52,7 +52,17 @@ async def test_create_list_get_and_delete_an_element(env):  # noqa: F811
 
 async def test_element_rules(env):  # noqa: F811
     _, http, _ = env
-    assert (await create(http, n=1)).json()["error"]["code"] == "image_count"
+    r = await http.post("/v1/elements", data={"name": "none", "description": "d"})
+    assert r.json()["error"]["code"] == "image_count"
+    one = await http.post("/v1/elements", data={"name": "solo", "description": "d", "category": "location"},
+                          files=files(PNG))  # fmt: skip
+    assert one.status_code == 201 and one.json()["category"] == "location"
+    bad = await http.post(
+        "/v1/elements", data={"name": "cat", "description": "d", "category": "x"}, files=files(PNG)
+    )
+    assert bad.json()["error"]["code"] == "invalid_category"
+    urls = (await http.post(f"/v1/elements/{one.json()['id']}/urls")).json()
+    assert urls["mention"] == "@solo" and len(urls["image_urls"]) == 1
     r = await http.post("/v1/elements", data={"name": "x5", "description": "d"}, files=files(*[PNG] * 5))
     assert r.json()["error"]["code"] == "image_count"
     assert (await create(http, name="Bad Name")).json()["error"]["code"] == "invalid_name"

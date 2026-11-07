@@ -153,7 +153,7 @@ async def test_the_agent_lists_saved_elements_to_cite_them(env):
     app, http, claude = env
     async with app.state.sessions() as s:
         ui = await s.scalar(select(ApiClient))
-        s.add(Element(id="el_000000000001", created_by=ui.id, name="zorro", description="Zorro rojo de peluche", images=[{"file": "a.png"}, {"file": "b.png"}]))  # fmt: skip
+        s.add(Element(id="el_000000000001", created_by=ui.id, name="zorro", description="Zorro rojo de peluche", images=[{"file": "a.png", "url": "https://cdn.test/a.png"}, {"file": "b.png", "url": "https://cdn.test/b.png"}]))  # fmt: skip
         await s.commit()
     claude.script = [([tool("list_elements", {})], "tool_use")]
     chat = (await http.post("/v1/chats", json={})).json()
@@ -161,7 +161,8 @@ async def test_the_agent_lists_saved_elements_to_cite_them(env):
     assert [e["name"] for e in events if e["type"] == "tool"] == ["list_elements"]
     listed = json.loads(claude.requests[1]["messages"][-1]["content"][0]["content"])
     assert listed["elements"][0] == {
-        "id": "el_000000000001", "name": "zorro", "mention": "@zorro", "description": "Zorro rojo de peluche", "images": 2,
+        "id": "el_000000000001", "name": "zorro", "mention": "@zorro", "category": "other",
+        "description": "Zorro rojo de peluche", "image_urls": ["https://cdn.test/a.png", "https://cdn.test/b.png"],
     }  # fmt: skip
     assert "list_elements" in {t["name"] for t in claude.requests[0]["tools"]}
     assert "# References" in str(claude.requests[0]["system"])

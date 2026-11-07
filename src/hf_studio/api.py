@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from . import projects
 from . import skills as skill_files
 from . import supercomputer as sc
 from .audio import _run as run_ffmpeg
@@ -42,8 +43,10 @@ from .db import (
     ApiClient,
     Chat,
     Element,
+    Folder,
     Job,
     Preset,
+    Project,
     Skill,
     Sound,
     Space,
@@ -56,6 +59,9 @@ from .db import (
     utcnow,
 )
 from .elements import (
+    CATEGORIES as ELEMENT_CATEGORIES,
+)
+from .elements import (
     MAX_IMAGES,
     MIN_IMAGES,
     ElementError,
@@ -66,6 +72,7 @@ from .elements import (
 )
 from .elements import check_available as check_element_ids
 from .elements import folder as element_folder
+from .elements import fresh_urls as fresh_element_urls
 from .elements import purge_deleted as purge_deleted_elements
 from .elements import resolve as resolve_elements
 from .elevenlabs_audio import (
@@ -222,6 +229,33 @@ class GenerationIn(BaseModel):
         False,
         description="Opción de HF Studio: al terminar, pone al resultado el audio del video de origen (video_url)",
     )
+    project_id: str | None = Field(None, max_length=36, description="Proyecto donde se guarda (opcional)")
+    folder_id: str | None = Field(None, max_length=36, description="Carpeta del proyecto (opcional)")
+
+
+class MoveIn(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=2000)
+    project_id: str | None = Field(None, max_length=36, description="null: fuera de todo proyecto")
+    folder_id: str | None = Field(None, max_length=36, description="null: sin carpeta")
+
+
+class ProjectIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field("", max_length=300)
+    brief: str | None = Field(
+        None, max_length=50000, description="Markdown; sin él, la plantilla de secciones"
+    )
+
+
+class ProjectPatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=120)
+    description: str | None = Field(None, max_length=300)
+    brief: str | None = Field(None, max_length=50000)
+    cover: str | None = Field(None, max_length=2000, description="URL propia; cadena vacía la quita")
+
+
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
 
 
 class BatchItem(BaseModel):
@@ -345,6 +379,16 @@ class SkillIn(BaseModel):
 
 class ChatIn(BaseModel):
     model: Literal[tuple(CLAUDE_PRICES)] = Field(DEFAULT_CLAUDE, description="Modelo de Claude del chat")  # type: ignore[valid-type]
+    project_id: str | None = Field(
+        None, max_length=36, description="Proyecto del chat (su brief va de contexto)"
+    )
+
+
+class ChatPatch(BaseModel):
+    project_id: str | None = Field(None, max_length=36, description="Cadena vacía: sin proyecto")
+    auto_budget_usd: float | None = Field(
+        None, ge=0, le=500, description="Tope de la generación automática; 0 la apaga"
+    )
 
 
 class ChatDocument(BaseModel):
@@ -377,6 +421,9 @@ class ChatMessageIn(BaseModel):
 
 class ProposalJobIn(BaseModel):
     job_id: str = Field(max_length=36)
+    auto_usd: float | None = Field(
+        None, ge=0, description="Lanzada por la generación automática: su precio cuenta contra el tope"
+    )
 
 
 class EstimateIn(BaseModel):
@@ -628,6 +675,8 @@ def create_app(
             "attempts": job.attempts_log or [],
             "hidden": bool(job.hidden),
             "favorite": bool(job.favorite),
+            "project_id": job.project_id,
+            "folder_id": job.folder_id,
             "created_at": iso(job.created_at),
             "submitted_at": iso(job.submitted_at),
             "finished_at": iso(job.finished_at),
@@ -1002,6 +1051,7 @@ def create_app(
         idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
     ) -> JSONResponse:
         model = check_input(catalog, body.model, body.input)
+        project_id, folder_id = await check_place(session, owner, body.project_id, body.folder_id)
         # Un reintento con la misma Idempotency-Key devuelve el trabajo ya creado antes de volver a cotizar o
         # resolver medios: un elemento borrado o un precio nuevo no lo convierten en otra petición (revisión 43).
         digest = request_digest(model["id"], body.input, body.keep_source_audio, body.provider)
@@ -1030,9 +1080,33 @@ def create_app(
             max_reserve_usd=approved_reserve,
             provider=body.provider,
         )
+        if created and project_id:
+            job.project_id, job.folder_id = project_id, folder_id
+            await session.commit()
         if created:
             request.app.state.worker.wake()
         return JSONResponse(job_out(job, deduplicated=not created), status_code=202 if created else 200)
+
+    async def check_place(
+        session: AsyncSession, owner: ApiClient, project_id: str | None, folder_id: str | None
+    ) -> tuple[str | None, str | None]:
+        """Proyecto y carpeta propios (una carpeta implica su proyecto); 404 si no existen o son de otro."""
+        if folder_id:
+            folder = await session.get(Folder, folder_id)
+            if folder is None:
+                raise ServiceError(404, "folder_not_found", "Folder not found")
+            if project_id and project_id != folder.project_id:
+                raise ServiceError(422, "folder_mismatch", "The folder belongs to another project")
+            project_id = folder.project_id
+        if project_id:
+            await get_owned_project(session, owner, project_id)
+        return project_id, folder_id
+
+    async def get_owned_project(session: AsyncSession, owner: ApiClient, project_id: str) -> Project:
+        project = await session.get(Project, project_id)
+        if project is None or (project.owner_id != owner.id and not owner.sees_all):
+            raise ServiceError(404, "project_not_found", "Project not found")
+        return project
 
     @app.get("/v1/generations", tags=["generaciones"])
     async def list_generations(
@@ -1046,6 +1120,8 @@ def create_app(
         wait: int = Query(0, ge=0, le=120, description="Con ids: espera hasta N s a que todas terminen"),
         hidden: bool = Query(False, description="true: solo las ocultas (sin ids, las ocultas no se listan)"),
         favorite: bool = Query(False, description="true: solo las favoritas"),
+        project: str | None = Query(None, max_length=36, description="Id de proyecto, o none: sin proyecto"),
+        folder: str | None = Query(None, max_length=36, description="Id de carpeta, o none: sin carpeta"),
         model: Annotated[list[str] | None, Query(description="Modelos (repetible); OR con text")] = None,
         text: Annotated[
             list[str] | None, Query(description="Texto que contiene la entrada (repetible, OR)")
@@ -1060,6 +1136,10 @@ def create_app(
             query = query.where(Job.hidden == hidden)
         if favorite:
             query = query.where(Job.favorite.is_(True))
+        if project:
+            query = query.where(Job.project_id.is_(None) if project == "none" else Job.project_id == project)
+        if folder:
+            query = query.where(Job.folder_id.is_(None) if folder == "none" else Job.folder_id == folder)
         if status:
             query = query.where(Job.status == status)
         # Filtro de una página (p. ej. el historial de AI Influencer): cualquiera de los modelos o de los textos.
@@ -1330,6 +1410,122 @@ def create_app(
         """Marca (o desmarca, con `favorite: false`) varias generaciones como favoritas de la biblioteca."""
         changed = await set_library_flag(session, owner, body.ids, {"favorite": body.favorite})
         return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}
+
+    @app.post("/v1/generations/move", tags=["generaciones"])
+    async def move_generations(body: MoveIn, session: Session, owner: Owner) -> dict:
+        """Mueve varias generaciones a un proyecto y carpeta (o fuera, con null)."""
+        project_id, folder_id = await check_place(session, owner, body.project_id, body.folder_id)
+        changed = await set_library_flag(
+            session, owner, body.ids, {"project_id": project_id, "folder_id": folder_id}
+        )
+        return {"changed": sorted(changed), "skipped": sorted(set(body.ids) - changed)}
+
+    # --- Proyectos y carpetas --------------------------------------------------------------------
+
+    async def project_view(session: AsyncSession, project: Project, full: bool = False) -> dict:
+        count = await session.scalar(select(func.count(Job.id)).where(Job.project_id == project.id))
+        latest = await session.scalars(
+            select(Job.outputs)
+            .where(Job.project_id == project.id, Job.status == "completed", Job.hidden.is_(False))
+            .order_by(Job.created_at.desc())
+            .limit(4)
+        )
+        thumbs = [o.get("url") for outs in latest for o in (outs or [])[:1] if o.get("url")]
+        data = {**project.out(full), "generations": count or 0, "thumbnails": thumbs}
+        if full:
+            folders = await session.scalars(
+                select(Folder).where(Folder.project_id == project.id).order_by(Folder.name)
+            )
+            data["folders"] = [f.out() for f in folders]
+        return data
+
+    @app.get("/v1/projects", tags=["proyectos"])
+    async def list_projects(session: Session, owner: Owner) -> dict:
+        query = select(Project) if owner.sees_all else select(Project).where(Project.owner_id == owner.id)
+        rows = list(await session.scalars(query.order_by(Project.updated_at.desc())))
+        return {"projects": [await project_view(session, p) for p in rows]}
+
+    @app.post("/v1/projects", tags=["proyectos"], status_code=201)
+    async def create_project(body: ProjectIn, session: Session, owner: Owner) -> dict:
+        """Crea un proyecto con un brief (por defecto, la plantilla de secciones)."""
+        brief = body.brief if body.brief is not None else projects.brief_template(body.name)
+        project = Project(owner_id=owner.id, name=body.name.strip(), description=body.description.strip(),
+                          brief=brief)  # fmt: skip
+        session.add(project)
+        await session.commit()
+        return await project_view(session, project, full=True)
+
+    @app.get("/v1/projects/{project_id}", tags=["proyectos"])
+    async def get_project(project_id: str, session: Session, owner: Owner) -> dict:
+        return await project_view(session, await get_owned_project(session, owner, project_id), full=True)
+
+    @app.patch("/v1/projects/{project_id}", tags=["proyectos"])
+    async def update_project(project_id: str, body: ProjectPatch, session: Session, owner: Owner) -> dict:
+        project = await get_owned_project(session, owner, project_id)
+        if body.name is not None:
+            project.name = body.name.strip()
+        if body.description is not None:
+            project.description = body.description.strip()
+        if body.brief is not None:
+            project.brief = body.brief
+        if body.cover is not None:
+            if body.cover and not await trusted_media(session, owner, body.cover):
+                raise ServiceError(
+                    422, "untrusted_source", "The cover must be one of your uploads or outputs"
+                )
+            project.cover = body.cover or None
+        project.updated_at = utcnow()
+        await session.commit()
+        return await project_view(session, project, full=True)
+
+    @app.delete("/v1/projects/{project_id}", tags=["proyectos"], status_code=204)
+    async def delete_project(project_id: str, session: Session, owner: Owner) -> None:
+        """Borra el proyecto y sus carpetas; sus generaciones siguen en el historial, sin proyecto."""
+        project = await get_owned_project(session, owner, project_id)
+        await session.execute(
+            update(Job).where(Job.project_id == project.id).values(project_id=None, folder_id=None)
+            .execution_options(synchronize_session=False)
+        )  # fmt: skip
+        await session.execute(
+            update(Chat).where(Chat.project_id == project.id).values(project_id=None)
+            .execution_options(synchronize_session=False)
+        )  # fmt: skip
+        await session.execute(delete(Folder).where(Folder.project_id == project.id))
+        await session.delete(project)
+        await session.commit()
+
+    @app.post("/v1/projects/{project_id}/folders", tags=["proyectos"], status_code=201)
+    async def create_folder(project_id: str, body: FolderIn, session: Session, owner: Owner) -> dict:
+        project = await get_owned_project(session, owner, project_id)
+        folder = Folder(project_id=project.id, name=body.name.strip())
+        session.add(folder)
+        await session.commit()
+        return folder.out()
+
+    async def get_owned_folder(session: AsyncSession, owner: ApiClient, folder_id: str) -> Folder:
+        folder = await session.get(Folder, folder_id)
+        if folder is None:
+            raise ServiceError(404, "folder_not_found", "Folder not found")
+        await get_owned_project(session, owner, folder.project_id)
+        return folder
+
+    @app.patch("/v1/folders/{folder_id}", tags=["proyectos"])
+    async def rename_folder(folder_id: str, body: FolderIn, session: Session, owner: Owner) -> dict:
+        folder = await get_owned_folder(session, owner, folder_id)
+        folder.name = body.name.strip()
+        await session.commit()
+        return folder.out()
+
+    @app.delete("/v1/folders/{folder_id}", tags=["proyectos"], status_code=204)
+    async def delete_folder(folder_id: str, session: Session, owner: Owner) -> None:
+        """Borra la carpeta; sus generaciones siguen en el proyecto, sin carpeta."""
+        folder = await get_owned_folder(session, owner, folder_id)
+        await session.execute(
+            update(Job).where(Job.folder_id == folder.id).values(folder_id=None)
+            .execution_options(synchronize_session=False)
+        )  # fmt: skip
+        await session.delete(folder)
+        await session.commit()
 
     @app.post("/v1/generations/{job_id}/approve", tags=["generaciones"])
     async def approve(
@@ -1686,9 +1882,15 @@ def create_app(
         description: Annotated[str, Form(min_length=1, max_length=500)],
         files: Annotated[list[UploadFile], File()] = [],  # noqa: B006
         image_urls: Annotated[list[str], Form()] = [],  # noqa: B006
+        category: Annotated[str, Form()] = "other",
     ) -> dict:
-        """Crea un elemento con 2 a 4 imágenes JPG o PNG (archivos o URLs propias). Se cita con @nombre."""
+        """Crea un elemento (personaje, lugar o prop) con 1 a 4 imágenes JPG o PNG (archivos o URLs propias). Se
+        cita con @nombre; Kling 3.0 necesita 2 o más."""
         name = check_name(name)
+        if category not in ELEMENT_CATEGORIES:
+            raise ServiceError(
+                422, "invalid_category", f"category must be one of {', '.join(ELEMENT_CATEGORIES)}"
+            )
         description = description.strip()
         if not description:
             raise ServiceError(422, "invalid_description", "The description cannot be empty")
@@ -1715,7 +1917,7 @@ def create_app(
                     {"file": file, "content_type": kind, "url": await request.app.state.hf.upload(data, kind)}
                 )
             element = Element(id=element_id, name=name, description=description, images=stored,
-                              created_by=owner.id)  # fmt: skip
+                              category=category, created_by=owner.id)  # fmt: skip
             session.add(element)
             await session.commit()
         except IntegrityError:
@@ -1755,6 +1957,16 @@ def create_app(
         image = element.images[index]
         return FileResponse(element_folder(settings.storage_dir, element.id) / image["file"],
                             media_type=image["content_type"])  # fmt: skip
+
+    @app.post("/v1/elements/{element_id}/urls", tags=["elementos"])
+    async def element_urls(element_id: str, request: Request, session: Session, owner: Owner) -> dict:
+        """URLs públicas y vigentes de sus imágenes, para pasarlas como referencias a cualquier modelo (las
+        vuelve a subir si caducan pronto; subir no cobra)."""
+        element = await get_element_or_404(session, element_id)
+        urls = await fresh_element_urls(element, settings.storage_dir, request.app.state.hf.upload)
+        await session.commit()
+        return {"id": element.id, "mention": f"@{element.name}", "description": element.description,
+                "image_urls": urls}  # fmt: skip
 
     @app.delete("/v1/elements/{element_id}", status_code=204, tags=["elementos"])
     async def delete_element(element_id: str, session: Session, owner: Owner) -> None:
@@ -2090,7 +2302,10 @@ def create_app(
 
     @app.post("/v1/chats", tags=["supercomputer"], status_code=201)
     async def create_chat(body: ChatIn, session: Session, owner: Owner) -> dict:
-        chat = Chat(owner_id=owner.id, title="New chat", model=body.model, messages=[], proposals={})
+        if body.project_id:
+            await get_owned_project(session, owner, body.project_id)
+        chat = Chat(owner_id=owner.id, title="New chat", model=body.model, messages=[], proposals={},
+                    project_id=body.project_id)  # fmt: skip
         session.add(chat)
         await session.commit()
         return chat_view(chat)
@@ -2098,6 +2313,23 @@ def create_app(
     @app.get("/v1/chats/{chat_id}", tags=["supercomputer"])
     async def get_chat(chat_id: str, session: Session, owner: Owner) -> dict:
         return chat_view(await get_owned_chat(session, owner, chat_id))
+
+    @app.patch("/v1/chats/{chat_id}", tags=["supercomputer"])
+    async def update_chat(chat_id: str, body: ChatPatch, session: Session, owner: Owner) -> dict:
+        """Cambia el proyecto del chat o el tope de la generación automática (0 la apaga y reinicia lo gastado)."""
+        chat = await get_owned_chat(session, owner, chat_id)
+        fields = body.model_fields_set
+        if "project_id" in fields:
+            if body.project_id:
+                await get_owned_project(session, owner, body.project_id)
+            chat.project_id = body.project_id or None
+        if "auto_budget_usd" in fields:
+            if not body.auto_budget_usd:
+                chat.auto_budget_usd, chat.auto_spent_usd = None, 0.0
+            else:
+                chat.auto_budget_usd = body.auto_budget_usd
+        await session.commit()
+        return chat.summary()
 
     @app.delete("/v1/chats/{chat_id}", tags=["supercomputer"], status_code=204)
     async def delete_chat(chat_id: str, session: Session, owner: Owner) -> None:
@@ -2125,6 +2357,8 @@ def create_app(
             )
         proposals[proposal_id] = {**p, "job_id": jobs[0], "job_ids": jobs, "reported": None}
         chat.proposals = proposals
+        if body.auto_usd and chat.auto_budget_usd:
+            chat.auto_spent_usd = round((chat.auto_spent_usd or 0) + body.auto_usd, 4)
         await session.commit()
         return proposals[proposal_id]
 
@@ -2241,11 +2475,17 @@ def create_app(
                     .order_by(Element.created_at.desc())
                     .limit(50)
                 )
-                return {"elements": [
-                    {"id": e.id, "name": e.name, "mention": f"@{e.name}", "description": e.description,
-                     "images": len(e.images)}
-                    for e in rows
-                ]}  # fmt: skip
+                out = []
+                for e in rows:
+                    try:
+                        urls = await fresh_element_urls(e, settings.storage_dir, request.app.state.hf.upload)
+                    except (OSError, ProviderError):
+                        urls = []  # sin copia local o sin subida: el agente aún puede citarlo en Kling
+                    out.append({"id": e.id, "name": e.name, "mention": f"@{e.name}",
+                                "category": e.category or "other", "description": e.description,
+                                "image_urls": urls})  # fmt: skip
+                await s.commit()  # guarda las URLs renovadas
+                return {"elements": out}
 
         async def list_skills_tool() -> dict:
             async with app.state.sessions() as s:
@@ -2308,10 +2548,15 @@ def create_app(
         called = skill_files.invoked(body.text, known)
         bodies = {r.slug: (r.body, sorted(r.files or {}))
                   for r in await session.scalars(select(Skill).where(Skill.slug.in_(called)))}  # fmt: skip
+        project = await session.get(Project, chat.project_id) if chat.project_id else None
+        context = [projects.brief_block(project.name, project.brief)] if project else []
+        if chat.auto_budget_usd:
+            left = max(0.0, chat.auto_budget_usd - (chat.auto_spent_usd or 0))
+            context.append(sc.auto_note(left))
         user_msg = {"role": "user", "content": sc.user_content(
             body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now,
             [(slug, *bodies[slug]) for slug in called if slug in bodies],
-            [d.model_dump() for d in body.documents])}  # fmt: skip
+            [d.model_dump() for d in body.documents], context)}  # fmt: skip
         history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
         chat_key, owner_id = chat.id, owner.id

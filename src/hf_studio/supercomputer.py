@@ -82,6 +82,13 @@ in your text; summarise what it contains in a few lines.
 output URLs) arrive inside <studio_update> tags; an output URL can be reused as an input (for example the image \
 of a character as `image_url` / start frame of a video).
 
+# Projects and elements
+When the chat belongs to a project, its brief arrives inside <studio_project> tags: follow its narrative, visuals \
+and production notes (palette, tone, characters, formats) unless the user asks otherwise. Elements are saved \
+characters, locations and props (`list_elements`); with Kling 3.0 pass their ids in `elements` and cite \
+@name (Kling needs 2+ images); with other models that take image references put their `image_urls` in the \
+reference field and describe them in the prompt.
+
 # Skills
 The studio has skills: playbooks with instructions for a kind of task. When the user calls one with /name, its \
 instructions arrive in their message inside <skill name="…"> tags: follow them for this request (they take \
@@ -246,8 +253,9 @@ TOOLS.append(
         "name": "list_elements",
         "description": (
             "List the user's saved elements: recurring characters, products or places with a name, a description "
-            "and reference images. Free. Kling 3.0 models take their ids in the `elements` field and the prompt "
-            "cites each as @name."
+            "and reference images (`image_urls`), with a category (character, location, prop, other). Free. Kling "
+            "3.0 models take their ids in the `elements` field and the prompt cites each as @name; other models "
+            "take their `image_urls` as image references."
         ),
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     }
@@ -442,6 +450,7 @@ def user_content(
     now: str | None = None,
     skills: list[tuple[str, str, list[str]]] | None = None,
     documents: list[dict] | None = None,
+    context: list[str] | None = None,
 ) -> list[dict]:
     """Bloques del mensaje del usuario: modo, hora actual, novedades de sus generaciones, adjuntos (las imágenes
     también como imagen, para que Claude las vea) y el texto."""
@@ -450,6 +459,8 @@ def user_content(
         head += f"\n<studio_time>{now}</studio_time>"
     if updates:
         head += "\n<studio_update>\n" + "\n".join(updates) + "\n</studio_update>"
+    for block in context or []:  # brief del proyecto, generación automática
+        head += "\n" + block
     blocks: list[dict] = [{"type": "text", "text": head}]
     for a in attachments[:MAX_ATTACHMENTS]:
         kind = (a.get("content_type") or "").split("/")[0] or "file"
@@ -467,6 +478,16 @@ def user_content(
         )
     blocks.append({"type": "text", "text": text})
     return blocks
+
+
+def auto_note(left_usd: float) -> str:
+    """Aviso de que la generación automática está activa y cuánto queda del tope."""
+    return (
+        f'<studio_auto_generate remaining_usd="{left_usd:.2f}">The user turned on auto-generation: every '
+        "proposal whose total price fits in the remaining budget starts right away, without a click. Propose only "
+        "what the user asked for, keep it within the budget, and say what you launched. Proposals that do not fit "
+        "wait for the user's click as usual.</studio_auto_generate>"
+    )
 
 
 async def run_turn(
