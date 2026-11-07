@@ -2317,19 +2317,24 @@ def create_app(
     @app.patch("/v1/chats/{chat_id}", tags=["supercomputer"])
     async def update_chat(chat_id: str, body: ChatPatch, session: Session, owner: Owner) -> dict:
         """Cambia el proyecto del chat o el tope de la generación automática (0 la apaga y reinicia lo gastado)."""
-        chat = await get_owned_chat(session, owner, chat_id)
+        await get_owned_chat(session, owner, chat_id)
         fields = body.model_fields_set
-        if "project_id" in fields:
-            if body.project_id:
-                await get_owned_project(session, owner, body.project_id)
-            chat.project_id = body.project_id or None
-        if "auto_budget_usd" in fields:
-            if not body.auto_budget_usd:
-                chat.auto_budget_usd, chat.auto_spent_usd = None, 0.0
-            else:
-                chat.auto_budget_usd = body.auto_budget_usd
-        await session.commit()
-        return chat.summary()
+        if "project_id" in fields and body.project_id:
+            await get_owned_project(session, owner, body.project_id)
+        # Bajo el candado del chat: un cambio de tope no se cruza con una generación automática en curso.
+        async with chat_lock(chat_id):
+            chat = await session.get(Chat, chat_id, populate_existing=True)
+            if chat is None:
+                raise ServiceError(404, "not_found", "Chat not found")
+            if "project_id" in fields:
+                chat.project_id = body.project_id or None
+            if "auto_budget_usd" in fields:
+                if not body.auto_budget_usd:
+                    chat.auto_budget_usd, chat.auto_spent_usd = None, 0.0
+                else:
+                    chat.auto_budget_usd = body.auto_budget_usd
+            await session.commit()
+            return chat.summary()
 
     @app.delete("/v1/chats/{chat_id}", tags=["supercomputer"], status_code=204)
     async def delete_chat(chat_id: str, session: Session, owner: Owner) -> None:

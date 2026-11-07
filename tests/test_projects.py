@@ -126,3 +126,39 @@ async def test_a_link_made_while_the_agent_answers_is_kept(chat_env, tmp_path): 
         if part.get("type") == "proposal"
     )
     assert proposal["job_ids"] == ["job-x"]
+
+
+async def test_changing_the_budget_waits_for_an_auto_run_in_progress(chat_env):  # noqa: F811
+    import asyncio
+
+    from .test_supercomputer import PROPOSAL, tool
+
+    app, http, claude = chat_env
+    claude.script = [([tool("propose_generation", PROPOSAL)], "tool_use")]
+    chat = (await http.post("/v1/chats", json={})).json()
+    events = await send(http, chat["id"], "un barco")
+    pid = next(e["proposal"]["tool_use_id"] for e in events if e["type"] == "proposal")
+    await http.patch(f"/v1/chats/{chat['id']}", json={"auto_budget_usd": 2})
+
+    router = app.state.router
+    original, quoting, release = router.plan, asyncio.Event(), asyncio.Event()
+
+    async def slow_plan(*args, **kwargs):
+        quoting.set()
+        await release.wait()
+        return await original(*args, **kwargs)
+
+    router.plan = slow_plan
+    try:
+        run = asyncio.create_task(http.post(f"/v1/chats/{chat['id']}/proposals/{pid}/auto"))
+        await quoting.wait()
+        patch = asyncio.create_task(http.patch(f"/v1/chats/{chat['id']}", json={"auto_budget_usd": 0}))
+        await asyncio.sleep(0.05)
+        assert not patch.done()  # espera al candado del chat
+        release.set()
+        assert (await run).status_code == 200
+        assert (await patch).json()["auto_budget_usd"] is None
+    finally:
+        router.plan = original
+    # Orden coherente: primero la generación (con su tope), después el apagado que reinicia lo gastado.
+    assert (await http.get(f"/v1/chats/{chat['id']}")).json()["auto_spent_usd"] == 0

@@ -30,11 +30,16 @@ export function ProjectView({ id }: { id: string }) {
   const [folder, setFolder] = useState<string | undefined>(undefined);
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefDraft | null>(null);
+  const latestBrief = useRef<string | null>(null);
+  const serverBrief = useRef<string | null>(null);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     studio.project(id).then(
       (pr) => {
         setProject(pr);
+        serverBrief.current = pr.brief;
+        latestBrief.current = pr.brief;
         setBrief({ text: pr.brief, saved: pr.brief, state: "saved" });
       },
       () => setMissing(true),
@@ -42,34 +47,43 @@ export function ProjectView({ id }: { id: string }) {
   }, [id]);
 
   // Borrador del brief a nivel de proyecto: cambiar de pestaña no lo pierde. Se guarda un segundo después de dejar de
-  // escribir; si falla queda «Sin guardar» y se reintenta con el siguiente cambio o con el botón.
-  const pendingBrief = useRef<string | null>(null);
-  const saveBrief = useCallback(
-    async (text: string) => {
-      setBrief((b) => (b ? { ...b, state: "saving" } : b));
-      try {
-        const saved = await studio.updateProject(id, { brief: text });
-        pendingBrief.current = pendingBrief.current === text ? null : pendingBrief.current;
-        setProject(saved);
-        setBrief((b) => (b ? { ...b, saved: text, state: b.text === text ? "saved" : "unsaved" } : b));
-      } catch {
-        setBrief((b) => (b ? { ...b, state: "unsaved" } : b));
+  // escribir, con una sola escritura en vuelo: al terminar, si el borrador cambió, se envía el último (nunca uno viejo).
+  // Si falla queda «Sin guardar» con reintento; al salir del proyecto se envía lo que falte.
+  const flushBrief = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      while (latestBrief.current !== null && latestBrief.current !== serverBrief.current) {
+        const text = latestBrief.current;
+        setBrief((b) => (b ? { ...b, state: "saving" } : b));
+        try {
+          const saved = await studio.updateProject(id, { brief: text });
+          serverBrief.current = text;
+          setProject(saved);
+        } catch {
+          setBrief((b) => (b ? { ...b, state: "unsaved" } : b));
+          return;
+        }
       }
-    },
-    [id],
-  );
+      const server = serverBrief.current;
+      setBrief((b) => (b && server !== null ? { ...b, saved: server, state: b.text === server ? "saved" : "unsaved" } : b));
+    } finally {
+      inFlight.current = false;
+    }
+  }, [id]);
+  const briefText = brief?.text ?? null;
   useEffect(() => {
-    if (!brief || brief.text === brief.saved || brief.state === "saving") return;
-    pendingBrief.current = brief.text;
-    const timer = setTimeout(() => void saveBrief(brief.text), 1000);
+    latestBrief.current = briefText;
+    if (briefText === null || briefText === serverBrief.current) return;
+    const timer = setTimeout(() => void flushBrief(), 1000);
     return () => clearTimeout(timer);
-  }, [brief, saveBrief]);
-  // Al salir del proyecto con cambios sin guardar, se envían igualmente.
+  }, [briefText, flushBrief]);
+  // Al salir del proyecto con cambios sin guardar, se envían igualmente (en orden, tras la escritura en vuelo).
   useEffect(
     () => () => {
-      if (pendingBrief.current !== null) void studio.updateProject(id, { brief: pendingBrief.current }).catch(() => undefined);
+      if (latestBrief.current !== null && latestBrief.current !== serverBrief.current) void flushBrief();
     },
-    [id],
+    [flushBrief],
   );
 
   if (missing) {
@@ -207,7 +221,7 @@ export function ProjectView({ id }: { id: string }) {
         <BriefEditor
           draft={brief}
           onChange={(text) => setBrief((b) => (b ? { ...b, text, state: text === b.saved ? "saved" : "unsaved" } : b))}
-          onRetry={() => void saveBrief(brief.text)}
+          onRetry={() => void flushBrief()}
         />
       )}
       {tab === "settings" && (
