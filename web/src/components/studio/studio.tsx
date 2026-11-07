@@ -35,6 +35,8 @@ import { Chip, FieldControl, SettingCard } from "./controls";
 import { EmptyState } from "./empty-state";
 import { MediaSlot } from "./media-slot";
 import { ModelPicker, ModelRow } from "./model-picker";
+import { CinemaControls, HashMovementMenu } from "./cinema/cinema-controls";
+import { EMPTY_CINEMA, applyCinema, cinemaKeysOf, type CinemaExtra } from "./cinema/data";
 
 const MODE_ICON = { type: Type, image: ImageIcon, layers: Layers, wand: Wand2, clock: Clock, swap: Repeat, move: Move, sparkles: Sparkles, brush: Brush };
 const detailCache = new Map<string, Promise<ModelDetail>>();
@@ -138,7 +140,9 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const prompt = fields.find((f) => f.kind === "prompt");
   const elementsField = fields.find((f) => f.kind === "elements");
   const styleField = fields.find((f) => f.kind === "style");
-  const settings = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
+  // Cinema Studio: sus campos creativos van en la barra de dirección, no en la lista genérica.
+  const cinemaKeys = useMemo(() => (detail ? cinemaKeysOf(detail.input_schema) : []), [detail]);
+  const settings = fields.filter((f) => ["enum", "range", "toggle"].includes(f.kind) && !(cinemaKeys as string[]).includes(f.key)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
   // Opción de HF Studio (no de Higgsfield): la API dice si la acepta (audio.supports_source_audio).
   const canKeepAudio = !!detail?.keep_source_audio;
   const advanced = fields.filter((f) => ["text", "number", "json"].includes(f.kind)) as Exclude<Field, { kind: "prompt" } | { kind: "media" }>[];
@@ -148,6 +152,16 @@ export function Studio({ output }: { output: "video" | "image" }) {
     setValues((prev) => ({ ...prev, [key]: v }));
     setErrors((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)));
   }, []);
+
+  // Extras de Cinema Studio (secuencia de movimientos, paleta e iluminación propias): se suman al prompt al enviar.
+  const [cinemaExtra, setCinemaExtraState] = useState<CinemaExtra>(EMPTY_CINEMA);
+  if (!cinemaKeys.length && cinemaExtra !== EMPTY_CINEMA) setCinemaExtraState(EMPTY_CINEMA);
+  const setCinemaExtra = useCallback((next: React.SetStateAction<CinemaExtra>) => {
+    idempotency.current = null;
+    setCinemaExtraState(next);
+  }, []);
+  const sendValues = useMemo(() => (cinemaKeys.length ? applyCinema(values, cinemaExtra) : values), [cinemaKeys, values, cinemaExtra]);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
 
   // Duración de los videos de entrada (algunos modelos cobran por segundos de entrada).
   const [videoSecs, setVideoSecs] = useState<Record<string, number>>({});
@@ -170,7 +184,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
 
   // Costo antes de generar: se recalcula con debounce en cada cambio y siempre se muestra.
   const hintsKey = JSON.stringify(hints);
-  const estimateKey = detail ? `${detail.id}|${JSON.stringify(cleanInput(values))}|${hintsKey}` : "";
+  const estimateKey = detail ? `${detail.id}|${JSON.stringify(cleanInput(sendValues))}|${hintsKey}` : "";
   const [estimated, setEstimated] = useState<{ key: string; value: Estimate | null; error?: string } | null>(null);
   const current = estimated?.key === estimateKey ? estimated : null;
   const [confirmUnknown, setConfirmUnknown] = useState<string | null>(null);
@@ -179,12 +193,12 @@ export function Studio({ output }: { output: "video" | "image" }) {
     const h = JSON.parse(hintsKey) as Record<string, number>;
     const t = setTimeout(() => {
       studio
-        .estimate(detail.id, cleanInput(values), h)
+        .estimate(detail.id, cleanInput(sendValues), h)
         .then((r) => setEstimated({ key: estimateKey, value: r }))
         .catch((e) => setEstimated({ key: estimateKey, value: null, error: e instanceof Error ? e.message : String(e) }));
     }, 500);
     return () => clearTimeout(t);
-  }, [detail, values, estimateKey, hintsKey]);
+  }, [detail, sendValues, estimateKey, hintsKey]);
 
   function go(next: { tab?: string; mode?: string }) {
       const sp = new URLSearchParams(params.toString());
@@ -205,6 +219,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
         const m = tb.modes.find((x) => x.filter(byId.get(g.model) ?? ({ id: g.model, capabilities: [], output: output } as never)));
         if (!m) continue;
         pendingValues.current = g.input;
+        setCinemaExtra(EMPTY_CINEMA);
         setKeepAudio(!!g.keep_source_audio);
         setChosen((c) => ({ ...c, [`${tb.key}/${m.key}`]: g.model }));
         if (g.model === modelId) {
@@ -296,7 +311,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
     try {
       const g = await studio.generate(
         detail.id,
-        cleanInput(values),
+        cleanInput(sendValues),
         idempotency.current,
         canKeepAudio && keepAudio,
         current?.value?.usd ?? null,
@@ -312,7 +327,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
       const fields = fieldErrors(e);
       if (e instanceof StudioError && e.code === "cost_changed") {
         // Otro precio que el que se mostró: se vuelve a cotizar y el usuario decide de nuevo.
-        const fresh = await studio.estimate(detail.id, cleanInput(values), JSON.parse(hintsKey)).catch(() => null);
+        const fresh = await studio.estimate(detail.id, cleanInput(sendValues), JSON.parse(hintsKey)).catch(() => null);
         setEstimated({ key: estimateKey, value: fresh });
         setFormError(fresh?.usd != null ? t.cost.priceChanged(formatUsd(fresh.usd)) : e.message);
       } else if (fields) {
@@ -409,8 +424,9 @@ export function Studio({ output }: { output: "video" | "image" }) {
               </div>
 
               {prompt && (
-                <div className={clsx("rounded-2xl border bg-surface-3 p-4", errors.prompt ? "border-danger/60" : "border-line focus-within:border-line-2")}>
+                <div className={clsx("relative rounded-2xl border bg-surface-3 p-4", errors.prompt ? "border-danger/60" : "border-line focus-within:border-line-2")}>
                   <textarea
+                    ref={promptRef}
                     value={(values.prompt as string) ?? ""}
                     onChange={(e) => setValue("prompt", e.target.value || undefined)}
                     onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && submit()}
@@ -423,7 +439,14 @@ export function Studio({ output }: { output: "video" | "image" }) {
                     <span className="font-mono">{((values.prompt as string) ?? "").length}</span>
                   </div>
                   {errors.prompt && <p className="mt-1 text-xs text-danger">{errors.prompt}</p>}
+                  {cinemaKeys.includes("camera_movement") && (
+                    <HashMovementMenu textareaRef={promptRef} keys={cinemaKeys} values={values} setValue={setValue} extra={cinemaExtra} setExtra={setCinemaExtra} />
+                  )}
                 </div>
+              )}
+
+              {cinemaKeys.length > 0 && (
+                <CinemaControls key={detail.id} keys={cinemaKeys} values={values} setValue={setValue} extra={cinemaExtra} setExtra={setCinemaExtra} />
               )}
 
               {elementsField && (
