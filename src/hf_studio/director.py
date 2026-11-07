@@ -112,7 +112,12 @@ def sort_key(shot: Any) -> tuple:
     """Orden natural: escena (2 antes que 10), `order` y número."""
 
     def natural(value: str) -> tuple:
-        return tuple(int(p) if p.isdigit() else p for p in re.split(r"(\d+)", value or "") if p)
+        # Cada trozo lleva su tipo delante: «1» y «A» en la misma posición se comparan sin TypeError.
+        return tuple(
+            (0, int(p), "") if p.isdigit() else (1, 0, p.lower())
+            for p in re.split(r"(\d+)", value or "")
+            if p
+        )
 
     return (natural(shot.scene), shot.order or 0, natural(shot.number))
 

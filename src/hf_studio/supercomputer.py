@@ -884,6 +884,35 @@ def tool_result(tool_use_id: str, result: dict) -> dict:
     }  # fmt: skip
 
 
+def strip_images(messages: list[dict]) -> list[dict]:
+    """El historial que se guarda sin las imágenes base64 de los resultados de herramientas (fotogramas de
+    `review_generation`, `chain_shot`): se ven en el turno en que se pidieron y luego se cambian por una nota, para
+    que no se acumulen ni se reenvíen en cada mensaje. El texto del resultado (tiempos, ajustes) se conserva."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            out.append(m)
+            continue
+        blocks = []
+        for b in content:
+            inner = b.get("content") if isinstance(b, dict) and b.get("type") == "tool_result" else None
+            if isinstance(inner, list):
+                kept = [
+                    x
+                    for x in inner
+                    if not (x.get("type") == "image" and x.get("source", {}).get("type") == "base64")
+                ]
+                if len(kept) != len(inner):
+                    n = len(inner) - len(kept)
+                    kept.append({"type": "text", "text": f"[{n} image(s) shown in that turn and removed from the "
+                                                          "history; call the tool again to look at them]"})  # fmt: skip
+                    b = {**b, "content": kept}
+            blocks.append(b)
+        out.append({**m, "content": blocks})
+    return out
+
+
 QUESTION_NOTE = "Shown to the user with clickable options. Stop now; their answer is their next message."
 
 

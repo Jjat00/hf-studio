@@ -13,65 +13,94 @@ type Draft = { title: string; kind: ProjectDocKind; markdown: string };
 type SaveState = "saved" | "saving" | "unsaved" | "conflict";
 
 /**
- * Borrador de un documento que se guarda solo, uno tras otro (como el brief): cada guardado manda la versión que
- * conoce y, si AI Director lo cambió mientras tanto, se detiene en «conflicto» en vez de pisarlo.
+ * Borradores de documentos que se guardan solos, uno tras otro por documento (como el brief). Cada documento lleva su
+ * propio borrador, versión y cola: una respuesta de A nunca toca B. Cambiar de documento o salir del editor envía lo
+ * pendiente de cada uno; si AI Director lo cambió mientras tanto, se detiene en «conflicto» en vez de pisarlo.
  */
 function useDocDraft(onSaved: (doc: ProjectDoc) => void, untitled: string) {
   const [doc, setDoc] = useState<ProjectDoc | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [state, setState] = useState<SaveState>("saved");
-  const latest = useRef<Draft | null>(null);
-  const server = useRef<{ id: string; version: number; draft: Draft } | null>(null);
-  const inFlight = useRef(false);
+  const current = useRef<string | null>(null);
+  const latest = useRef(new Map<string, Draft>());
+  const server = useRef(new Map<string, { version: number; draft: Draft }>());
+  const inFlight = useRef(new Set<string>());
 
-  const init = useCallback((d: ProjectDoc) => {
-    const value = { title: d.title, kind: d.kind, markdown: d.markdown };
-    server.current = { id: d.id, version: d.version, draft: value };
-    latest.current = value;
-    setDoc(d);
-    setDraft(value);
-    setState("saved");
-  }, []);
+  const same = (a: Draft | undefined | null, b: Draft | undefined | null) =>
+    !!a && !!b && a.title === b.title && a.kind === b.kind && a.markdown === b.markdown;
 
-  const same = (a: Draft | null, b: Draft | null) => !!a && !!b && a.title === b.title && a.kind === b.kind && a.markdown === b.markdown;
-
-  const flush = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    try {
-      while (server.current && latest.current && !same(latest.current, server.current.draft)) {
-        const next = latest.current;
-        const base = server.current;
-        setState("saving");
-        try {
-          const saved = await studio.updateDocument(base.id, { ...next, title: next.title.trim() || untitled, base_version: base.version });
-          server.current = { id: saved.id, version: saved.version, draft: next };
-          setDoc(saved);
-          onSaved(saved);
-        } catch (e) {
-          setState(e instanceof StudioError && e.status === 409 ? "conflict" : "unsaved");
-          return;
+  const flush = useCallback(
+    async (id: string) => {
+      if (inFlight.current.has(id)) return;
+      inFlight.current.add(id);
+      const mine = () => current.current === id;
+      try {
+        for (;;) {
+          const next = latest.current.get(id);
+          const base = server.current.get(id);
+          if (!next || !base || same(next, base.draft)) break;
+          if (mine()) setState("saving");
+          try {
+            const saved = await studio.updateDocument(id, { ...next, title: next.title.trim() || untitled, base_version: base.version });
+            server.current.set(id, { version: saved.version, draft: next });
+            onSaved(saved);
+            if (mine()) setDoc(saved);
+          } catch (e) {
+            if (mine()) setState(e instanceof StudioError && e.status === 409 ? "conflict" : "unsaved");
+            return;
+          }
         }
+        if (mine()) setState(same(latest.current.get(id), server.current.get(id)?.draft) ? "saved" : "unsaved");
+      } finally {
+        inFlight.current.delete(id);
       }
+    },
+    [onSaved, untitled],
+  );
+
+  const init = useCallback(
+    (d: ProjectDoc) => {
+      const prev = current.current;
+      if (prev && prev !== d.id) void flush(prev); // lo pendiente del anterior se envía, no se pierde
+      const value = { title: d.title, kind: d.kind, markdown: d.markdown };
+      server.current.set(d.id, { version: d.version, draft: value });
+      latest.current.set(d.id, value);
+      current.current = d.id;
+      setDoc(d);
+      setDraft(value);
       setState("saved");
-    } finally {
-      inFlight.current = false;
-    }
-  }, [onSaved, untitled]);
+    },
+    [flush],
+  );
 
   useEffect(() => {
-    latest.current = draft;
-    if (!draft || !server.current || same(draft, server.current.draft)) return;
-    const timer = setTimeout(() => void flush(), 1000);
+    const id = current.current;
+    if (!draft || !id) return;
+    latest.current.set(id, draft);
+    if (same(draft, server.current.get(id)?.draft)) return;
+    const timer = setTimeout(() => void flush(id), 1000);
     return () => clearTimeout(timer);
   }, [draft, flush]);
+
+  // Al salir del editor, cada documento con cambios sin guardar se envía igualmente.
+  useEffect(() => {
+    const latestMap = latest.current;
+    const serverMap = server.current;
+    return () => {
+      for (const [id, d] of latestMap) if (!same(d, serverMap.get(id)?.draft)) void flush(id);
+    };
+  }, [flush]);
 
   const change = useCallback((patch: Partial<Draft>) => {
     setDraft((d) => (d ? { ...d, ...patch } : d));
     setState((s) => (s === "conflict" ? s : "unsaved"));
   }, []);
 
-  return { doc, draft, state, init, change, retry: flush, dirty: state !== "saved" };
+  const retry = useCallback(() => {
+    if (current.current) void flush(current.current);
+  }, [flush]);
+
+  return { doc, draft, state, init, change, retry, dirty: state !== "saved" };
 }
 
 /** Documentos vivos del proyecto (tratamiento, desglose, biblia…): lista y editor en Markdown. */
@@ -85,10 +114,16 @@ export function ProjectDocuments({ projectId, revision }: { projectId: string; r
   const onSaved = useCallback((d: ProjectDoc) => setDocs((list) => list?.map((x) => (x.id === d.id ? d : x)) ?? list), []);
   const { doc, draft, state, init, change, retry, dirty } = useDocDraft(onSaved, p.untitled);
 
+  // Solo vale la respuesta del último documento pedido (una lectura lenta de otro no lo sustituye).
+  const requested = useRef<string | null>(null);
   const open = useCallback(
     (id: string) => {
       setSelected(id);
-      studio.document(id).then(init, (e) => setError(e instanceof Error ? e.message : String(e)));
+      requested.current = id;
+      studio.document(id).then(
+        (d) => requested.current === id && init(d),
+        (e) => requested.current === id && setError(e instanceof Error ? e.message : String(e)),
+      );
     },
     [init],
   );

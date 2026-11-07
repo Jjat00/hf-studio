@@ -307,3 +307,56 @@ async def test_an_element_from_a_generation_needs_the_users_click(env, tmp_path)
     claude.script = [([tool("create_element_from_generation", args, 2)], "tool_use")]
     await send(http, chat["id"], "otra vez")
     assert "already an element" in result_of(claude, -1)["error"]
+
+
+async def test_two_saves_from_the_same_version_do_not_both_win(env):  # noqa: F811
+    import asyncio
+
+    _, http, _ = env
+    project = (await http.post("/v1/projects", json={"name": "Docs"})).json()
+    doc = (
+        await http.post(
+            f"/v1/projects/{project['id']}/documents",
+            json={"kind": "notes", "title": "N", "markdown": "original"},
+        )
+    ).json()
+    url = f"/v1/documents/{doc['id']}"
+    a, b = await asyncio.gather(
+        http.patch(url, json={"markdown": "edicion A", "base_version": doc["version"]}),
+        http.patch(url, json={"markdown": "edicion B", "base_version": doc["version"]}),
+    )
+    assert sorted([a.status_code, b.status_code]) == [200, 409]
+    final = (await http.get(url)).json()
+    assert final["version"] == doc["version"] + 1 and final["markdown"] in ("edicion A", "edicion B")
+
+
+async def test_scenes_with_numbers_and_letters_sort_together(env):  # noqa: F811
+    from types import SimpleNamespace
+
+    from hf_studio.director import sort_key
+
+    shots = [
+        SimpleNamespace(scene=s, order=0, number=n)
+        for s, n in [("A", "1"), ("10", "2"), ("2", "B"), ("2", "3")]
+    ]
+    assert [(x.scene, x.number) for x in sorted(shots, key=sort_key)] == [
+        ("2", "3"),
+        ("2", "B"),
+        ("10", "2"),
+        ("A", "1"),
+    ]
+
+
+def test_saved_history_drops_old_frames_but_keeps_their_text():
+    from hf_studio.supercomputer import strip_images
+
+    image = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "AAAA"}}
+    msgs = [
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                      "content": [{"type": "text", "text": '{"frames": [0, 2.5]}'}, image, image]}]},
+        {"role": "user", "content": "hola"},
+    ]  # fmt: skip
+    out = strip_images(msgs)
+    inner = out[0]["content"][0]["content"]
+    assert inner[0]["text"] == '{"frames": [0, 2.5]}' and all(b["type"] == "text" for b in inner)
+    assert "2 image(s)" in inner[-1]["text"] and out[1] == msgs[1]

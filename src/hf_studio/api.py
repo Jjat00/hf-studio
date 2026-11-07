@@ -2618,15 +2618,34 @@ def create_app(
         await get_owned_project(session, owner, doc.project_id)
         return doc
 
-    def save_document_version(
-        session: AsyncSession, doc: ProjectDocument, title: str, markdown: str, kind: str, by: str
-    ) -> None:
-        """Guarda la versión vigente en el historial y escribe la nueva (sube `version`)."""
-        session.add(ProjectDocumentVersion(document_id=doc.id, version=doc.version, title=doc.title,
-                                           markdown=doc.markdown, updated_by=doc.updated_by))  # fmt: skip
-        doc.title, doc.markdown, doc.kind, doc.updated_by = title, markdown, kind, by
-        doc.version += 1
-        doc.updated_at = utcnow()
+    async def save_document_version(
+        session: AsyncSession, doc: ProjectDocument, base: int, title: str, markdown: str, kind: str, by: str
+    ) -> bool:
+        """Escribe la versión `base + 1` solo si el documento sigue en `base` (UPDATE condicional, atómico frente a
+        otra pestaña, otro chat o el agente) y archiva la versión `base` en el historial, en la misma transacción.
+        False si otro guardado ganó: quien llama responde conflicto."""
+        old = (doc.title, doc.markdown, doc.updated_by)
+        done = await session.execute(
+            update(ProjectDocument)
+            .where(ProjectDocument.id == doc.id, ProjectDocument.version == base)
+            .values(
+                title=title,
+                markdown=markdown,
+                kind=kind,
+                updated_by=by,
+                version=base + 1,
+                updated_at=utcnow(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if done.rowcount != 1:
+            await session.rollback()
+            return False
+        session.add(ProjectDocumentVersion(document_id=doc.id, version=base, title=old[0], markdown=old[1],
+                                           updated_by=old[2]))  # fmt: skip
+        await session.commit()
+        await session.refresh(doc)
+        return True
 
     async def director_context(session: AsyncSession, project_id: str) -> list[str]:
         """Índice de documentos y resumen de la lista de tomas para el mensaje del agente."""
@@ -2704,10 +2723,14 @@ def create_app(
             raise ServiceError(
                 409, "version_conflict", "The document changed; reload it", {"version": doc.version}
             )
-        save_document_version(session, doc, (body.title or doc.title).strip(),
-                              doc.markdown if body.markdown is None else body.markdown,
-                              body.kind or doc.kind, "user")  # fmt: skip
-        await session.commit()
+        saved = await save_document_version(session, doc, body.base_version, (body.title or doc.title).strip(),
+                                            doc.markdown if body.markdown is None else body.markdown,
+                                            body.kind or doc.kind, "user")  # fmt: skip
+        if not saved:
+            await session.refresh(doc)
+            raise ServiceError(
+                409, "version_conflict", "The document changed; reload it", {"version": doc.version}
+            )
         return doc.out()
 
     @app.delete("/v1/documents/{document_id}", tags=["proyectos"], status_code=204)
@@ -2962,7 +2985,14 @@ def create_app(
                         return {"error": f"The document is at version {doc.version} (the user may have edited "
                                          "it): read_document again and merge before saving",
                                 "version": doc.version}, None  # fmt: skip
-                    save_document_version(s, doc, title.strip()[:120], markdown, kind, "agent")
+                    if not await save_document_version(s, doc, doc.version, title.strip()[:120], markdown, kind,
+                                                       "agent"):  # fmt: skip
+                        await s.refresh(doc)
+                        return {"error": f"The document is at version {doc.version} (it changed meanwhile): "
+                                         "read_document again and merge before saving",
+                                "version": doc.version}, None  # fmt: skip
+                    return {"ok": True, "document_id": doc.id, "version": doc.version,
+                            "note": "Saved in the project's Documents"}, None  # fmt: skip
                 else:
                     doc = ProjectDocument(project_id=pid, kind=kind, title=title.strip()[:120], markdown=markdown,
                                           updated_by="agent")  # fmt: skip
@@ -3329,7 +3359,7 @@ def create_app(
             body.text, body.mode, [a.model_dump() for a in body.attachments], updates, now,
             [(slug, *bodies[slug]) for slug in called if slug in bodies],
             [d.model_dump() for d in body.documents], context)}  # fmt: skip
-        history = sc.with_user_turn(chat.messages, user_msg)
+        history = sc.with_user_turn(sc.strip_images(chat.messages), user_msg)
         first = not chat.messages
         chat_key, owner_id, project_key = chat.id, owner.id, chat.project_id
         busy.add(chat_key)
@@ -3339,7 +3369,7 @@ def create_app(
                 row = await s.get(Chat, chat_key)
                 if row is None:
                     return None
-                row.messages = [*history, *turn.messages]
+                row.messages = sc.strip_images([*history, *turn.messages])
                 # Sobre lo vigente: los vínculos hechos mientras Claude respondía se conservan; del inicio del turno
                 # solo se trae lo que el agente ya sabe de cada generación.
                 merged = dict(row.proposals or {})
