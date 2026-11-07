@@ -241,6 +241,8 @@ export function Supercomputer() {
   const bottom = useRef<HTMLDivElement>(null);
   const file = useRef<HTMLInputElement>(null);
   const [historyMenu, setHistoryMenu] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0); // dragenter/dragleave saltan en cada hijo: se cuenta para no parpadear
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   // Menú de skills: la palabra «/algo» que se está escribiendo (sin la barra) y la opción marcada.
   const [slash, setSlash] = useState<{ query: string; start: number; end: number } | null>(null);
@@ -319,11 +321,13 @@ export function Supercomputer() {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [chat?.messages.length, pending, draft]);
 
-  async function upload(files: FileList | null) {
-    if (!files?.length) return;
+  async function upload(files: FileList | File[] | null) {
+    // Solo imágenes y videos (lo que se arrastra o se pega puede traer otros archivos).
+    const media = Array.from(files ?? []).filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (!media.length) return;
     setUploading(true);
     try {
-      for (const f of Array.from(files).slice(0, 6 - attachments.length)) {
+      for (const f of media.slice(0, 6 - attachments.length)) {
         const up = await studio.upload(f);
         setAttachments((prev) => [...prev, { url: up.url, content_type: up.content_type, filename: f.name }]);
       }
@@ -491,6 +495,14 @@ export function Supercomputer() {
           updateSlash(e.target.value, e.target.selectionStart ?? e.target.value.length);
         }}
         onBlur={() => setSlash(null)}
+        onPaste={(e) => {
+          // Pegar una imagen (captura, copiada de la web) la adjunta en vez de pegar texto.
+          const files = Array.from(e.clipboardData.files);
+          if (files.some((f) => f.type.startsWith("image/") || f.type.startsWith("video/"))) {
+            e.preventDefault();
+            void upload(files);
+          }
+        }}
         onKeyDown={(e) => {
           if (slash && slashMatches.length > 0) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -648,7 +660,38 @@ export function Supercomputer() {
         </nav>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main
+        className="relative flex min-w-0 flex-1 flex-col"
+        onDragEnter={(e) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDragging(true);
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDragLeave={() => {
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragging(false);
+        }}
+        onDrop={(e) => {
+          if (!e.dataTransfer.files.length) return;
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragging(false);
+          if (available && attachments.length < 6) void upload(e.dataTransfer.files);
+        }}
+      >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-3xl border-2 border-dashed border-lime/60 bg-surface-1/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <Paperclip className="size-7 text-lime" />
+              <p className="text-base font-semibold text-fg">{s.dropFiles}</p>
+              <p className="text-xs text-fg-3">{s.dropHint}</p>
+            </div>
+          </div>
+        )}
         {empty ? (
           <div className="flex flex-1 flex-col items-center justify-center px-4">
             <div className="w-full max-w-2xl">
