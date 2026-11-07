@@ -87,23 +87,32 @@ export function useGenerations({
     changedAt.current = asked.current;
   }, []);
 
+  // Un solo planificador de sondeos: cada (re)programación sube `epoch` y cualquier ciclo anterior (también uno con
+  // una lectura en vuelo) se detiene al ver que ya no es el vigente. Desmontar sube `epoch` y no deja nada vivo.
+  const epoch = useRef(0);
+  const schedule = useCallback((delay: number) => {
+    const mine = ++epoch.current;
+    if (timer.current) clearTimeout(timer.current);
+    const tick = async () => {
+      if (mine !== epoch.current) return;
+      const list = await latestRefresh.current();
+      if (mine !== epoch.current) return;
+      const active = list?.some((g) => !g.terminal);
+      timer.current = setTimeout(tick, active ? 2500 : 20000);
+    };
+    timer.current = setTimeout(tick, delay);
+  }, []);
+
   useEffect(() => {
     visible.current = `${hidden}|${favorite}|${project ?? ""}|${folder ?? ""}`;
     latestRefresh.current = refresh;
     invalidate();
-    let alive = true;
-    const loop = async () => {
-      const list = await refresh();
-      if (!alive) return;
-      const active = list?.some((g) => !g.terminal);
-      timer.current = setTimeout(loop, active ? 2500 : 20000);
-    };
-    loop();
+    schedule(0);
     return () => {
-      alive = false;
+      epoch.current += 1;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [refresh, invalidate, hidden, favorite, project, folder]);
+  }, [refresh, invalidate, schedule, hidden, favorite, project, folder]);
 
   // Hay más mientras la última lectura llenó la ventana; se está cargando mientras la ventana nueva aún no llegó.
   const hasMore = read.window === limit && read.count >= limit && limit < MAX_WINDOW;
@@ -120,14 +129,9 @@ export function useGenerations({
     (g: Generation) => {
       invalidate();
       setItems((prev) => [g, ...prev.filter((p) => p.id !== g.id)]);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(async function tick() {
-        const list = await refresh();
-        const active = list?.some((x) => !x.terminal);
-        timer.current = setTimeout(tick, active ? 2500 : 20000);
-      }, 1500);
+      schedule(1500);
     },
-    [refresh, invalidate],
+    [invalidate, schedule],
   );
 
   /** Un cambio de la lista: se ve al momento (`optimistic`), se envía en orden tras los anteriores y, al terminar

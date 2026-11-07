@@ -321,12 +321,13 @@ function HomeView({
       <div className="mt-8 w-full max-w-[880px]">
         <Composer panelsBelow onGenerated={generations.add} />
       </div>
-      {latest.length > 0 && (
+      {(generations.loading || generations.error || latest.length > 0) && (
         <div className="mt-12 w-full">
           <button type="button" onClick={onGenerations} className="mb-4 flex items-center gap-1 text-[18px] font-semibold text-fg hover:text-lime">
             {cs.recent} <ChevronRight className="size-5" />
           </button>
-          <GenerationsGrid list={generations} items={latest} empty={cs.noGenerations} />
+          {generations.error && <p className="mb-3 rounded-xl bg-danger/10 p-3 text-sm text-danger">{generations.error}</p>}
+          {(generations.loading || latest.length > 0) && <GenerationsGrid list={generations} items={latest} empty={cs.noGenerations} />}
         </div>
       )}
       <div className="mt-16 w-full">
