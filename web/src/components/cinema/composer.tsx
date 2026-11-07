@@ -13,7 +13,6 @@ import {
   Minus,
   Music,
   Plus,
-  RectangleHorizontal,
   ScanEye,
   Search,
   Sparkles,
@@ -25,6 +24,7 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { RatioIcon } from "@/components/studio/controls";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { CATEGORIES, elementMention } from "@/components/studio/element-refs";
 import { CinemaControls, HashMovementMenu, type CinemaPanel } from "@/components/studio/cinema/cinema-controls";
@@ -166,7 +166,16 @@ export function Composer({
   const cinemaKeys = useMemo(() => (ready ? cinemaKeysOf(ready.input_schema) : []), [ready]);
   const isCinema = cinemaKeys.length > 0;
   if (!isCinema && extra !== EMPTY_CINEMA) setExtraState(EMPTY_CINEMA);
-  const sendValues = useMemo(() => (isCinema ? applyCinema(values, extra) : values), [isCinema, values, extra]);
+  // Lote de 1 a 4: si el modelo admite ese tamaño de lote (`batch_size` de Soul Cinema: 1 o 4) lo hace en una sola
+  // generación; si no, se lanzan N generaciones con el lote mínimo del modelo.
+  const nativeBatch = (props.batch_size?.enum as number[] | undefined) ?? null;
+  const useNative = !!nativeBatch && nativeBatch.includes(batch);
+  // Tamaño de lote que va en la petición (null: el modelo no tiene `batch_size`).
+  const batchSize = nativeBatch ? (useNative ? batch : Math.min(...nativeBatch)) : null;
+  const sendValues = useMemo(() => {
+    const base = isCinema ? applyCinema(values, extra) : values;
+    return batchSize === null ? base : { ...base, batch_size: batchSize };
+  }, [isCinema, values, extra, batchSize]);
 
   const setValue = useCallback((key: string, v: unknown) => {
     keys.current = null; // otra petición: otras claves
@@ -283,9 +292,7 @@ export function Composer({
   if (videoUrls.length && videoUrls.every((u) => videoSecs[u])) hints.input_video_seconds = videoUrls.reduce((n, u) => n + videoSecs[u], 0);
   const hintsKey = JSON.stringify(hints);
 
-  // Lote: en modelos con `batch_size` (Soul Cinema) lo hace el propio modelo; si no, N generaciones.
-  const nativeBatch = (props.batch_size?.enum as number[] | undefined) ?? null;
-  const count = nativeBatch ? 1 : batch;
+  const count = useNative ? 1 : batch;
 
   // Precio: se recotiza con debounce en cada cambio; el que se ve es N × el de una.
   const estimateKey = ready ? `${ready.id}|${JSON.stringify(cleanInput(sendValues))}|${hintsKey}` : "";
@@ -637,11 +644,12 @@ export function Composer({
                 </Pop>
               )}
               {ratios && (
-                <Pop trigger={<><RectangleHorizontal className="size-3.5" />{String(values.aspect_ratio ?? ratios[0])}</>}>
+                <Pop trigger={<><RatioIcon value={String(values.aspect_ratio ?? ratios[0])} />{String(values.aspect_ratio ?? ratios[0])}</>}>
                   {(close) => (
                     <OptionList
                       title={c.ratio}
                       options={ratios}
+                      icon={(v) => <RatioIcon value={v} />}
                       value={values.aspect_ratio}
                       onPick={(v) => {
                         setValue("aspect_ratio", v);
@@ -696,15 +704,12 @@ export function Composer({
                 </button>
               )}
               <BatchStepper
-                value={nativeBatch ? Number(values.batch_size ?? nativeBatch[0]) : batch}
-                options={nativeBatch ?? [1, 2, 3, 4]}
-                title={c.batchHint(nativeBatch ? Number(values.batch_size ?? 1) : batch)}
+                value={batch}
+                options={[1, 2, 3, 4]}
+                title={c.batchHint(batch)}
                 onChange={(n) => {
-                  if (nativeBatch) setValue("batch_size", n);
-                  else {
-                    keys.current = null;
-                    setBatch(n);
-                  }
+                  keys.current = null;
+                  setBatch(n);
                 }}
               />
             </div>
@@ -795,6 +800,7 @@ function OptionList({
   onPick,
   note,
   format = (v) => v,
+  icon,
 }: {
   title: string;
   options: string[];
@@ -802,13 +808,17 @@ function OptionList({
   onPick: (v: string) => void;
   note?: string;
   format?: (v: string) => string;
+  icon?: (v: string) => ReactNode;
 }) {
   return (
     <div className="w-44">
       <p className="px-2.5 pt-1.5 pb-1 text-[11px] font-semibold text-fg-4">{title}</p>
       {options.map((o) => (
         <button key={o} type="button" onClick={() => onPick(o)} className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[13px] font-semibold hover:bg-surface-4">
-          {format(o)}
+          <span className="flex items-center gap-2">
+            {icon?.(o)}
+            {format(o)}
+          </span>
           {String(value) === o && <Check className="size-4 text-lime" />}
         </button>
       ))}
