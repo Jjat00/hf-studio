@@ -128,6 +128,7 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const keys = useRef<string[] | null>(null);
+  const batchOf = useRef<string | null>(null); // la petición a la que pertenecen las claves
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -322,11 +323,16 @@ export function Composer({
     setSubmitting(true);
     setError(null);
     setNotice(null);
-    // Una clave por posición del lote, estable mientras la petición no cambie: reintentar tras un fallo parcial
-    // recupera las ya aceptadas (el servidor deduplica por clave) y solo crea las que faltan.
-    if (!keys.current || keys.current.length !== count) keys.current = Array.from({ length: count }, () => crypto.randomUUID());
     const input = cleanInput(sendValues);
     const place = projectId === undefined ? activeProject() : projectId;
+    // Una clave por posición del lote, atada a la petición exacta (modelo, entrada, lote, proyecto y carpeta): reintentar
+    // la misma tras un fallo parcial recupera las ya aceptadas (el servidor deduplica por clave) y solo crea las que
+    // faltan; cualquier cambio de la petición, por cualquier vía (modo, esquema, controles), estrena claves.
+    const identity = JSON.stringify([ready.id, input, count, place ?? null, folderId ?? null, hintsKey]);
+    if (!keys.current || batchOf.current !== identity) {
+      keys.current = Array.from({ length: count }, () => crypto.randomUUID());
+      batchOf.current = identity;
+    }
     let launched = 0;
     try {
       for (const key of keys.current) {
