@@ -368,6 +368,9 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
     if (!chatId || chat?.id === chatId) return;
     studio.chat(chatId).then(
       (c) => {
+        // Panel ligado a un proyecto (AI Director): un chat que se movió a otro proyecto no se sigue aquí, porque
+        // leería otro brief y generaría en otro proyecto. Se empieza uno nuevo.
+        if (projectId !== undefined && (c.project_id ?? null) !== projectId) return onChatId(null);
         setChat(c);
         setModel(c.model);
       },

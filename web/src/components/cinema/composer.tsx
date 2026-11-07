@@ -23,7 +23,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { costAllowsDirectSubmit } from "@/components/studio/cost-panel";
 import { CATEGORIES, elementMention } from "@/components/studio/element-refs";
@@ -206,18 +206,26 @@ export function Composer({
     setValues(next);
     return true;
   }
-  const removeRef = useCallback((key: string, url: string) => {
+  // Las menciones <<<image_N>>> (y video/audio) del prompt siguen a su referencia: al quitar una se borra su mención y
+  // las siguientes se renumeran; al vaciar las referencias se quitan todas.
+  const removeRef = (key: string, url: string) => {
     keys.current = null;
+    const kind = media.find((f) => f.key === key)?.media;
     setValues((prev) => {
       const v = prev[key];
-      return { ...prev, [key]: Array.isArray(v) ? (v as string[]).filter((u) => u !== url) : undefined };
+      const list = Array.isArray(v) ? (v as string[]) : [];
+      const at = list.indexOf(url) + 1;
+      const next: Record<string, unknown> = { ...prev, [key]: Array.isArray(v) ? list.filter((u) => u !== url) : undefined };
+      if (kind && at > 0 && typeof prev.prompt === "string") next.prompt = renumberMentions(prev.prompt, kind, at);
+      return next;
     });
-  }, []);
+  };
   const resetRefs = () => {
     keys.current = null;
     setValues((prev) => {
       const next = { ...prev };
       for (const f of media) next[f.key] = undefined;
+      if (typeof prev.prompt === "string") next.prompt = stripMentions(prev.prompt);
       return next;
     });
   };
@@ -314,7 +322,9 @@ export function Composer({
     setSubmitting(true);
     setError(null);
     setNotice(null);
-    keys.current ??= Array.from({ length: count }, () => crypto.randomUUID());
+    // Una clave por posición del lote, estable mientras la petición no cambie: reintentar tras un fallo parcial
+    // recupera las ya aceptadas (el servidor deduplica por clave) y solo crea las que faltan.
+    if (!keys.current || keys.current.length !== count) keys.current = Array.from({ length: count }, () => crypto.randomUUID());
     const input = cleanInput(sendValues);
     const place = projectId === undefined ? activeProject() : projectId;
     let launched = 0;
@@ -350,8 +360,7 @@ export function Composer({
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
-      // Solo se conservan las claves si el fallo pudo ser de red (reintento seguro).
-      if (e instanceof StudioError && e.status < 500) keys.current = null;
+      if (launched > 0 && launched < count) setNotice(c.partial(launched, count));
     } finally {
       setSubmitting(false);
     }
@@ -737,6 +746,17 @@ function IconChip({ title, onClick, children }: { title: string; onClick: () => 
 function Pop({ trigger, children, className }: { trigger: ReactNode; children: (close: () => void) => ReactNode; className?: string }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  // El menú sale del chip hacia la derecha; si no cabe en la pantalla (móvil), se desplaza hasta que quepa.
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (!open || !el) return;
+    el.style.transform = "";
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    const shift = r.right > window.innerWidth - margin ? window.innerWidth - margin - r.right : r.left < margin ? margin - r.left : 0;
+    if (shift) el.style.transform = `translateX(${shift}px)`;
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const down = (e: MouseEvent) => box.current && !box.current.contains(e.target as Node) && setOpen(false);
@@ -754,7 +774,7 @@ function Pop({ trigger, children, className }: { trigger: ReactNode; children: (
         {trigger}
       </button>
       {open && (
-        <div className={clsx("absolute bottom-full left-0 z-40 mb-2 rounded-xl border border-line-2 bg-surface-2 p-1 shadow-2xl", className)}>
+        <div ref={panel} className={clsx("absolute bottom-full left-0 z-40 mb-2 rounded-xl border border-line-2 bg-surface-2 p-1 shadow-2xl", className)}>
           {children(() => setOpen(false))}
         </div>
       )}
@@ -887,7 +907,7 @@ function RefThumb({ url, kind, className }: { url: string; kind: MediaKind; clas
   );
 }
 
-type Item = { id: string; url: string; kind: MediaKind; source?: string };
+type Item = { id: string; url: string; kind: MediaKind; source?: string; label: string };
 
 /**
  * Panel de References, anclado encima del compositor: subidas, elementos, generaciones y favoritas. Las generaciones
@@ -948,10 +968,13 @@ function ReferencesPanel({
     const fromGens = (gs: Generation[]): Item[] =>
       gs
         .filter((g) => g.status === "completed" && g.outputs[0] && ["image", "video", "audio"].includes(g.outputs[0].kind))
-        .map((g) => ({ id: g.id, url: outputSrc(g.outputs[0]), kind: g.outputs[0].kind as MediaKind, source: g.id }));
+        .map((g) => {
+          const prompt = typeof g.input.prompt === "string" ? g.input.prompt.slice(0, 80) : "";
+          return { id: g.id, url: outputSrc(g.outputs[0]), kind: g.outputs[0].kind as MediaKind, source: g.id, label: `${g.outputs[0].kind}: ${prompt || g.model}` };
+        });
     const load: Promise<Item[]> =
       tab === "uploads"
-        ? studio.uploads(60).then((r) => r.uploads.map((u) => ({ id: u.id, url: u.url, kind: kindOf(u.content_type, u.url) })))
+        ? studio.uploads(60).then((r) => r.uploads.map((u) => ({ id: u.id, url: u.url, kind: kindOf(u.content_type, u.url), label: u.filename || u.url })))
         : studio.list(100, false, tab === "liked").then((r) => fromGens(r.generations));
     load.then(
       (list) => setItems((prev) => ({ ...prev, [tab]: list })),
@@ -1110,6 +1133,9 @@ function ReferencesPanel({
                         key={it.id}
                         type="button"
                         disabled={busy !== null}
+                        aria-label={it.label}
+                        aria-pressed={on}
+                        title={it.label}
                         onClick={() => void toggle(it)}
                         className={clsx("relative aspect-square overflow-hidden rounded-xl bg-surface-3 ring-lime transition hover:ring-2", on && "ring-2")}
                       >
@@ -1134,4 +1160,21 @@ function ReferencesPanel({
       </div>
     </>
   );
+}
+
+const MENTION = /\s?<<<(image|video|audio)_(\d+)>>>/g;
+
+/** Quita la mención de la referencia `removed` (1, 2…) de ese tipo y baja un número las siguientes. */
+export function renumberMentions(prompt: string, kind: string, removed: number): string {
+  return prompt.replace(MENTION, (whole, k: string, n: string) => {
+    if (k !== kind) return whole;
+    const i = Number(n);
+    if (i === removed) return "";
+    return i > removed ? whole.replace(`_${i}>>>`, `_${i - 1}>>>`) : whole;
+  });
+}
+
+/** Quita todas las menciones de referencias. */
+export function stripMentions(prompt: string): string {
+  return prompt.replace(MENTION, "");
 }
