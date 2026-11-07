@@ -363,6 +363,7 @@ def test_create_element_sends_files_and_urls(calls, tmp_path):
         "name": "zorro",
         "description": "zorro rojo",
         "image_urls": ["https://cdn.test/a.png"],
+        "category": "other",
     }
     with pytest.raises(ToolError, match="No existe"):
         mcp_server.create_element("x", "y", [str(tmp_path / "no.png")])
