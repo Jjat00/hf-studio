@@ -25,6 +25,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { ElementPicker } from "@/components/studio/element-picker";
 import { StylePicker } from "@/components/studio/style-picker";
+import { ElementRefsPicker, elementMention, type ElementRefs } from "@/components/studio/element-refs";
 import { cleanInput, defaultsFor, fieldsFor, takesStudioElements, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
 import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate, modelMap } from "@/lib/studio";
@@ -265,6 +266,44 @@ export function Studio({ output }: { output: "video" | "image" }) {
     if (elementsParam) onElementsParam(elementsParam);
   }, [elementsParam, detail]);
 
+  // Elementos como referencias (modelos que no son Kling 3.0): sus imágenes van a la primera casilla múltiple de
+  // imágenes y se citan en el prompt.
+  const refSlot = media.find((f) => f.media === "image" && f.multiple);
+  const refList = refSlot && Array.isArray(values[refSlot.key]) ? (values[refSlot.key] as string[]) : [];
+  const refRoom = refSlot ? (refSlot.max ?? 10) - refList.length : 0;
+  function addElementRefs({ element, urls }: ElementRefs) {
+    if (!refSlot || !detail) return;
+    const current = Array.isArray(values[refSlot.key]) ? (values[refSlot.key] as string[]) : [];
+    const fresh = urls.filter((u) => !current.includes(u)).slice(0, Math.max(0, (refSlot.max ?? 10) - current.length));
+    if (!fresh.length) return;
+    setValue(refSlot.key, [...current, ...fresh]);
+    if (detail.input_schema.properties?.prompt) {
+      const mention = elementMention(element, detail.id, current.length + 1);
+      const text = (values.prompt as string) ?? "";
+      setValue("prompt", text ? `${text.trimEnd()} ${mention}` : mention);
+    }
+  }
+
+  // ?element=<id> desde la página Elementos: se añade como referencia en cuanto el modelo tiene dónde ponerlo.
+  const elementParam = reuseId ? null : params.get("element");
+  const appliedElement = useRef<string | null>(null);
+  const onElementParam = useEffectEvent(async (id: string) => {
+    if (!detail || !refSlot || appliedElement.current === `${detail.id}|${id}`) return;
+    appliedElement.current = `${detail.id}|${id}`;
+    try {
+      const [{ elements }, r] = await Promise.all([studio.elements(), studio.elementUrls(id)]);
+      const element = elements.find((x) => x.id === id);
+      if (element) addElementRefs({ element, urls: r.image_urls });
+    } catch {
+      /* elemento borrado: se ignora */
+    }
+  });
+  useEffect(() => {
+    if (!elementParam) return;
+    const timer = setTimeout(() => void onElementParam(elementParam), 0);
+    return () => clearTimeout(timer);
+  }, [elementParam, detail]);
+
   // ?use=<url>&as=image|video desde «Usar en…» de una creación: va a la primera casilla de ese tipo.
   const useParam = reuseId ? null : params.get("use");
   const useKind = params.get("as");
@@ -459,6 +498,10 @@ export function Studio({ output }: { output: "video" | "image" }) {
                     if (!text.includes(el.mention)) setValue("prompt", text ? `${text.trimEnd()} ${el.mention}` : el.mention);
                   }}
                 />
+              )}
+
+              {!elementsField && refSlot && (
+                <ElementRefsPicker key={`${detail.id}/refs`} room={refRoom} onAdd={addElementRefs} />
               )}
 
               {styleField && (

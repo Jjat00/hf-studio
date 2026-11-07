@@ -6,9 +6,16 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { apiSrc, studio } from "@/lib/studio";
-import type { StudioElement } from "@/lib/types";
+import type { ElementCategory, StudioElement } from "@/lib/types";
+import { CATEGORIES } from "@/components/studio/element-refs";
 
 const NAME = /^[a-z][a-z0-9_]{1,31}$/;
+
+/** Abre Cinema Studio 4.0 en Video › Referencias con las imágenes del elemento como referencias. */
+export function elementRefHref(el: StudioElement) {
+  const q = new URLSearchParams({ tab: "create", mode: "references", model: "higgsfield/cinema-studio/4.0", element: el.id });
+  return `/video?${q}`;
+}
 
 /** Abre el estudio en Video › Referencias con Kling 3.0, el elemento elegido y su @nombre en el prompt. */
 export function elementHref(el: StudioElement) {
@@ -31,6 +38,7 @@ export function ElementLibrary() {
   // ?image=<url> desde «Usar en… › Crear elemento» de una creación: abre el formulario con esa imagen.
   const fromCreation = useSearchParams().get("image");
   const [creating, setCreating] = useState(!!fromCreation);
+  const [category, setCategory] = useState<ElementCategory | "all">("all");
 
   useEffect(() => {
     studio.elements().then(
@@ -86,11 +94,25 @@ export function ElementLibrary() {
       ) : elements.length === 0 && !creating ? (
         <p className="mt-8 text-fg-3">{e.empty}</p>
       ) : (
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {elements.map((el) => (
+        <>
+        <div className="mt-8 flex flex-wrap gap-1">
+          {(["all", ...CATEGORIES] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCategory(c)}
+              className={`h-9 rounded-xl px-3.5 text-sm font-medium ${category === c ? "bg-surface-4 text-fg" : "text-fg-3 hover:text-fg-2"}`}
+            >
+              {c === "all" ? e.all : e.categories[c]}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {elements.filter((el) => category === "all" || (el.category ?? "other") === category).map((el) => (
             <ElementCard key={el.id} el={el} onDelete={() => remove(el)} />
           ))}
         </div>
+        </>
       )}
     </div>
   );
@@ -109,15 +131,22 @@ function ElementCard({ el, onDelete }: { el: StudioElement; onDelete: () => void
       </div>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-mono text-sm font-semibold text-lime">{el.mention}</p>
+          <p className="flex items-center gap-2 font-mono text-sm font-semibold text-lime">
+            {el.mention}
+            <span className="rounded-md bg-glass px-1.5 py-0.5 font-sans text-[11px] font-medium text-fg-3">{t.elements.categoryOne[el.category ?? "other"]}</span>
+          </p>
           <p className="mt-1 line-clamp-2 text-sm text-fg-2">{el.description}</p>
-          <Link
-            href={elementHref(el)}
-            className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-lime px-3 text-xs font-semibold text-ink"
-          >
-            <Clapperboard className="size-3.5" />
-            {t.elements.use}
-          </Link>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <Link href={elementRefHref(el)} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-lime px-3 text-xs font-semibold text-ink">
+              <Clapperboard className="size-3.5" />
+              {t.elements.useAnywhere}
+            </Link>
+            {el.images.length >= 2 && (
+              <Link href={elementHref(el)} className="inline-flex h-8 items-center rounded-lg bg-glass px-3 text-xs font-semibold text-fg-2 hover:text-fg">
+                {t.elements.use}
+              </Link>
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 gap-1">
           <button
@@ -163,6 +192,7 @@ function CreateForm({
   const e = t.elements;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState<ElementCategory>("character");
   // Cada imagen con su URL de vista previa; se liberan al quitarlas y al cerrar el formulario.
   const [items, setItems] = useState<Item[]>(() => initialUrls.map((url) => ({ url })));
   const live = useRef(items);
@@ -174,7 +204,7 @@ function CreateForm({
 
   useEffect(() => () => live.current.forEach((i) => i.file && URL.revokeObjectURL(i.url)), []);
 
-  const valid = NAME.test(name) && description.trim().length > 0 && items.length >= 2 && items.length <= 4;
+  const valid = NAME.test(name) && description.trim().length > 0 && items.length >= 1 && items.length <= 4;
 
   async function save() {
     setBusy(true);
@@ -182,7 +212,7 @@ function CreateForm({
     try {
       const files = items.flatMap((i) => (i.file ? [i.file] : []));
       const urls = items.filter((i) => !i.file).map((i) => i.url);
-      onCreated(await studio.createElement(name, description.trim(), files, urls));
+      onCreated(await studio.createElement(name, description.trim(), files, urls, category));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -202,6 +232,21 @@ function CreateForm({
         />
         <span className="text-xs text-fg-3">{e.nameHint}</span>
       </label>
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="font-semibold text-fg-2">{e.category}</span>
+        <div className="flex flex-wrap gap-1.5">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCategory(c)}
+              className={`h-8 rounded-lg border-2 px-2.5 text-xs font-semibold ${category === c ? "border-lime/70 bg-lime/10 text-lime" : "border-transparent bg-glass text-fg"}`}
+            >
+              {e.categoryOne[c]}
+            </button>
+          ))}
+        </div>
+      </div>
       <label className="flex flex-col gap-1 text-sm">
         <span className="font-semibold text-fg-2">{e.description}</span>
         <textarea

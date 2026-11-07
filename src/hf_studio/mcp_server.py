@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urljoin
 
 import httpx
@@ -73,7 +73,7 @@ Seedance 2.5 Draft (bytedance/seedance-2.5-draft/…, solo APIMart y KIE): borra
 escena en 1080p, genera bytedance/seedance-2.5-draft/final con draft_generation_id = id de la generación del
 borrador (va a la tienda que lo hizo; vale 3 días en APIMart y 7 en KIE; precio aproximado). Úsalo para probar
 varias versiones de una escena larga o cara antes de pagar la buena en 1080p.
-Elementos (Kling 3.0): personajes, productos o lugares reutilizables con nombre, descripción y 2 a 4 imágenes
+Elementos: personajes, lugares o props reutilizables con nombre, descripción y 1 a 4 imágenes (Kling 3.0 pide 2+)
 JPG/PNG. create_element los guarda; list_elements los muestra. Para usarlos, pon sus ids (el_…) en el campo
 elements de un modelo Kling 3.0 y cítalos en el prompt con @nombre (p. ej. "@zorro corre por la nieve").
 Solo salen por APIMart y KIE (KIE además exige image_url); nunca por Higgsfield.
@@ -705,11 +705,16 @@ def list_elements() -> dict:
     ),
 )
 def create_element(
-    name: str, description: str, paths: list[str] | None = None, image_urls: list[str] | None = None
+    name: str,
+    description: str,
+    paths: list[str] | None = None,
+    image_urls: list[str] | None = None,
+    category: Literal["character", "location", "prop", "other"] = "other",
 ) -> dict:
-    """Crea un elemento (personaje, producto o lugar) con 2 a 4 imágenes JPG o PNG: rutas locales en paths
-    (la primera, de frente) o URLs propias (de upload_media o de una generación) en image_urls. name va en
-    minúsculas, sin espacios (letras, dígitos y _), y se cita en el prompt con @name. No gasta créditos."""
+    """Crea un elemento (personaje, lugar o prop, según category) con 1 a 4 imágenes JPG o PNG (Kling 3.0 pide
+    2 o más): rutas locales en paths (la primera, de frente) o URLs propias (de upload_media o de una
+    generación) en image_urls. name va en minúsculas, sin espacios (letras, dígitos y _), y se cita en el
+    prompt con @name. No gasta créditos."""
     files = []
     for path in paths or []:
         file = _local_path(path)
@@ -718,7 +723,7 @@ def create_element(
         files.append(
             ("files", (file.name, file.read_bytes(), mimetypes.guess_type(file.name)[0] or "image/jpeg"))
         )
-    data = {"name": name, "description": description, "image_urls": image_urls or []}
+    data = {"name": name, "description": description, "image_urls": image_urls or [], "category": category}
     return _call("POST", "/v1/elements", data=data, files=files or None)
 
 
