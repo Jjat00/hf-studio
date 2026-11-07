@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { AlertTriangle, Check, Copy, ExternalLink, Film, ImageIcon, Loader2, Maximize2, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useEffectEvent, useRef, useState } from "react";
 import { FinalizeDraft } from "@/components/generations/finalize-draft";
 import { ApprovalActions, providerTitle, StatusPill } from "@/components/generations/generation-card";
 import { useI18n } from "@/components/i18n-provider";
@@ -149,6 +149,19 @@ function Tile({
 }
 
 /**
+ * Ajustes del chat que usan las propuestas: su proyecto (lo generado va ahí) y la generación automática. `fresh` son
+ * las propuestas que llegaron en esta sesión: solo esas se lanzan solas (nunca las de un chat que se reabre).
+ */
+export type ChatAuto = {
+  projectId: string | null;
+  /** Lo que queda del tope de generación automática (null: apagada). */
+  left: number | null;
+  fresh: Set<string>;
+  onSpent: (usd: number) => void;
+};
+export const ChatAutoContext = createContext<ChatAuto>({ projectId: null, left: null, fresh: new Set(), onSpent: () => {} });
+
+/**
  * Propuesta del agente: modelo, prompt y ajustes con su precio vigente. Con variaciones, una sola tarjeta con el
  * precio total que lanza todas las generaciones a la vez y las muestra en una cuadrícula a medida que terminan.
  * Solo el clic del usuario genera, con el precio que ve como tope (si sube, la API responde cost_changed y se
@@ -157,6 +170,7 @@ function Tile({
 export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: ChatProposal }) {
   const { t } = useI18n();
   const s = t.supercomputer;
+  const auto = useContext(ChatAutoContext);
   const inputs = proposal.inputs?.length ? proposal.inputs : [proposal.input];
   const count = inputs.length;
   const labels = proposal.labels ?? [];
@@ -208,10 +222,10 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
 
   const priceOf = (i: number) => (pieces ? estimates?.[i] : estimate) ?? null;
 
-  async function generate() {
+  async function generate(automatic = false) {
     if (!estimates?.length) return;
     const known = estimates.every((e) => costAllowsDirectSubmit(e));
-    if (!known && !window.confirm(s.confirmUnknown)) return;
+    if (!known && (automatic || !window.confirm(s.confirmUnknown))) return;
     setBusy(true);
     setError(null);
     key.current ||= crypto.randomUUID();
@@ -228,8 +242,11 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
           priceOf(i)?.reserve_usd ?? null,
           !known,
           count > 1,
+          auto.projectId,
         );
-        await studio.linkProposal(chatId, proposal.tool_use_id, g.id).catch(() => {});
+        const paid = automatic ? (priceOf(i)?.usd ?? null) : null;
+        await studio.linkProposal(chatId, proposal.tool_use_id, g.id, paid).catch(() => {});
+        if (paid) auto.onSpent(paid);
         onUpdate(g);
         setJobIds((prev) => (prev.includes(g.id) ? prev : [...prev, g.id]));
       }
@@ -243,6 +260,23 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
       setBusy(false);
     }
   }
+
+  // Generación automática: una propuesta recién llegada cuyo total conocido cabe en lo que queda se lanza sola, una vez.
+  const launchAuto = useEffectEvent(() => void generate(true));
+  useEffect(() => {
+    if (!estimates?.length || jobIds.length || auto.left == null || !auto.fresh.has(proposal.tool_use_id)) return;
+    if (!estimates.every((e) => costAllowsDirectSubmit(e))) return;
+    const each = Array.from({ length: count }, (_, i) => (pieces ? estimates[i] : estimates[0])?.usd ?? null);
+    if (each.some((u) => u == null)) return;
+    const sum = each.reduce((a, b) => (a ?? 0) + (b ?? 0), 0) ?? 0;
+    if (sum > auto.left + 1e-9) return;
+    // Fuera del render del efecto: si el efecto se repite antes, se cancela y se vuelve a programar.
+    const timer = setTimeout(() => {
+      if (!auto.fresh.delete(proposal.tool_use_id)) return;
+      launchAuto();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [estimates, jobIds.length, auto, proposal.tool_use_id, count, pieces]);
 
   const unitText = costShort(estimate);
   const usds = Array.from({ length: count }, (_, i) => priceOf(i)?.usd ?? null);
@@ -362,7 +396,7 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
         {pending > 0 ? (
           <button
             type="button"
-            onClick={generate}
+            onClick={() => void generate()}
             disabled={busy || quoting || !estimate}
             className="flex h-9 items-center gap-1.5 rounded-xl bg-lime px-3.5 text-sm font-semibold text-ink transition hover:brightness-105 disabled:opacity-50"
           >

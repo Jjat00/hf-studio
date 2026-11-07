@@ -1,9 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowUp, FileText, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, Wand2, X } from "lucide-react";
+import { ArrowUp, FileText, Film, History, ImageIcon, Loader2, MessageSquare, Paperclip, Plus, Square, Trash2, Wand2, X, Zap } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { Lightbox, type Viewable } from "@/components/lightbox";
 import { Logo } from "@/components/logo";
@@ -21,7 +21,9 @@ import {
   type ChatSummary,
   type SkillSummary,
 } from "@/lib/studio";
-import { ProposalCard } from "./proposal-card";
+import { useActiveProject } from "@/lib/project";
+import type { ProjectSummary } from "@/lib/types";
+import { ChatAutoContext, ProposalCard, type ChatAuto } from "./proposal-card";
 
 type Attachment = { url: string; content_type: string; filename: string };
 type Draft = { parts: ChatPart[]; status: string | null };
@@ -263,6 +265,14 @@ export function Supercomputer() {
   const [picking, setPicking] = useState<"image" | "video" | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
   const streaming = draft !== null;
+  // Proyecto y generación automática: los del chat abierto, o los elegidos para el chat nuevo.
+  const active = useActiveProject();
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [newProject, setNewProject] = useState<string | null | undefined>(undefined);
+  const [newBudget, setNewBudget] = useState<number | null>(null);
+  const [budgetDraft, setBudgetDraft] = useState("");
+  const [fresh] = useState(() => new Set<string>()); // propuestas llegadas en esta sesión (mutable a propósito)
   // Sin ?c= en la URL (chat nuevo) no se muestra ni se reutiliza el chat anterior.
   const current = chatParam && chat?.id === chatParam ? chat : null;
 
@@ -402,7 +412,10 @@ export function Supercomputer() {
         return { parts, status: null };
       }
       if (e.type === "tool") return { ...d, status: s.tools[e.label as keyof typeof s.tools] ?? s.thinking };
-      if (e.type === "proposal") return { parts: [...d.parts, { type: "proposal", proposal: e.proposal }], status: null };
+      if (e.type === "proposal") {
+        fresh.add(e.proposal.tool_use_id);
+        return { parts: [...d.parts, { type: "proposal", proposal: e.proposal }], status: null };
+      }
       if (e.type === "question") return { parts: [...d.parts, { type: "question", question: e.question }], status: null };
       return d;
     });
@@ -433,7 +446,8 @@ export function Supercomputer() {
     try {
       let target = current;
       if (!target) {
-        target = await studio.createChat(model || undefined);
+        target = await studio.createChat(model || undefined, chatProject);
+        if (newBudget) target = { ...target, ...(await studio.updateChat(target.id, { auto_budget_usd: newBudget })) };
         setChat(target);
         router.replace(`/supercomputer?c=${target.id}`);
       }
@@ -472,6 +486,43 @@ export function Supercomputer() {
 
   const messages = current?.messages ?? [];
   const empty = messages.length === 0 && !pending;
+  const chatProject = current ? (current.project_id ?? null) : newProject === undefined ? (active?.id ?? null) : newProject;
+  const budget = current ? (current.auto_budget_usd ?? null) : newBudget;
+  const spent = current?.auto_spent_usd ?? 0;
+  const left = budget ? Math.max(0, budget - spent) : null;
+  const autoValue = useMemo<ChatAuto>(
+    () => ({
+      projectId: chatProject,
+      left,
+      fresh,
+      onSpent: (usd) => setChat((c) => (c ? { ...c, auto_spent_usd: (c.auto_spent_usd ?? 0) + usd } : c)),
+    }),
+    [chatProject, left, fresh],
+  );
+
+  useEffect(() => {
+    if (optionsOpen) studio.projects().then((r) => setProjects(r.projects)).catch(() => undefined);
+  }, [optionsOpen]);
+
+  async function changeProject(id: string | null) {
+    if (!current) return setNewProject(id);
+    try {
+      const summary = await studio.updateChat(current.id, { project_id: id ?? "" });
+      setChat((c) => (c ? { ...c, ...summary } : c));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function changeBudget(value: number | null) {
+    if (!current) return setNewBudget(value);
+    try {
+      const summary = await studio.updateChat(current.id, { auto_budget_usd: value ?? 0 });
+      setChat((c) => (c ? { ...c, ...summary } : c));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
   const totalCost = cost != null ? (current?.cost_usd ?? 0) + cost : current?.cost_usd;
 
   const composer = (
@@ -666,6 +717,76 @@ export function Supercomputer() {
             </button>
           ))}
         </div>
+        <div className="relative">
+          <button
+            type="button"
+            title={s.chatOptions}
+            aria-label={s.chatOptions}
+            aria-expanded={optionsOpen}
+            onClick={() => setOptionsOpen((o) => !o)}
+            className={clsx(
+              "flex h-7 max-w-44 items-center gap-1 rounded-lg px-2 text-xs font-medium",
+              left != null ? "bg-lime/15 text-lime" : "bg-surface-4 text-fg-2 hover:text-fg",
+            )}
+          >
+            <Zap className="size-3.5 shrink-0" />
+            <span className="truncate">{left != null ? s.autoGenOn(formatUsd(left)) : (projects.find((x) => x.id === chatProject)?.name ?? (chatProject && active?.id === chatProject ? active.name : s.autoGen))}</span>
+          </button>
+          {optionsOpen && (
+            <div className="absolute bottom-10 left-0 z-20 w-72 space-y-3 rounded-xl border border-line-2 bg-surface-2 p-3 shadow-xl">
+              <label className="block space-y-1">
+                <span className="text-xs font-semibold text-fg-3">{s.project}</span>
+                <select
+                  value={chatProject ?? ""}
+                  onChange={(e) => void changeProject(e.target.value || null)}
+                  className="h-8 w-full rounded-lg bg-surface-4 px-2 text-sm text-fg outline-none"
+                >
+                  <option value="">{s.noProject}</option>
+                  {chatProject && !projects.some((x) => x.id === chatProject) && (
+                    <option value={chatProject}>{active?.id === chatProject ? active.name : chatProject}</option>
+                  )}
+                  {projects.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="space-y-1.5 border-t border-line pt-3">
+                <p className="text-xs font-semibold text-fg-3">{budget ? s.autoGenOn(formatUsd(left ?? 0)) : s.autoGenOff}</p>
+                <p className="text-xs text-fg-4">{s.autoGenHint}</p>
+                {budget ? (
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-xs text-fg-2">{s.autoGenSpent(formatUsd(spent), formatUsd(budget))}</span>
+                    <button type="button" onClick={() => void changeBudget(null)} className="h-7 rounded-lg bg-surface-4 px-2.5 text-xs font-semibold text-fg-2 hover:text-fg">
+                      {s.autoGenStop}
+                    </button>
+                  </div>
+                ) : (
+                  <form
+                    className="flex items-center gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const v = Number(budgetDraft.replace(",", "."));
+                      if (v > 0) void changeBudget(Math.min(v, 500));
+                    }}
+                  >
+                    <input
+                      inputMode="decimal"
+                      value={budgetDraft}
+                      onChange={(e) => setBudgetDraft(e.target.value)}
+                      placeholder={s.autoGenBudget}
+                      className="h-7 min-w-0 flex-1 rounded-lg bg-surface-4 px-2 text-xs text-fg outline-none"
+                    />
+                    <button type="submit" className="h-7 rounded-lg bg-lime px-2.5 text-xs font-semibold text-ink">
+                      {s.autoGenApply}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         {models.length > 0 && (
           <select
             value={model}
@@ -703,6 +824,7 @@ export function Supercomputer() {
   );
 
   return (
+    <ChatAutoContext.Provider value={autoValue}>
     <div className="flex h-[calc(100dvh-3.5rem)]">
       <aside className="hidden w-64 shrink-0 flex-col border-r border-line md:flex">
         <div className="p-3">
@@ -826,5 +948,6 @@ export function Supercomputer() {
         )}
       </main>
     </div>
+    </ChatAutoContext.Provider>
   );
 }
