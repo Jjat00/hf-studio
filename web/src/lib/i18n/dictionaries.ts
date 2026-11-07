@@ -820,6 +820,7 @@ const es = {
       launched: (n: number) => (n === 1 ? "Generación en marcha" : `${n} generaciones en marcha`),
       partial: (n: number, total: number) => `${n} de ${total} en marcha. Vuelve a pulsar Generate para lanzar las que faltan (las ya lanzadas no se repiten).`,
       noRefsModel: "Este modelo no usa referencias",
+      refHint: "Referencia adjunta",
     },
   },
   skills: {
@@ -2274,6 +2275,7 @@ const en: Dict = {
       launched: (n: number) => (n === 1 ? "Generation started" : `${n} generations started`),
       partial: (n: number, total: number) => `${n} of ${total} started. Press Generate again to launch the rest (those already started are not repeated).`,
       noRefsModel: "This model takes no references",
+      refHint: "Attached reference",
     },
   },
   skills: {

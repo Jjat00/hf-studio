@@ -110,7 +110,7 @@ export function Composer({
   onGenerated?: (g: Generation) => void;
   className?: string;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const c = t.cinemaStudio.composer;
   const [mode, setMode] = useState<Mode>("video");
   const [models, setModels] = useState<ModelSummary[]>([]);
@@ -173,7 +173,9 @@ export function Composer({
   // Tamaño de lote que va en la petición (null: el modelo no tiene `batch_size`).
   const batchSize = nativeBatch ? (useNative ? batch : Math.min(...nativeBatch)) : null;
   const sendValues = useMemo(() => {
-    const base = isCinema ? applyCinema(values, extra) : values;
+    const cinema = isCinema ? applyCinema(values, extra) : values;
+    // @imagen1, @video2… del prompt pasan a la referencia que entiende el modelo (Cinema: <<<image_1>>>).
+    const base = typeof cinema.prompt === "string" ? { ...cinema, prompt: resolveRefMentions(cinema.prompt, isCinema) } : cinema;
     return batchSize === null ? base : { ...base, batch_size: batchSize };
   }, [isCinema, values, extra, batchSize]);
 
@@ -226,7 +228,7 @@ export function Composer({
       const list = Array.isArray(v) ? (v as string[]) : [];
       const at = list.indexOf(url) + 1;
       const next: Record<string, unknown> = { ...prev, [key]: Array.isArray(v) ? list.filter((u) => u !== url) : undefined };
-      if (kind && at > 0 && typeof prev.prompt === "string") next.prompt = renumberMentions(prev.prompt, kind, at);
+      if (kind && at > 0 && typeof prev.prompt === "string") next.prompt = renumberRefWords(renumberMentions(prev.prompt, kind, at), kind, at);
       return next;
     });
   };
@@ -235,7 +237,7 @@ export function Composer({
     setValues((prev) => {
       const next = { ...prev };
       for (const f of media) next[f.key] = undefined;
-      if (typeof prev.prompt === "string") next.prompt = stripMentions(prev.prompt);
+      if (typeof prev.prompt === "string") next.prompt = stripRefWords(stripMentions(prev.prompt));
       return next;
     });
   };
@@ -386,9 +388,37 @@ export function Composer({
   }, [elements]);
   const [at, setAt] = useState<{ query: string; start: number; end: number } | null>(null);
   const [atIndex, setAtIndex] = useState(0);
-  const atMatches = at ? (elements ?? []).filter((el) => el.name.includes(at.query.toLowerCase())).slice(0, 6) : [];
+  // Menú de @: primero las referencias adjuntas en su orden (@imagen1, @video1…), después los elementos.
+  const refKey = refs.map((r) => `${r.kind}|${r.key}|${r.url}`).join("\n");
+  const refOptions = useMemo(() => {
+    const seen: Record<string, number> = {};
+    return refKey
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [kind, key, url] = line.split("|") as [MediaKind, string, string];
+        seen[kind] = (seen[kind] ?? 0) + 1;
+        const word = kind === "image" ? (locale === "es" ? "imagen" : "image") : kind;
+        return { kind, key, url, name: `${word}${seen[kind]}` };
+      });
+  }, [refKey, locale]);
+  const q = at?.query.toLowerCase() ?? "";
+  const refMatches = at ? refOptions.filter((r) => r.name.includes(q)) : [];
+  const atMatches = at ? (elements ?? []).filter((el) => el.name.includes(q)).slice(0, 6) : [];
+  const atTotal = refMatches.length + atMatches.length;
+  function pickAt(i: number) {
+    if (!at) return;
+    if (i < refMatches.length) {
+      const text = (values.prompt as string) ?? "";
+      setValue("prompt", `${text.slice(0, at.start)}@${refMatches[i].name} ${text.slice(at.end)}`);
+    } else {
+      const el = atMatches[i - refMatches.length];
+      if (el) void addElement(el, at);
+    }
+    setAt(null);
+  }
   function checkAt(el: HTMLTextAreaElement) {
-    if (!imageSlot) return setAt(null);
+    if (!imageSlot && !refs.length) return setAt(null);
     const caret = el.selectionStart ?? 0;
     const m = /(^|\s)@(\w*)$/.exec(el.value.slice(0, caret));
     if (!m) return setAt(null);
@@ -535,16 +565,15 @@ export function Composer({
                 }
               }}
               onKeyDown={(e) => {
-                if (at && atMatches.length) {
+                if (at && atTotal) {
                   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                     e.preventDefault();
-                    setAtIndex((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + atMatches.length) % atMatches.length);
+                    setAtIndex((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + atTotal) % atTotal);
                     return;
                   }
                   if (e.key === "Enter" || e.key === "Tab") {
                     e.preventDefault();
-                    void addElement(atMatches[Math.min(atIndex, atMatches.length - 1)], at);
-                    setAt(null);
+                    pickAt(Math.min(atIndex, atTotal - 1));
                     return;
                   }
                 }
@@ -557,22 +586,33 @@ export function Composer({
             />
             {at && (
               <div className="absolute inset-x-2 bottom-full z-30 mb-1 overflow-hidden rounded-2xl border border-line-2 bg-surface-2 p-1 shadow-2xl">
+                {refMatches.map((r, i) => (
+                  <button
+                    key={`${r.key}:${r.url}`}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setAtIndex(i)}
+                    onClick={() => pickAt(i)}
+                    className={clsx("flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left", i === atIndex && "bg-surface-4")}
+                  >
+                    <RefThumb url={r.url} kind={r.kind} className="size-7 rounded-md" />
+                    <span className="font-mono text-[13px] font-semibold">@{r.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-fg-3">{c.refHint}</span>
+                  </button>
+                ))}
                 {elements === null ? (
                   <Loader2 className="m-2 size-4 animate-spin text-fg-3" />
                 ) : atMatches.length === 0 ? (
-                  <p className="px-2.5 py-1.5 text-[13px] text-fg-3">{c.noElements}</p>
+                  refMatches.length === 0 && <p className="px-2.5 py-1.5 text-[13px] text-fg-3">{c.noElements}</p>
                 ) : (
-                  atMatches.map((el, i) => (
+                  atMatches.map((el, j) => (
                     <button
                       key={el.id}
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
-                      onMouseEnter={() => setAtIndex(i)}
-                      onClick={() => {
-                        void addElement(el, at);
-                        setAt(null);
-                      }}
-                      className={clsx("flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left", i === atIndex && "bg-surface-4")}
+                      onMouseEnter={() => setAtIndex(refMatches.length + j)}
+                      onClick={() => pickAt(refMatches.length + j)}
+                      className={clsx("flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left", refMatches.length + j === atIndex && "bg-surface-4")}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={apiSrc(el.images[0])} alt="" className="size-7 rounded-md object-cover" />
@@ -1193,4 +1233,29 @@ export function renumberMentions(prompt: string, kind: string, removed: number):
 /** Quita todas las menciones de referencias. */
 export function stripMentions(prompt: string): string {
   return prompt.replace(MENTION, "");
+}
+
+const kindOfWord = (w: string) => (w.toLowerCase().startsWith("imag") ? "image" : w.toLowerCase());
+
+/** Cambia @imagen1, @image2, @video1, @audio1… por la referencia del modelo: en Cinema Studio <<<image_1>>>; en otros
+ * modelos un texto claro («reference image 1»). */
+export function resolveRefMentions(prompt: string, cinema: boolean): string {
+  return prompt.replace(/@(imagen|image|video|audio)(\d+)\b/gi, (_w, word: string, n: string) => {
+    const kind = kindOfWord(word);
+    return cinema ? `<<<${kind}_${n}>>>` : `reference ${kind} ${n}`;
+  });
+}
+
+/** Al quitar la referencia `removed` de un tipo: su @mención se borra y las siguientes bajan un número. */
+export function renumberRefWords(prompt: string, kind: string, removed: number): string {
+  return prompt.replace(/\s?@(imagen|image|video|audio)(\d+)\b/gi, (whole, word: string, n: string) => {
+    if (kindOfWord(word) !== kind) return whole;
+    const i = Number(n);
+    if (i === removed) return "";
+    return i > removed ? whole.replace(new RegExp(`${n}$`), String(i - 1)) : whole;
+  });
+}
+
+export function stripRefWords(prompt: string): string {
+  return prompt.replace(/\s?@(imagen|image|video|audio)\d+\b/gi, "");
 }
