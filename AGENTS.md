@@ -81,7 +81,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   internal worker-only provider), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models), `space_assistant.py` (Spaces
   Assistant node: Claude writes text for other nodes, optional `ANTHROPIC_API_KEY`), `supercomputer.py` (Supercomputer chat agent at `/supercomputer`: Claude with tools to
   find, read and propose models, ask clickable questions, web search and skills; it never generates, the user's click
-  does), `skills.py` (Supercomputer skills: SKILL.md parsing and `/name` mentions; stored in the `skills` table).
+  does), `skills.py` (Supercomputer skills: SKILL.md parsing and `/name` mentions; stored in the `skills` table), `director.py` (AI Director in a Cinema Studio project: shot list, project documents, brief sections and video frames for reviews; its agent tools and routes live in `api.py`; the directing skills ship in `builtin_skills/`).
 - Every MCP tool declares `title` and all four hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
   `openWorldHint`); `tests/test_mcp_tools.py` pins them. Keep them true to what the handler does.
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in

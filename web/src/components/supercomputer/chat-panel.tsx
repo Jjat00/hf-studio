@@ -40,6 +40,7 @@ import {
 } from "@/lib/studio";
 import { useActiveProject } from "@/lib/project";
 import type { ProjectSummary, StudioElement } from "@/lib/types";
+import { ElementProposalCard } from "./element-card";
 import { ChatAutoContext, ProposalCard, type ChatAuto } from "./proposal-card";
 
 type Attachment = { url: string; content_type: string; filename: string };
@@ -189,6 +190,8 @@ function Parts({ chatId, parts, onAnswer }: { chatId: string; parts: ChatPart[];
           <Sources key={`sources-${i}`} sources={p.sources} />
         ) : p.type === "question" ? (
           <QuestionCard key={p.question.id} q={p.question} onAnswer={i === parts.length - 1 ? onAnswer : undefined} />
+        ) : p.proposal.kind === "element" ? (
+          <ElementProposalCard key={p.proposal.tool_use_id} chatId={chatId} proposal={p.proposal} />
         ) : (
           <ProposalCard key={p.proposal.tool_use_id} chatId={chatId} proposal={p.proposal} />
         ),
@@ -255,6 +258,9 @@ export type ChatPanelProps = {
   /** Saludo del chat vacío y sugerencias en las que se hace clic (en `panel`). */
   greeting?: ReactNode;
   suggestions?: string[];
+  /** Atajos del chat vacío (en `panel`): escriben su texto en el compositor, p. ej. «/lista-de-tomas ». */
+  quickActions?: { label: string; text: string }[];
+  quickActionsTitle?: string;
   placeholder?: string;
 };
 
@@ -263,7 +269,7 @@ export type ChatPanelProps = {
  * llegan como tarjetas con precio; solo el clic del usuario en una de ellas genera (o el tope de generación
  * automática que el usuario fijó).
  */
-export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onActivity, greeting, suggestions, placeholder }: ChatPanelProps) {
+export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onActivity, greeting, suggestions, quickActions, quickActionsTitle, placeholder }: ChatPanelProps) {
   const { t } = useI18n();
   const s = t.supercomputer;
   const panel = variant === "panel";
@@ -1023,6 +1029,29 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
                 </li>
               ))}
             </ul>
+          )}
+          {quickActions && quickActions.length > 0 && (
+            <div className="mt-6">
+              {quickActionsTitle && <p className="mb-2 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{quickActionsTitle}</p>}
+              <div className="flex flex-wrap gap-1.5">
+                {quickActions.map((a) => (
+                  <button
+                    key={a.text}
+                    type="button"
+                    onClick={() => {
+                      setText(a.text);
+                      requestAnimationFrame(() => {
+                        input.current?.focus();
+                        input.current?.setSelectionRange(a.text.length, a.text.length);
+                      });
+                    }}
+                    className="rounded-full border border-line-2 px-2.5 py-1 text-xs text-fg-2 hover:border-lime/40 hover:text-fg"
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {!available && <p className="mt-4 rounded-xl bg-warning/10 p-3 text-sm text-warning">{s.noKey}</p>}
           {error && <p className="mt-4 text-sm text-danger">{error}</p>}

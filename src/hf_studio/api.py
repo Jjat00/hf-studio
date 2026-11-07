@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
+from . import director as dr
 from . import projects
 from . import skills as skill_files
 from . import supercomputer as sc
@@ -47,6 +48,9 @@ from .db import (
     Job,
     Preset,
     Project,
+    ProjectDocument,
+    ProjectDocumentVersion,
+    Shot,
     Skill,
     Sound,
     Space,
@@ -421,6 +425,43 @@ class ChatMessageIn(BaseModel):
 
 class ProposalJobIn(BaseModel):
     job_id: str = Field(max_length=36)
+
+
+class ShotPatch(BaseModel):
+    status: (
+        Literal["planned", "boarded", "proposed", "generating", "review", "approved", "retake", "cut"] | None
+    ) = None
+    selected_job_id: str | None = Field(None, max_length=36, description="Toma buena; cadena vacía la quita")
+    notes: str | None = Field(None, max_length=4000)
+    verdict: str | None = Field(None, max_length=4000)
+
+
+class DocumentIn(BaseModel):
+    kind: Literal[
+        "treatment", "breakdown", "bible", "lookbook", "color_script", "blocking", "script", "notes", "other"
+    ] = "notes"
+    title: str = Field(min_length=1, max_length=120)
+    markdown: str = Field("", max_length=dr.MAX_DOCUMENT)
+
+
+class DocumentPatch(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=120)
+    kind: (
+        Literal[
+            "treatment",
+            "breakdown",
+            "bible",
+            "lookbook",
+            "color_script",
+            "blocking",
+            "script",
+            "notes",
+            "other",
+        ]
+        | None
+    ) = None
+    markdown: str | None = Field(None, max_length=dr.MAX_DOCUMENT)
+    base_version: int = Field(description="Versión leída: si otro la cambió, 409")
 
 
 class EstimateIn(BaseModel):
@@ -1491,6 +1532,12 @@ def create_app(
             .execution_options(synchronize_session=False)
         )  # fmt: skip
         await session.execute(delete(Folder).where(Folder.project_id == project.id))
+        await session.execute(delete(Shot).where(Shot.project_id == project.id))
+        doc_ids = select(ProjectDocument.id).where(ProjectDocument.project_id == project.id)
+        await session.execute(
+            delete(ProjectDocumentVersion).where(ProjectDocumentVersion.document_id.in_(doc_ids))
+        )
+        await session.execute(delete(ProjectDocument).where(ProjectDocument.project_id == project.id))
         await session.delete(project)
         await session.commit()
 
@@ -1679,8 +1726,8 @@ def create_app(
         session: Session,
         owner: Owner,
         as_: Annotated[
-            Literal["last_frame", "audio"] | None,
-            Query(alias="as", description="De un video: su último fotograma o su pista de audio"),
+            Literal["last_frame", "first_frame", "audio"] | None,
+            Query(alias="as", description="De un video: su último o primer fotograma, o su pista de audio"),
         ] = None,
     ) -> dict:
         """URL pública y vigente de una salida propia, para usarla como entrada de otra generación (fotograma
@@ -1717,7 +1764,8 @@ def create_app(
     async def derived_file(path: Path, derive: str) -> Path:
         """Último fotograma (PNG) o pista de audio (WAV) de un video propio, hecho una vez junto a él con
         ffmpeg. Mismo candado y temporal único que `mp3_as_wav`."""
-        out = path.with_name(f"{path.stem}.{'last.png' if derive == 'last_frame' else 'audio.wav'}")
+        suffix = {"last_frame": "last.png", "first_frame": "first.png"}.get(derive, "audio.wav")
+        out = path.with_name(f"{path.stem}.{suffix}")
         lock = wav_locks.get(out)
         if lock is None:
             lock = wav_locks[out] = asyncio.Lock()
@@ -1733,6 +1781,8 @@ def create_app(
                 if derive == "last_frame":
                     # Desde el último segundo, cada fotograma reescribe el archivo: queda el último.
                     args = ["-sseof", "-1", *guarded(str(path)), "-update", "1", str(tmp)]
+                elif derive == "first_frame":
+                    args = [*guarded(str(path)), "-frames:v", "1", str(tmp)]
                 else:
                     args = [*guarded(str(path)), "-vn", "-c:a", "pcm_s16le", str(tmp)]
                 code, err = await run_ffmpeg("ffmpeg", "-y", "-v", "error", *args)
@@ -1797,7 +1847,8 @@ def create_app(
                     422, "not_a_video", "Only a video output has a last frame or an audio track"
                 )
             path = await derived_file(path, derive)
-            content_type, kind = ("image/png", "image") if derive == "last_frame" else ("audio/wav", "audio")
+            frame = derive in ("last_frame", "first_frame")
+            content_type, kind = ("image/png", "image") if frame else ("audio/wav", "audio")
         elif content_type == "audio/mpeg":
             # Higgsfield no acepta MP3 (el audio de ElevenLabs): se sube una copia WAV hecha con ffmpeg, así
             # la voz o la música generadas se pueden encadenar como entrada (Spaces, fase 2c).
@@ -1886,6 +1937,19 @@ def create_app(
     ) -> dict:
         """Crea un elemento (personaje, lugar o prop) con 1 a 4 imágenes JPG o PNG (archivos o URLs propias). Se
         cita con @nombre; Kling 3.0 necesita 2 o más."""
+        sources: list = [*files, *image_urls]
+        return await store_element(request, session, owner, name, description, category, sources)
+
+    async def store_element(
+        request: Request,
+        session: AsyncSession,
+        owner: ApiClient,
+        name: str,
+        description: str,
+        category: str,
+        sources: list,
+    ) -> dict:
+        """Valida y guarda un elemento con sus imágenes: archivos, URLs propias o bytes ya leídos `(datos, tipo)`."""
         name = check_name(name)
         if category not in ELEMENT_CATEGORIES:
             raise ServiceError(
@@ -1895,7 +1959,6 @@ def create_app(
         if not description:
             raise ServiceError(422, "invalid_description", "The description cannot be empty")
         await purge_deleted_elements(session, settings.storage_dir)
-        sources: list = [*files, *image_urls]
         if not MIN_IMAGES <= len(sources) <= MAX_IMAGES:
             raise ServiceError(422, "image_count", f"An element needs {MIN_IMAGES} to {MAX_IMAGES} images")
         taken = await session.scalar(select(Element).where(Element.name == name))
@@ -1904,7 +1967,12 @@ def create_app(
             if taken.deleted_at:
                 message = f"@{name} was deleted recently or a running generation still uses it; try again in a few minutes"
             raise ServiceError(409, "name_taken", message)
-        images = [await element_image(session, owner, src) for src in sources]
+        images = [
+            (src[0], check_image(src[0], ""))
+            if isinstance(src, tuple)
+            else await element_image(session, owner, src)
+            for src in sources
+        ]
         element_id = new_element_id()
         target = element_folder(settings.storage_dir, element_id)
         target.mkdir(parents=True, exist_ok=True)
@@ -2351,7 +2419,7 @@ def create_app(
         await get_owned_job(session, owner, body.job_id)
         async with chat_lock(chat_id):
             chat = await session.get(Chat, chat_id, populate_existing=True)
-            if chat is None or proposal_id not in chat.proposals:
+            if chat is None or proposal_id not in chat.proposals or chat.proposals[proposal_id].get("kind"):
                 raise ServiceError(404, "not_found", "Proposal not found")
             proposals = dict(chat.proposals)
             p = proposals[proposal_id]
@@ -2362,6 +2430,7 @@ def create_app(
                 )
             proposals[proposal_id] = {**p, "job_id": jobs[0], "job_ids": jobs, "reported": None}
             chat.proposals = proposals
+            await link_shot_jobs(session, chat.project_id, p, [(jobs.index(body.job_id), body.job_id)])
             await session.commit()
             return proposals[proposal_id]
 
@@ -2383,7 +2452,11 @@ def create_app(
         await get_owned_chat(session, owner, chat_id)
         async with chat_lock(chat_id):
             chat = await session.get(Chat, chat_id, populate_existing=True)
-            if chat is None or proposal_id not in (chat.proposals or {}):
+            if (
+                chat is None
+                or proposal_id not in (chat.proposals or {})
+                or chat.proposals[proposal_id].get("kind")
+            ):
                 raise ServiceError(404, "not_found", "Proposal not found")
             if not chat.auto_budget_usd:
                 raise ServiceError(409, "auto_off", "Auto-generation is off for this chat")
@@ -2408,7 +2481,7 @@ def create_app(
                     "auto_budget_exceeded",
                     f"Needs {commit_usd} USD and the chat has {max(left, 0)} USD left",
                 )
-            jobs, spent = list(done), 0.0
+            jobs, spent, launched = list(done), 0.0, []
             for i, plan, usd, reserve in pending:
                 stored, approved_usd, approved_reserve = authorize(plan, usd, reserve, False)
                 job, created = await create_generation(
@@ -2421,6 +2494,8 @@ def create_app(
                     spent += max(usd, reserve or 0)
                 if job.id not in jobs:
                     jobs.append(job.id)
+                launched.append((i, job.id))
+            await link_shot_jobs(session, chat.project_id, p, launched)
             proposals = dict(chat.proposals)
             proposals[proposal_id] = {
                 **p,
@@ -2465,7 +2540,608 @@ def create_app(
                 }
         return lines, changed
 
-    def chat_toolbox(request: Request, owner: ApiClient, catalog: Catalog) -> sc.Toolbox:
+    # --- AI Director: lista de tomas y documentos del proyecto ----------------------------------------
+
+    def take_brief(job: Job | None) -> dict | None:
+        """Una generación de una toma en pocas líneas: estado, primera salida y lo que costó."""
+        if job is None:
+            return None
+        body = job_out(job)
+        first = body["outputs"][0] if body["outputs"] else {}
+        return {"job_id": job.id, "status": job.status, "kind": first.get("kind"), "url": first.get("url"),
+                "file_url": first.get("file_url"), "cost_usd": body["cost_usd"]}  # fmt: skip
+
+    async def sync_shots(session: AsyncSession, shots: list[Shot]) -> None:
+        """Una toma en `generating` pasa a `review` cuando todas sus tomas terminaron (a `retake` si ninguna salió)."""
+        changed = False
+        for shot in shots:
+            if shot.status != "generating" or not shot.take_job_ids:
+                continue
+            statuses = list(await session.scalars(select(Job.status).where(Job.id.in_(shot.take_job_ids))))
+            if statuses and all(s in TERMINAL for s in statuses):
+                shot.status = "review" if "completed" in statuses else "retake"
+                shot.updated_at = utcnow()
+                changed = True
+        if changed:
+            await session.commit()
+
+    async def project_shots(session: AsyncSession, project_id: str) -> list[Shot]:
+        rows = list(await session.scalars(select(Shot).where(Shot.project_id == project_id)))
+        await sync_shots(session, rows)
+        return sorted(rows, key=dr.sort_key)
+
+    async def shot_views(session: AsyncSession, shots: list[Shot]) -> list[dict]:
+        ids = {j for s in shots for j in [*(s.take_job_ids or []), s.board_job_id, s.selected_job_id] if j}
+        jobs = {j.id: j for j in await session.scalars(select(Job).where(Job.id.in_(ids)))} if ids else {}
+        views = []
+        for s in shots:
+            takes = [b for b in (take_brief(jobs.get(j)) for j in s.take_job_ids or []) if b]
+            views.append({**s.out(), "takes": takes, "board": take_brief(jobs.get(s.board_job_id or "")),
+                          "selected": take_brief(jobs.get(s.selected_job_id or ""))})  # fmt: skip
+        return views
+
+    async def link_shot_jobs(
+        session: AsyncSession, project_id: str | None, proposal: dict, pairs: list[tuple[int, str]]
+    ) -> None:
+        """Anota en la toma de cada posición de la propuesta la generación lanzada (sin hacer commit)."""
+        links = proposal.get("shots") or []
+        if not project_id or not links:
+            return
+        for index, job_id in pairs:
+            link = links[index] if index < len(links) else None
+            shot = await session.get(Shot, link["shot_id"]) if link else None
+            if shot is None or shot.project_id != project_id:
+                continue
+            if link.get("role") == "board":
+                shot.board_job_id = job_id
+                if shot.status in ("planned", "proposed"):
+                    shot.status = "boarded"
+            else:
+                if job_id not in (shot.take_job_ids or []):
+                    shot.take_job_ids = [*(shot.take_job_ids or []), job_id]
+                shot.status = "generating"
+            shot.updated_at = utcnow()
+
+    async def get_owned_shot(session: AsyncSession, owner: ApiClient, shot_id: str) -> Shot:
+        shot = await session.get(Shot, shot_id)
+        if shot is None:
+            raise ServiceError(404, "shot_not_found", "Shot not found")
+        await get_owned_project(session, owner, shot.project_id)
+        return shot
+
+    async def get_owned_document(
+        session: AsyncSession, owner: ApiClient, document_id: str
+    ) -> ProjectDocument:
+        doc = await session.get(ProjectDocument, document_id)
+        if doc is None:
+            raise ServiceError(404, "document_not_found", "Document not found")
+        await get_owned_project(session, owner, doc.project_id)
+        return doc
+
+    def save_document_version(
+        session: AsyncSession, doc: ProjectDocument, title: str, markdown: str, kind: str, by: str
+    ) -> None:
+        """Guarda la versión vigente en el historial y escribe la nueva (sube `version`)."""
+        session.add(ProjectDocumentVersion(document_id=doc.id, version=doc.version, title=doc.title,
+                                           markdown=doc.markdown, updated_by=doc.updated_by))  # fmt: skip
+        doc.title, doc.markdown, doc.kind, doc.updated_by = title, markdown, kind, by
+        doc.version += 1
+        doc.updated_at = utcnow()
+
+    async def director_context(session: AsyncSession, project_id: str) -> list[str]:
+        """Índice de documentos y resumen de la lista de tomas para el mensaje del agente."""
+        docs = list(
+            await session.scalars(
+                select(ProjectDocument)
+                .where(ProjectDocument.project_id == project_id)
+                .order_by(ProjectDocument.updated_at.desc())
+            )
+        )
+        statuses = list(await session.scalars(select(Shot.status).where(Shot.project_id == project_id)))
+        counts = {s: statuses.count(s) for s in dr.SHOT_STATUSES if s in statuses}
+        blocks = [dr.documents_block([d.summary() for d in docs]), dr.shots_block(counts)]
+        return [b for b in blocks if b]
+
+    @app.get("/v1/projects/{project_id}/shots", tags=["proyectos"])
+    async def list_shots(project_id: str, session: Session, owner: Owner) -> dict:
+        """Lista de tomas del proyecto en orden, con sus generaciones (storyboard, tomas y la elegida)."""
+        project = await get_owned_project(session, owner, project_id)
+        return {"shots": await shot_views(session, await project_shots(session, project.id))}
+
+    @app.patch("/v1/shots/{shot_id}", tags=["proyectos"])
+    async def update_shot_route(shot_id: str, body: ShotPatch, session: Session, owner: Owner) -> dict:
+        shot = await get_owned_shot(session, owner, shot_id)
+        if body.status is not None:
+            shot.status = body.status
+        if body.notes is not None:
+            shot.notes = body.notes
+        if body.verdict is not None:
+            shot.verdict = body.verdict
+        if body.selected_job_id is not None:
+            if body.selected_job_id and body.selected_job_id not in (shot.take_job_ids or []):
+                raise ServiceError(
+                    422, "not_a_take", "The selected take must be one of the shot's generations"
+                )
+            shot.selected_job_id = body.selected_job_id or None
+        shot.updated_at = utcnow()
+        await session.commit()
+        return (await shot_views(session, [shot]))[0]
+
+    @app.delete("/v1/shots/{shot_id}", tags=["proyectos"], status_code=204)
+    async def delete_shot(shot_id: str, session: Session, owner: Owner) -> None:
+        """Borra la toma de la lista; sus generaciones siguen en el proyecto."""
+        await session.delete(await get_owned_shot(session, owner, shot_id))
+        await session.commit()
+
+    @app.get("/v1/projects/{project_id}/documents", tags=["proyectos"])
+    async def list_documents(project_id: str, session: Session, owner: Owner) -> dict:
+        project = await get_owned_project(session, owner, project_id)
+        rows = await session.scalars(
+            select(ProjectDocument)
+            .where(ProjectDocument.project_id == project.id)
+            .order_by(ProjectDocument.updated_at.desc())
+        )
+        return {"documents": [d.summary() for d in rows]}
+
+    @app.post("/v1/projects/{project_id}/documents", tags=["proyectos"], status_code=201)
+    async def create_document(project_id: str, body: DocumentIn, session: Session, owner: Owner) -> dict:
+        project = await get_owned_project(session, owner, project_id)
+        doc = ProjectDocument(project_id=project.id, kind=body.kind, title=body.title.strip(),
+                              markdown=body.markdown, updated_by="user")  # fmt: skip
+        session.add(doc)
+        await session.commit()
+        return doc.out()
+
+    @app.get("/v1/documents/{document_id}", tags=["proyectos"])
+    async def get_document(document_id: str, session: Session, owner: Owner) -> dict:
+        return (await get_owned_document(session, owner, document_id)).out()
+
+    @app.patch("/v1/documents/{document_id}", tags=["proyectos"])
+    async def update_document(document_id: str, body: DocumentPatch, session: Session, owner: Owner) -> dict:
+        """Guarda un documento: exige la versión leída (si el agente u otra pestaña lo cambió, 409)."""
+        doc = await get_owned_document(session, owner, document_id)
+        if body.base_version != doc.version:
+            raise ServiceError(
+                409, "version_conflict", "The document changed; reload it", {"version": doc.version}
+            )
+        save_document_version(session, doc, (body.title or doc.title).strip(),
+                              doc.markdown if body.markdown is None else body.markdown,
+                              body.kind or doc.kind, "user")  # fmt: skip
+        await session.commit()
+        return doc.out()
+
+    @app.delete("/v1/documents/{document_id}", tags=["proyectos"], status_code=204)
+    async def delete_document(document_id: str, session: Session, owner: Owner) -> None:
+        doc = await get_owned_document(session, owner, document_id)
+        await session.execute(
+            delete(ProjectDocumentVersion).where(ProjectDocumentVersion.document_id == doc.id)
+        )
+        await session.delete(doc)
+        await session.commit()
+
+    async def output_bytes(session: AsyncSession, owner: ApiClient, source: dict) -> bytes:
+        """Imagen de una salida propia para un elemento: la imagen tal cual o un fotograma de un video."""
+        job = await get_owned_job(session, owner, str(source.get("job_id") or ""))
+        index = int(source.get("output_index") or 0)
+        entry = next((f for f in job.files or [] if f["index"] == index), None)
+        if job.status != "completed" or entry is None:
+            raise ServiceError(404, "not_found", "That output is not available (finished generations only)")
+        path = Path(settings.storage_dir) / "outputs" / job.id / entry["name"]
+        if not path.is_file():
+            raise ServiceError(404, "not_found", "The local copy of that output is missing")
+        if entry["kind"] == "video":
+            which = "first_frame" if source.get("frame") == "first" else "last_frame"
+            path = await derived_file(path, which)
+        elif entry["kind"] != "image":
+            raise ServiceError(422, "not_an_image", "Elements take images or video frames")
+        return path.read_bytes()
+
+    @app.post("/v1/chats/{chat_id}/proposals/{proposal_id}/element", tags=["supercomputer"], status_code=201)
+    async def create_proposed_element(
+        chat_id: str, proposal_id: str, request: Request, session: Session, owner: Owner
+    ) -> dict:
+        """Crea el elemento que propuso el agente (`create_element_from_generation`): solo con el clic del usuario."""
+        await get_owned_chat(session, owner, chat_id)
+        async with chat_lock(chat_id):
+            chat = await session.get(Chat, chat_id, populate_existing=True)
+            p = (chat.proposals or {}).get(proposal_id) if chat else None
+            if p is None or p.get("kind") != "element":
+                raise ServiceError(404, "not_found", "Proposal not found")
+            if p.get("element_id"):
+                raise ServiceError(409, "element_created", "This element was already created")
+            images = [(await output_bytes(session, owner, src), "") for src in p["sources"]]
+            element = await store_element(
+                request, session, owner, p["name"], p["description"], p["category"], images
+            )
+            chat = await session.get(Chat, chat_id, populate_existing=True)
+            proposals = dict(chat.proposals)
+            proposals[proposal_id] = {**p, "element_id": element["id"]}
+            chat.proposals = proposals
+            await session.commit()
+        return element
+
+    def director_tools(request: Request, owner: ApiClient, catalog: Catalog, project_id: str | None) -> dict:
+        """Herramientas del director para el agente (todas gratis). Las de proyecto exigen que el chat tenga uno."""
+
+        def need_project() -> str:
+            if not project_id:
+                raise dr.DirectorError(dr.NO_PROJECT)
+            return project_id
+
+        def agent_shot(view: dict) -> dict:
+            """Una toma como la lee el agente: el plan, el estado y sus generaciones, sin rutas locales."""
+            keep = ("id", "scene", "number", "order", "purpose", "shot_size", "duration_s", "screen_direction",
+                    "element_ids", "model_id", "params", "prompt", "notes", "status", "verdict",
+                    "selected_job_id", "start_frame_url")  # fmt: skip
+            out = {
+                ("shot_id" if k == "id" else k): view[k]
+                for k in keep
+                if view.get(k) not in (None, "", [], {})
+            }
+
+            def brief(b: dict) -> dict:
+                return {k: b[k] for k in ("job_id", "status", "url") if b.get(k)}
+
+            if view.get("board"):
+                out["board"] = brief(view["board"])
+            if view.get("takes"):
+                out["takes"] = [brief(b) for b in view["takes"]]
+            return out
+
+        async def upsert_shots(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            raw = args.get("shots")
+            if not isinstance(raw, list) or not 1 <= len(raw) <= dr.MAX_SHOTS:
+                raise dr.DirectorError(f"`shots` takes 1 to {dr.MAX_SHOTS} shots")
+            warnings: list[str] = []
+            async with app.state.sessions() as s:
+                rows = list(await s.scalars(select(Shot).where(Shot.project_id == pid)))
+                by_id = {r.id: r for r in rows}
+                by_number = {(r.scene, r.number): r for r in rows if r.number}
+                touched: list[Shot] = []
+                for item in raw:
+                    fields = dr.shot_fields(item, partial=True)
+                    shot_id = item.get("shot_id") if isinstance(item, dict) else None
+                    if shot_id:
+                        shot = by_id.get(shot_id)
+                        if shot is None:
+                            raise dr.DirectorError(f"Unknown shot {shot_id!r}; call get_shot_list")
+                    else:
+                        key = (fields.get("scene", "1"), fields.get("number"))
+                        shot = by_number.get(key) if key[1] else None
+                    if fields.get("model_id") and not catalog.get(fields["model_id"]):
+                        warnings.append(f"Unknown model {fields['model_id']!r}; use find_models")
+                    if shot is None:
+                        if len(rows) >= dr.MAX_SHOTS_PER_PROJECT:
+                            raise dr.DirectorError(f"A project holds up to {dr.MAX_SHOTS_PER_PROJECT} shots")
+                        full = dr.shot_fields(item)
+                        full.setdefault("order", 1 + sum(1 for r in rows if r.scene == full["scene"]))
+                        shot = Shot(project_id=pid, **full)
+                        s.add(shot)
+                        rows.append(shot)
+                        if shot.number:
+                            by_number[(shot.scene, shot.number)] = shot
+                    else:
+                        for key, value in fields.items():
+                            setattr(shot, key, value)
+                        shot.updated_at = utcnow()
+                    touched.append(shot)
+                await s.commit()
+                result = {
+                    "ok": True,
+                    "shots": [
+                        {"shot_id": t.id, "scene": t.scene, "number": t.number, "status": t.status}
+                        for t in touched
+                    ],
+                    "note": "Saved in the project's shot list (the user sees it as a table and a storyboard)",
+                }
+                if warnings:
+                    result["warnings"] = warnings
+                return result, None
+
+        async def get_shot_list(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            async with app.state.sessions() as s:
+                views = await shot_views(s, await project_shots(s, pid))
+            if isinstance(args.get("scene"), str):
+                views = [v for v in views if v["scene"] == args["scene"]]
+            if args.get("status") in dr.SHOT_STATUSES:
+                views = [v for v in views if v["status"] == args["status"]]
+            return {"shots": [agent_shot(v) for v in views], "count": len(views)}, None
+
+        async def update_shot(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            fields = dr.shot_fields(args, partial=True)
+            async with app.state.sessions() as s:
+                shot = await s.get(Shot, str(args.get("shot_id") or ""))
+                if shot is None or shot.project_id != pid:
+                    raise dr.DirectorError("Unknown shot; call get_shot_list")
+                for key in ("selected_job_id", "board_job_id"):
+                    job_id = args.get(key)
+                    if isinstance(job_id, str) and job_id:
+                        await get_owned_job(s, owner, job_id)
+                        setattr(shot, key, job_id)
+                        if key == "selected_job_id" and job_id not in (shot.take_job_ids or []):
+                            shot.take_job_ids = [*(shot.take_job_ids or []), job_id]
+                if isinstance(args.get("verdict"), str):
+                    shot.verdict = args["verdict"].strip()[:4000]
+                for key, value in fields.items():
+                    setattr(shot, key, value)
+                shot.updated_at = utcnow()
+                await s.commit()
+                view = (await shot_views(s, [shot]))[0]
+            return {"ok": True, "shot": agent_shot(view)}, None
+
+        async def image_of(s: AsyncSession, ref: str) -> tuple[str, dict] | None:
+            """Imagen para comparar: la primera de un elemento o la primera salida (o fotograma) de una generación."""
+            if ref.startswith("el_"):
+                element = await s.get(Element, ref)
+                if element is None or not element.images:
+                    return None
+                path = element_folder(settings.storage_dir, element.id) / element.images[0]["file"]
+                data = await dr.small_image(path) if path.is_file() else None
+                block = dr.image_block(data) if data else dr.url_block(element.images[0].get("url") or "")
+                return f"Element @{element.name}", block
+            job = await get_owned_job(s, owner, ref)
+            entry = next((f for f in job.files or [] if f["index"] == 0), None)
+            path = Path(settings.storage_dir) / "outputs" / job.id / entry["name"] if entry else None
+            if path is None or not path.is_file():
+                url = next((o.get("url") for o in job.outputs or [] if o.get("kind") == "image"), None)
+                return (f"Generation {job.id}", dr.url_block(url)) if url else None
+            if entry["kind"] == "video":
+                frames, _ = await dr.video_frames(path, 1)
+                return (
+                    (f"Generation {job.id} (first frame)", dr.image_block(frames[0][1])) if frames else None
+                )
+            data = await dr.small_image(path)
+            return (f"Generation {job.id}", dr.image_block(data)) if data else None
+
+        async def review_generation(args: dict) -> tuple[dict, None]:
+            count = args.get("frames") if isinstance(args.get("frames"), int) else 4
+            compare = [c for c in args.get("compare_with") or [] if isinstance(c, str)][:4]
+            blocks: list[dict] = []
+            async with app.state.sessions() as s:
+                job = await get_owned_job(s, owner, str(args.get("job_id") or ""))
+                if job.status != "completed":
+                    return {
+                        "error": f"Generation {job.id} is {job.status}; review it once it is completed"
+                    }, None
+                info: dict = {"job_id": job.id, "model": job.model, "input": job.input, "outputs": []}
+                files = {f["index"]: f for f in job.files or []}
+                for i, out in enumerate((job.outputs or [])[:4]):
+                    entry = files.get(i)
+                    path = Path(settings.storage_dir) / "outputs" / job.id / entry["name"] if entry else None
+                    local = path is not None and path.is_file()
+                    item: dict = {"index": i, "kind": out.get("kind"), "url": out.get("url")}
+                    if out.get("kind") == "video" and local:
+                        frames, length = await dr.video_frames(path, count)
+                        item["duration_s"] = round(length, 2) if length else None
+                        item["has_audio"] = await has_audio(str(path))
+                        item["frames_at_s"] = [t for t, _ in frames]
+                        for t, data in frames:
+                            blocks.append({"type": "text", "text": f"Output {i + 1}, frame at {t:.2f}s:"})
+                            blocks.append(dr.image_block(data))
+                        info["outputs"].append(item)
+                        break  # un video llena el cupo de imágenes
+                    if out.get("kind") == "image":
+                        data = await dr.small_image(path) if local else None
+                        blocks.append({"type": "text", "text": f"Output {i + 1}:"})
+                        blocks.append(dr.image_block(data) if data else dr.url_block(out["url"]))
+                    elif not local:
+                        item["note"] = "No local copy to extract frames from"
+                    info["outputs"].append(item)
+                for ref in compare:
+                    try:
+                        found = await image_of(s, ref)
+                    except ServiceError:
+                        found = None
+                    if found:
+                        blocks.append({"type": "text", "text": f"For comparison, {found[0]}:"})
+                        blocks.append(found[1])
+                    else:
+                        info.setdefault("not_found", []).append(ref)
+            info["images"] = sum(1 for b in blocks if b["type"] == "image")
+            return {**info, "_blocks": blocks}, None
+
+        async def save_document(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            kind, title, markdown = args.get("kind"), args.get("title"), args.get("markdown")
+            if kind not in dr.DOC_KINDS:
+                raise dr.DirectorError(f"`kind` must be one of {', '.join(dr.DOC_KINDS)}")
+            if not isinstance(title, str) or not title.strip() or not isinstance(markdown, str):
+                raise dr.DirectorError("`title` and `markdown` are required")
+            if len(markdown) > dr.MAX_DOCUMENT:
+                raise dr.DirectorError(f"A document is limited to {dr.MAX_DOCUMENT:,} characters")
+            async with app.state.sessions() as s:
+                doc_id = args.get("document_id")
+                if doc_id:
+                    doc = await s.get(ProjectDocument, str(doc_id))
+                    if doc is None or doc.project_id != pid:
+                        raise dr.DirectorError("Unknown document; call list_documents")
+                    if args.get("base_version") != doc.version:
+                        return {"error": f"The document is at version {doc.version} (the user may have edited "
+                                         "it): read_document again and merge before saving",
+                                "version": doc.version}, None  # fmt: skip
+                    save_document_version(s, doc, title.strip()[:120], markdown, kind, "agent")
+                else:
+                    doc = ProjectDocument(project_id=pid, kind=kind, title=title.strip()[:120], markdown=markdown,
+                                          updated_by="agent")  # fmt: skip
+                    s.add(doc)
+                await s.commit()
+                return {"ok": True, "document_id": doc.id, "version": doc.version,
+                        "note": "Saved in the project's Documents"}, None  # fmt: skip
+
+        async def read_document(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            async with app.state.sessions() as s:
+                doc = await s.get(ProjectDocument, str(args.get("document_id") or ""))
+                if doc is None or doc.project_id != pid:
+                    raise dr.DirectorError("Unknown document; call list_documents")
+                return doc.out(), None
+
+        async def list_documents_tool(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            query = select(ProjectDocument).where(ProjectDocument.project_id == pid)
+            if args.get("kind") in dr.DOC_KINDS:
+                query = query.where(ProjectDocument.kind == args["kind"])
+            async with app.state.sessions() as s:
+                rows = await s.scalars(query.order_by(ProjectDocument.updated_at.desc()))
+                return {"documents": [d.summary() for d in rows]}, None
+
+        async def update_project_brief(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            section, markdown = args.get("section"), args.get("markdown")
+            mode = "append" if args.get("mode") == "append" else "replace"
+            if section not in dr.BRIEF_SECTIONS or not isinstance(markdown, str) or not markdown.strip():
+                raise dr.DirectorError(
+                    f"`section` ({', '.join(dr.BRIEF_SECTIONS)}) and `markdown` are required"
+                )
+            async with app.state.sessions() as s:
+                project = await s.get(Project, pid)
+                if project is None:
+                    raise dr.DirectorError(dr.NO_PROJECT)
+                brief = dr.replace_section(project.brief or projects.brief_template(project.name), section,
+                                           markdown[:8000], mode)  # fmt: skip
+                if len(brief) > 50_000:
+                    raise dr.DirectorError("The brief would pass 50,000 characters; keep it short")
+                project.brief, project.updated_at = brief, utcnow()
+                await s.commit()
+            return {"ok": True, "section": section, "mode": mode, "brief_chars": len(brief)}, None
+
+        async def chain_shot(args: dict) -> tuple[dict, None]:
+            which = "first_frame" if args.get("which") == "first" else "last_frame"
+            async with app.state.sessions() as s:
+                job = await get_owned_job(s, owner, str(args.get("from_job_id") or ""))
+                video = next((f for f in job.files or [] if f["kind"] == "video"), None)
+                if video is None:
+                    raise dr.DirectorError("That generation has no finished video output")
+                frame = await fresh_output(s, owner, job.id, video["index"], which)
+                shot = None
+                if args.get("to_shot_id"):
+                    pid = need_project()
+                    shot = await s.get(Shot, str(args["to_shot_id"]))
+                    if shot is None or shot.project_id != pid:
+                        raise dr.DirectorError("Unknown shot; call get_shot_list")
+                    shot.start_frame_url, shot.updated_at = frame["url"], utcnow()
+                    await s.commit()
+                path = Path(settings.storage_dir) / "outputs" / job.id / video["name"]
+                small = await dr.small_image(await derived_file(path, which))
+            result = {"ok": True, "image_url": frame["url"], "which": which.split("_")[0],
+                      "note": "Pass image_url as the start frame or first image reference of the next shot"}  # fmt: skip
+            if shot is not None:
+                result["shot_id"] = shot.id
+            if small:
+                result["_blocks"] = [dr.image_block(small)]
+            return result, None
+
+        async def estimate_shot_list(args: dict) -> tuple[dict, None]:
+            pid = need_project()
+            takes = args.get("takes_per_shot")
+            takes = float(takes) if isinstance(takes, int | float) and 1 <= takes <= 5 else 1.5
+            ids = [i for i in args.get("shot_ids") or [] if isinstance(i, str)]
+            async with app.state.sessions() as s:
+                shots = [x for x in await project_shots(s, pid) if x.status != "cut"]
+                if ids:
+                    shots = [x for x in shots if x.id in ids]
+                if isinstance(args.get("scene"), str):
+                    shots = [x for x in shots if x.scene == args["scene"]]
+                lines, total, unknown = [], 0.0, 0
+                for shot in shots:
+                    line: dict = {"shot_id": shot.id, "number": shot.number, "model_id": shot.model_id}
+                    model = catalog.get(shot.model_id or "")
+                    if not model or not shot.prompt:
+                        line["error"] = "Needs model_id and prompt"
+                        unknown += 1
+                    else:
+                        arguments = dr.shot_input(shot.out())
+                        try:
+                            if found := catalog.validate(
+                                model["id"], fill_placeholders(model["input_schema"], arguments)[0]
+                            ):
+                                raise dr.DirectorError(str(found)[:300])
+                            body = estimate_body(await make_plan(request, s, owner, model, arguments, {}))
+                            line.update(
+                                usd=body.get("usd"), kind=body.get("kind"), provider=body.get("provider")
+                            )
+                            if body.get("usd") is None:
+                                unknown += 1
+                            else:
+                                total += body["usd"]
+                        except (ServiceError, dr.DirectorError) as exc:
+                            line["error"] = str(exc)[:300]
+                            unknown += 1
+                    lines.append(line)
+                spent = 0.0
+                rows = await s.execute(
+                    select(Job.plan, Job.plan_index).where(Job.project_id == pid, Job.status == "completed")
+                )
+                for plan, index in rows.tuples():
+                    option = plan[index] if plan and index < len(plan) else {}
+                    spent += option.get("usd") or 0
+            return {
+                "shots": lines, "total_usd": round(total, 4), "takes_per_shot": takes,
+                "total_with_retakes_usd": round(total * takes, 4), "unpriced_shots": unknown,
+                "project_spent_usd": round(spent, 4),
+                "note": "Storyboard frames are not included; a cheaper alternative is 480p or a Seedance 2.5 Draft",
+            }, None  # fmt: skip
+
+        async def create_element_from_generation(args: dict) -> tuple[dict, dict | None]:
+            name = check_name(str(args.get("name") or ""))
+            category = args.get("category") if args.get("category") in ELEMENT_CATEGORIES else "other"
+            description = str(args.get("description") or "").strip()[:500]
+            sources = args.get("sources")
+            if not description:
+                raise dr.DirectorError("`description` is required")
+            if not isinstance(sources, list) or not MIN_IMAGES <= len(sources) <= MAX_IMAGES:
+                raise dr.DirectorError(f"`sources` takes {MIN_IMAGES} to {MAX_IMAGES} items")
+            clean, previews = [], []
+            async with app.state.sessions() as s:
+                if await s.scalar(select(Element.id).where(Element.name == name)):
+                    raise dr.DirectorError(f"There is already an element called @{name}; pick another name")
+                for src in sources:
+                    if not isinstance(src, dict):
+                        raise dr.DirectorError("Each source is an object with job_id")
+                    job = await get_owned_job(s, owner, str(src.get("job_id") or ""))
+                    index = src.get("output_index") if isinstance(src.get("output_index"), int) else 0
+                    out = (job.outputs or [])[index] if index < len(job.outputs or []) else None
+                    if job.status != "completed" or out is None:
+                        raise dr.DirectorError(f"Generation {job.id} has no finished output {index}")
+                    if out.get("kind") not in ("image", "video"):
+                        raise dr.DirectorError("Elements take images or video frames")
+                    frame = (src.get("frame") if src.get("frame") in ("first", "last") else "last") if out[
+                        "kind"] == "video" else None  # fmt: skip
+                    clean.append(
+                        {"job_id": job.id, "output_index": index, **({"frame": frame} if frame else {})}
+                    )
+                    previews.append({"url": out.get("url"), "kind": out["kind"], "frame": frame})
+            proposal = {"kind": "element", "title": f"@{name}", "name": name, "category": category,
+                        "description": description, "sources": clean, "previews": previews, "element_id": None}  # fmt: skip
+            note = ("Shown to the user as a card with a Create button; the element exists only after they click it. "
+                    "Do not cite it until then.")  # fmt: skip
+            return {"ok": True, "note": note}, proposal
+
+        tools = {
+            "upsert_shots": upsert_shots, "get_shot_list": get_shot_list, "update_shot": update_shot,
+            "review_generation": review_generation, "save_document": save_document, "read_document": read_document,
+            "list_documents": list_documents_tool, "update_project_brief": update_project_brief,
+            "chain_shot": chain_shot, "estimate_shot_list": estimate_shot_list,
+            "create_element_from_generation": create_element_from_generation,
+        }  # fmt: skip
+
+        def safe(fn):
+            async def run(args: dict) -> tuple[dict, dict | None]:
+                try:
+                    return await fn(args)
+                except (dr.DirectorError, ServiceError, ElementError) as exc:
+                    return {"error": str(exc)[:500]}, None
+
+            return run
+
+        return {name: safe(fn) for name, fn in tools.items()}
+
+    def chat_toolbox(
+        request: Request, owner: ApiClient, catalog: Catalog, project_id: str | None = None
+    ) -> sc.Toolbox:
         async def price(model: dict, arguments: dict) -> dict:
             return estimate_body(await request.app.state.router.plan(model, arguments, {}))
 
@@ -2491,6 +3167,7 @@ def create_app(
             title: str,
             variations: int = 1,
             items: list[dict] | None = None,
+            links: list[dict | None] | None = None,
         ) -> tuple[dict, dict | None]:
             """Una tarjeta: una generación, N variaciones de la misma entrada o varias piezas (`items`), cada
             una validada y cotizada; el precio de la tarjeta es la suma."""
@@ -2519,6 +3196,24 @@ def create_app(
                         break
             if errors:
                 return {"errors": errors if items else next(iter(errors.values()))}, None
+            if links:
+                if not project_id:
+                    return {"error": dr.NO_PROJECT}, None
+                async with app.state.sessions() as s:
+                    wanted = {link["shot_id"] for link in links if link}
+                    found = {x.id: x for x in await s.scalars(select(Shot).where(Shot.id.in_(wanted)))}
+                    missing = sorted(i for i in wanted if i not in found or found[i].project_id != project_id)
+                    if missing:
+                        return {"error": f"Unknown shot ids {missing}; call get_shot_list"}, None
+                    for link in links:
+                        shot = found[link["shot_id"]] if link else None
+                        if (
+                            shot
+                            and link["role"] == "take"
+                            and shot.status in ("planned", "boarded", "retake")
+                        ):
+                            shot.status, shot.updated_at = "proposed", utcnow()
+                    await s.commit()
             usds = [q.get("usd") for q in quotes]
             reserves = [q.get("reserve_usd") or 0 for q in quotes]
             kinds = [q.get("kind") for q in quotes]
@@ -2534,6 +3229,8 @@ def create_app(
             proposal = {"model": model["id"], "model_title": model["title"], "output": model["output"],
                         "title": title, "input": inputs[0], "inputs": inputs, "labels": labels,
                         "variations": len(inputs), "estimate": brief, "job_id": None, "job_ids": []}  # fmt: skip
+            if links:
+                proposal["shots"] = list(links)
             note = "Shown to the user as one card with a Generate button"
             if len(inputs) > 1:
                 note += f" that launches all {len(inputs)} generations at once (total price shown)"
@@ -2584,6 +3281,7 @@ def create_app(
         return sc.Toolbox(
             find_models=find_models, get_model=get_model_info, propose=propose, list_elements=list_elements,
             list_skills=list_skills_tool, use_skill=use_skill, read_skill_file=read_skill_file,
+            director=director_tools(request, owner, catalog, project_id),
         )  # fmt: skip
 
     @app.post("/v1/chats/{chat_id}/messages", tags=["supercomputer"])
@@ -2622,6 +3320,8 @@ def create_app(
                   for r in await session.scalars(select(Skill).where(Skill.slug.in_(called)))}  # fmt: skip
         project = await session.get(Project, chat.project_id) if chat.project_id else None
         context = [projects.brief_block(project.name, project.brief)] if project else []
+        if project:
+            context += await director_context(session, project.id)
         if chat.auto_budget_usd:
             left = max(0.0, chat.auto_budget_usd - (chat.auto_spent_usd or 0))
             context.append(sc.auto_note(left))
@@ -2631,7 +3331,7 @@ def create_app(
             [d.model_dump() for d in body.documents], context)}  # fmt: skip
         history = sc.with_user_turn(chat.messages, user_msg)
         first = not chat.messages
-        chat_key, owner_id = chat.id, owner.id
+        chat_key, owner_id, project_key = chat.id, owner.id, chat.project_id
         busy.add(chat_key)
 
         async def save(turn: sc.Turn) -> Chat | None:
@@ -2668,7 +3368,9 @@ def create_app(
                 base_url=settings.secret("ANTHROPIC_BASE_URL") or None,
                 http_client=jobs.http_client_factory() if jobs.http_client_factory else None,
             )
-            toolbox = chat_toolbox(request, SimpleNamespace(id=owner_id, sees_all=owner.sees_all), catalog)
+            toolbox = chat_toolbox(
+                request, SimpleNamespace(id=owner_id, sees_all=owner.sees_all), catalog, project_key
+            )
             try:
                 async for event in sc.run_turn(
                     client,

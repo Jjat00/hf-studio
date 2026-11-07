@@ -223,6 +223,89 @@ class Project(Base):
         return {**data, "brief": self.brief} if full else data
 
 
+class Shot(Base):
+    """Toma de la lista de tomas de un proyecto (AI Director). `take_job_ids` son todas las generaciones de la toma,
+    `board_job_id` su fotograma de storyboard y `selected_job_id` la toma buena. Estados: planned, boarded,
+    proposed, generating, review, approved, retake y cut."""
+
+    __tablename__ = "shots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    scene: Mapped[str] = mapped_column(String(20), default="1")
+    number: Mapped[str] = mapped_column(String(20), default="")
+    order: Mapped[int] = mapped_column(Integer, default=0)
+    purpose: Mapped[str] = mapped_column(Text, default="")
+    shot_size: Mapped[str | None] = mapped_column(String(20))
+    duration_s: Mapped[float | None] = mapped_column(Float)
+    screen_direction: Mapped[str] = mapped_column(String(200), default="")
+    element_ids: Mapped[list] = mapped_column(JSON, default=list)
+    model_id: Mapped[str | None] = mapped_column(String(200))
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="planned")
+    board_job_id: Mapped[str | None] = mapped_column(String(36))
+    take_job_ids: Mapped[list] = mapped_column(JSON, default=list)
+    selected_job_id: Mapped[str | None] = mapped_column(String(36))
+    verdict: Mapped[str] = mapped_column(Text, default="")
+    # Fotograma de entrada que dejó `chain_shot` (último fotograma de la toma anterior): URL pública.
+    start_frame_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def out(self) -> dict:
+        return {"id": self.id, "project_id": self.project_id, "scene": self.scene, "number": self.number,
+                "order": self.order, "purpose": self.purpose, "shot_size": self.shot_size,
+                "duration_s": self.duration_s, "screen_direction": self.screen_direction,
+                "element_ids": list(self.element_ids or []), "model_id": self.model_id,
+                "params": dict(self.params or {}), "prompt": self.prompt, "notes": self.notes,
+                "status": self.status, "board_job_id": self.board_job_id,
+                "take_job_ids": list(self.take_job_ids or []), "selected_job_id": self.selected_job_id,
+                "verdict": self.verdict, "start_frame_url": self.start_frame_url,
+                "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+
+
+class ProjectDocument(Base):
+    """Documento vivo de un proyecto (tratamiento, desglose, biblia, lookbook…) en Markdown. `version` es un bloqueo
+    optimista: guardar exige la versión leída; la anterior pasa a `project_document_versions`."""
+
+    __tablename__ = "project_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="notes")
+    title: Mapped[str] = mapped_column(String(120))
+    markdown: Mapped[str] = mapped_column(Text, default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[str] = mapped_column(String(10), default="user")  # agent | user
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def summary(self) -> dict:
+        first = next((line.strip("# ").strip() for line in self.markdown.splitlines() if line.strip()), "")
+        return {"id": self.id, "project_id": self.project_id, "kind": self.kind, "title": self.title,
+                "version": self.version, "updated_by": self.updated_by, "chars": len(self.markdown),
+                "excerpt": first[:160], "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+
+    def out(self) -> dict:
+        return {**self.summary(), "markdown": self.markdown}
+
+
+class ProjectDocumentVersion(Base):
+    """Versión anterior de un documento de proyecto (se guarda una por cada cambio)."""
+
+    __tablename__ = "project_document_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(String(36), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(120))
+    markdown: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[str] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Folder(Base):
     """Carpeta de un proyecto. Borrarla deja sus generaciones en el proyecto, sin carpeta."""
 

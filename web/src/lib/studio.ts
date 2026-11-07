@@ -362,6 +362,21 @@ export const studio = {
   /** Generación automática: el servidor cotiza, comprueba el tope del chat y lanza lo que falta de la propuesta. */
   autoProposal: (chatId: string, proposalId: string) =>
     call<{ proposal: ChatProposal; auto_spent_usd: number }>(`/v1/chats/${chatId}/proposals/${proposalId}/auto`, { method: "POST" }),
+  /** Crea el elemento que propuso AI Director (solo con este clic del usuario). */
+  createProposedElement: (chatId: string, proposalId: string) =>
+    call<StudioElement>(`/v1/chats/${chatId}/proposals/${proposalId}/element`, { method: "POST" }),
+  /** AI Director: lista de tomas del proyecto y sus documentos. */
+  shots: (projectId: string) => call<{ shots: Shot[] }>(`/v1/projects/${projectId}/shots`),
+  updateShot: (id: string, patch: { status?: ShotStatus; selected_job_id?: string; notes?: string; verdict?: string }) =>
+    call<Shot>(`/v1/shots/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }),
+  deleteShot: (id: string) => call<void>(`/v1/shots/${id}`, { method: "DELETE" }),
+  documents: (projectId: string) => call<{ documents: ProjectDocSummary[] }>(`/v1/projects/${projectId}/documents`),
+  document: (id: string) => call<ProjectDoc>(`/v1/documents/${id}`),
+  createDocument: (projectId: string, body: { kind: ProjectDocKind; title: string; markdown: string }) =>
+    call<ProjectDoc>(`/v1/projects/${projectId}/documents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  updateDocument: (id: string, patch: { title?: string; kind?: ProjectDocKind; markdown?: string; base_version: number }) =>
+    call<ProjectDoc>(`/v1/documents/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }),
+  deleteDocument: (id: string) => call<void>(`/v1/documents/${id}`, { method: "DELETE" }),
   /** Envía un mensaje y entrega cada evento del stream (text, tool, proposal, usage, error, done). */
   skills: () => call<{ skills: SkillSummary[] }>("/v1/skills"),
   skill: (slug: string) => call<Skill>(`/v1/skills/${encodeURIComponent(slug)}`),
@@ -582,7 +597,57 @@ export type ChatProposal = {
   /** Varias piezas distintas (`items`): el título de cada una. Vacío en variaciones. */
   labels?: string[];
   job_ids?: string[];
+  /** Toma de la lista a la que va cada posición (AI Director). */
+  shots?: ({ shot_id: string; role: "take" | "board" } | null)[];
+  /** `element`: tarjeta para crear un elemento desde generaciones (no genera nada). */
+  kind?: "element";
+  name?: string;
+  category?: string;
+  description?: string;
+  previews?: { url: string; kind: "image" | "video"; frame: "first" | "last" | null }[];
+  element_id?: string | null;
 };
+export type ShotStatus = "planned" | "boarded" | "proposed" | "generating" | "review" | "approved" | "retake" | "cut";
+export type ShotTake = { job_id: string; status: string; kind: "image" | "video" | null; url: string | null; file_url: string | null; cost_usd: number | null };
+export type Shot = {
+  id: string;
+  project_id: string;
+  scene: string;
+  number: string;
+  order: number;
+  purpose: string;
+  shot_size: string | null;
+  duration_s: number | null;
+  screen_direction: string;
+  element_ids: string[];
+  model_id: string | null;
+  params: Record<string, unknown>;
+  prompt: string;
+  notes: string;
+  status: ShotStatus;
+  board_job_id: string | null;
+  take_job_ids: string[];
+  selected_job_id: string | null;
+  verdict: string;
+  start_frame_url: string | null;
+  updated_at: string;
+  takes: ShotTake[];
+  board: ShotTake | null;
+  selected: ShotTake | null;
+};
+export type ProjectDocKind = "treatment" | "breakdown" | "bible" | "lookbook" | "color_script" | "blocking" | "script" | "notes" | "other";
+export type ProjectDocSummary = {
+  id: string;
+  project_id: string;
+  kind: ProjectDocKind;
+  title: string;
+  version: number;
+  updated_by: "agent" | "user";
+  chars: number;
+  excerpt: string;
+  updated_at: string;
+};
+export type ProjectDoc = ProjectDocSummary & { markdown: string };
 export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[] };
 export type Skill = SkillSummary & { body: string };
 export type SkillBody = ({ slug: string; description: string; body: string } | { skill_md: string }) & { files?: Record<string, string> };
