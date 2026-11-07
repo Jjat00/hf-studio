@@ -1,12 +1,13 @@
 "use client";
 
 import clsx from "clsx";
-import { ChevronDown, Globe, LogOut, Menu, Sparkles } from "lucide-react";
+import { ChevronDown, FolderOpen, Globe, LogOut, Menu, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import type { Dict } from "@/lib/i18n";
 import { MEGA_MENUS, type MegaMenu, type MenuEntry } from "@/lib/menu";
+import { setActiveProject, useActiveProject } from "@/lib/project";
 import { Approvals } from "./generations/approvals";
 import { useI18n } from "./i18n-provider";
 import { Logo } from "./logo";
@@ -32,6 +33,7 @@ const PRIMARY: Item[] = [
 ];
 const PRODUCTS: Item[] = [
   { href: "/supercomputer", label: "supercomputer", badge: "new", match: (p) => p.startsWith("/supercomputer") },
+  { href: "/projects", label: "projects", badge: "new", match: (p) => p.startsWith("/projects") },
   { href: "/video?tab=genjutsu", label: "genjutsu", badge: "top", match: (p, q) => p.startsWith("/video") && tabIs(q, "genjutsu") },
   { href: "/spaces", label: "spaces", badge: "new", match: (p) => p.startsWith("/spaces") || p.startsWith("/flows") },
   { href: "/influencer", label: "influencer", badge: "new", match: (p) => p.startsWith("/influencer") },
@@ -271,6 +273,24 @@ function ApiStatus() {
   );
 }
 
+/** Proyecto activo: a dónde va lo que se genera. Lleva a su página; la x deja de trabajar en él. */
+function ActiveProjectPill() {
+  const { t } = useI18n();
+  const project = useActiveProject();
+  if (!project) return null;
+  return (
+    <span className="flex h-8 max-w-48 items-center rounded-lg bg-lime/10 text-sm font-medium text-lime">
+      <Link href={`/projects/${project.id}`} title={t.projects.activeHint} className="flex min-w-0 items-center gap-1.5 pl-2.5">
+        <FolderOpen className="size-4 shrink-0" />
+        <span className="truncate">{project.name}</span>
+      </Link>
+      <button type="button" onClick={() => setActiveProject(null)} aria-label={t.projects.deactivate} title={t.projects.deactivate} className="px-1.5 text-lime/70 hover:text-lime">
+        <X className="size-3.5" />
+      </button>
+    </span>
+  );
+}
+
 /** Alterna ES/EN; el idioma se guarda en una cookie y el español es el predeterminado. */
 function LanguageToggle() {
   const { t, locale, setLocale } = useI18n();
@@ -320,6 +340,7 @@ export function Nav({ gate = false }: { gate?: boolean }) {
         <NavLinks />
       </Suspense>
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <ActiveProjectPill />
         <Approvals />
         <ApiStatus />
         <LanguageToggle />

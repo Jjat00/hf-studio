@@ -44,7 +44,7 @@ function inline(text: string): ReactNode[] {
 }
 
 /** Markdown mínimo del agente: párrafos, títulos y listas. */
-function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }) {
   const blocks = text.trim().split(/\n{2,}/);
   return (
     <div className="space-y-3 text-[15px] leading-relaxed text-fg-2">

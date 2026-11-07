@@ -26,7 +26,13 @@ const PAGE = 80;
 /** Tope de la ventana (el máximo que el servidor devuelve en una lectura). */
 const MAX_WINDOW = 2000;
 
-export function useGenerations({ hidden = false, favorite = false }: { hidden?: boolean; favorite?: boolean } = {}) {
+/** `project` y `folder`: solo las de ese proyecto o carpeta ("none": sin proyecto o sin carpeta). */
+export function useGenerations({
+  hidden = false,
+  favorite = false,
+  project,
+  folder,
+}: { hidden?: boolean; favorite?: boolean; project?: string; folder?: string } = {}) {
   const [items, setItems] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +51,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   const latestRefresh = useRef<() => Promise<Generation[] | null>>(async () => null);
 
   // Otra consulta (otro filtro): no se muestra la lista de la anterior como si fuera de esta.
-  const query = `${hidden}|${favorite}`;
+  const query = `${hidden}|${favorite}|${project ?? ""}|${folder ?? ""}`;
   const [shownQuery, setShownQuery] = useState(query);
   if (shownQuery !== query) {
     setShownQuery(query);
@@ -57,9 +63,9 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
 
   const refresh = useCallback(async () => {
     const id = ++asked.current;
-    const mine = `${hidden}|${favorite}`;
+    const mine = `${hidden}|${favorite}|${project ?? ""}|${folder ?? ""}`;
     try {
-      const { generations } = await studio.list(limit, hidden, favorite);
+      const { generations } = await studio.list(limit, hidden, favorite, { project, folder });
       if (mine !== visible.current || id <= applied.current || id <= changedAt.current) return generations;
       applied.current = id;
       setRead({ count: generations.length, window: limit });
@@ -74,7 +80,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       }
       return null;
     }
-  }, [hidden, favorite, limit]);
+  }, [hidden, favorite, project, folder, limit]);
 
   /** Lo que esté en vuelo ya no vale: la lista cambió (otra consulta o un cambio hecho aquí). */
   const invalidate = useCallback(() => {
@@ -82,7 +88,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
   }, []);
 
   useEffect(() => {
-    visible.current = `${hidden}|${favorite}`;
+    visible.current = `${hidden}|${favorite}|${project ?? ""}|${folder ?? ""}`;
     latestRefresh.current = refresh;
     invalidate();
     let alive = true;
@@ -97,7 +103,7 @@ export function useGenerations({ hidden = false, favorite = false }: { hidden?: 
       alive = false;
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [refresh, invalidate, hidden, favorite]);
+  }, [refresh, invalidate, hidden, favorite, project, folder]);
 
   // Hay más mientras la última lectura llenó la ventana; se está cargando mientras la ventana nueva aún no llegó.
   const hasMore = read.window === limit && read.count >= limit && limit < MAX_WINDOW;

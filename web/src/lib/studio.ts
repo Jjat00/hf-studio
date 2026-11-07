@@ -1,6 +1,7 @@
 import type { Flow, FlowSummary, RunEstimate, Space, SpaceRun, SpaceSummary } from "./spaces";
 import type { LiveCategory } from "./influencer-data";
-import type { ApiErrorBody, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, ModelStyle, Usage, Voice, VoiceChangeBody, VoiceDesignBody, VoicePreview, VoiceStatus } from "./types";
+import { activeProject } from "./project";
+import type { ApiErrorBody, ElementCategory, Project, ProjectFolder, ProjectSummary, FreeVoice, Generation, ModelDetail, ModelSummary, Preset, ProviderInfo, Sound, StudioElement, ModelStyle, Usage, Voice, VoiceChangeBody, VoiceDesignBody, VoicePreview, VoiceStatus } from "./types";
 
 /** Cambio de voz con ElevenLabs: trabajo local de HF Studio, no un modelo del catálogo de Higgsfield. */
 export const VOICE_MODEL = "elevenlabs/voice-changer";
@@ -115,6 +116,8 @@ export const studio = {
     maxReserveUsd?: number | null,
     acceptUnknownCost = false,
     allowDuplicate = false,
+    // Proyecto donde se guarda: sin indicarlo, el proyecto activo (null: ninguno).
+    projectId: string | null = activeProject(),
   ) =>
     call<Generation>("/v1/generations", {
       method: "POST",
@@ -128,6 +131,7 @@ export const studio = {
         ...(maxReserveUsd != null ? { max_reserve_usd: maxReserveUsd } : {}),
         ...(acceptUnknownCost ? { accept_unknown_cost: true } : {}),
         ...(allowDuplicate ? { allow_duplicate: true } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
       }),
     }),
   /** Aprueba el proveedor de respaldo más caro de una generación en awaiting_approval. */
@@ -226,8 +230,30 @@ export const studio = {
     }),
   importElevenlabs: () => call<{ imported: number; skipped: number }>("/v1/sounds/import-elevenlabs", { method: "POST" }),
   /** Las `limit` más recientes de la biblioteca (o de las ocultas, o de las favoritas). */
-  list: (limit = 60, hidden = false, favorite = false) =>
-    call<{ generations: Generation[] }>(`/v1/generations?limit=${limit}${hidden ? "&hidden=true" : ""}${favorite ? "&favorite=true" : ""}`),
+  list: (limit = 60, hidden = false, favorite = false, place: { project?: string; folder?: string } = {}) =>
+    call<{ generations: Generation[] }>(
+      `/v1/generations?limit=${limit}${hidden ? "&hidden=true" : ""}${favorite ? "&favorite=true" : ""}` +
+        `${place.project ? `&project=${encodeURIComponent(place.project)}` : ""}${place.folder ? `&folder=${encodeURIComponent(place.folder)}` : ""}`,
+    ),
+  /** Mueve generaciones a un proyecto y carpeta (null: fuera). */
+  move: (ids: string[], projectId: string | null, folderId: string | null = null) =>
+    call<{ changed: string[]; skipped: string[] }>("/v1/generations/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, project_id: projectId, folder_id: folderId }),
+    }),
+  projects: () => call<{ projects: ProjectSummary[] }>("/v1/projects"),
+  project: (id: string) => call<Project>(`/v1/projects/${id}`),
+  createProject: (name: string, description = "") =>
+    call<Project>("/v1/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, description }) }),
+  updateProject: (id: string, patch: { name?: string; description?: string; brief?: string; cover?: string }) =>
+    call<Project>(`/v1/projects/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }),
+  deleteProject: (id: string) => call<void>(`/v1/projects/${id}`, { method: "DELETE" }),
+  createFolder: (projectId: string, name: string) =>
+    call<ProjectFolder>(`/v1/projects/${projectId}/folders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }),
+  renameFolder: (id: string, name: string) =>
+    call<ProjectFolder>(`/v1/folders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }),
+  deleteFolder: (id: string) => call<void>(`/v1/folders/${id}`, { method: "DELETE" }),
   /** Marca (o desmarca) varias generaciones como favoritas. */
   favorite: (ids: string[], favorite = true) =>
     call<{ changed: string[]; skipped: string[] }>("/v1/generations/favorite", {
@@ -295,33 +321,41 @@ export const studio = {
     call<{ url: string; kind: string; content_type: string }>(`/v1/generations/${id}/outputs/${index}/use${as ? `?as=${as}` : ""}`, {
       method: "POST",
     }),
-  /** 2 a 4 imágenes JPG o PNG; `name` en minúsculas (letras, dígitos y _), se cita como @name. */
+  /** 1 a 4 imágenes JPG o PNG (Kling 3.0 pide 2+); `name` en minúsculas (letras, dígitos y _), se cita como @name. */
   /** `urls`: imágenes propias ya subidas (p. ej. una creación vía `useOutput`). */
-  createElement: (name: string, description: string, files: File[], urls: string[] = []) => {
+  createElement: (name: string, description: string, files: File[], urls: string[] = [], category: ElementCategory = "other") => {
     const form = new FormData();
     form.append("name", name);
     form.append("description", description);
+    form.append("category", category);
     for (const f of files) form.append("files", f);
     for (const u of urls) form.append("image_urls", u);
     return call<StudioElement>("/v1/elements", { method: "POST", body: form });
   },
   deleteElement: (id: string) => call<void>(`/v1/elements/${id}`, { method: "DELETE" }),
+  /** URLs públicas y vigentes de las imágenes de un elemento, para usarlas como referencias en cualquier modelo. */
+  elementUrls: (id: string) =>
+    call<{ id: string; mention: string; description: string; image_urls: string[] }>(`/v1/elements/${id}/urls`, { method: "POST" }),
   chats: () =>
     call<{ available: boolean; models: string[]; default_model: string; chats: ChatSummary[] }>("/v1/chats"),
   chat: (id: string) => call<Chat>(`/v1/chats/${id}`),
-  createChat: (model?: string) =>
+  createChat: (model?: string, projectId: string | null = activeProject()) =>
     call<Chat>("/v1/chats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(model ? { model } : {}),
+      body: JSON.stringify({ ...(model ? { model } : {}), ...(projectId ? { project_id: projectId } : {}) }),
     }),
+  /** Proyecto del chat ("" lo quita) o tope de la generación automática (0 la apaga). */
+  updateChat: (id: string, patch: { project_id?: string; auto_budget_usd?: number }) =>
+    call<ChatSummary>(`/v1/chats/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }),
   deleteChat: (id: string) => call<void>(`/v1/chats/${id}`, { method: "DELETE" }),
   /** Anota la generación lanzada desde una propuesta: el agente sabrá cómo terminó. */
-  linkProposal: (chatId: string, proposalId: string, jobId: string) =>
+  /** `autoUsd`: la lanzó la generación automática; su precio cuenta contra el tope del chat. */
+  linkProposal: (chatId: string, proposalId: string, jobId: string, autoUsd?: number | null) =>
     call<ChatProposal>(`/v1/chats/${chatId}/proposals/${proposalId}/job`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId }),
+      body: JSON.stringify({ job_id: jobId, ...(autoUsd ? { auto_usd: autoUsd } : {}) }),
     }),
   /** Envía un mensaje y entrega cada evento del stream (text, tool, proposal, usage, error, done). */
   skills: () => call<{ skills: SkillSummary[] }>("/v1/skills"),
@@ -505,7 +539,18 @@ export function modelLabel(title: string) {
 }
 
 /** Supercomputer: chats con el agente que aclara la idea y propone generaciones. */
-export type ChatSummary = { id: string; title: string; model: string; cost_usd: number; created_at: string; updated_at: string };
+export type ChatSummary = {
+  id: string;
+  title: string;
+  model: string;
+  cost_usd: number;
+  created_at: string;
+  updated_at: string;
+  project_id?: string | null;
+  /** Tope de la generación automática (null: apagada) y lo ya lanzado con ella. */
+  auto_budget_usd?: number | null;
+  auto_spent_usd?: number;
+};
 export type ChatProposal = {
   tool_use_id: string;
   model: string;

@@ -9,7 +9,7 @@ import { useGenerations } from "@/components/generations/use-generations";
 import { Masonry } from "@/components/masonry";
 import { useI18n } from "@/components/i18n-provider";
 import { outputOf, reuseHref, studio, modelMap } from "@/lib/studio";
-import type { Generation, ModelSummary } from "@/lib/types";
+import type { Generation, ModelSummary, ProjectSummary } from "@/lib/types";
 
 const FILTERS = ["all", "favorites", "video", "image", "audio", "active", "failed"] as const;
 
@@ -35,6 +35,10 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  useEffect(() => {
+    if (selecting) studio.projects().then((r) => setProjects(r.projects)).catch(() => undefined);
+  }, [selecting]);
   useEffect(() => {
     studio.models().then((r) => setModels(modelMap(r.models))).catch(() => undefined);
   }, []);
@@ -93,6 +97,20 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
       setPicked(new Set());
       if (res.skipped.length) setNotice(h.skipped(res.skipped.length));
       else setSelecting(false);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveTo(target: string) {
+    if (!chosen.length || !target) return;
+    setBusy(true);
+    try {
+      const res = await studio.move(chosen, target === "none" ? null : target);
+      setNotice(t.projects.moved(res.changed.length));
+      setPicked(new Set());
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
     } finally {
@@ -212,11 +230,28 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
             {h.selectAll}
           </button>
           {!hidden && (
+            <select
+              value=""
+              disabled={!chosen.length || busy}
+              onChange={(e) => void moveTo(e.target.value)}
+              aria-label={t.projects.moveTo}
+              className="ml-auto h-9 max-w-44 rounded-xl bg-surface-4 px-2 text-sm font-semibold text-fg disabled:opacity-40"
+            >
+              <option value="">{t.projects.moveTo}</option>
+              {projects.map((pr) => (
+                <option key={pr.id} value={pr.id}>
+                  {pr.name}
+                </option>
+              ))}
+              <option value="none">{t.projects.noProject}</option>
+            </select>
+          )}
+          {!hidden && (
             <button
               type="button"
               disabled={!chosen.length || busy}
               onClick={() => apply("favorite")}
-              className="ml-auto flex h-9 items-center gap-1.5 rounded-xl bg-surface-4 px-4 text-sm font-semibold text-fg disabled:opacity-40"
+              className="flex h-9 items-center gap-1.5 rounded-xl bg-surface-4 px-4 text-sm font-semibold text-fg disabled:opacity-40"
             >
               <Star className="size-4" />
               {favorites ? h.unfavorite(chosen.length) : h.favorite(chosen.length)}

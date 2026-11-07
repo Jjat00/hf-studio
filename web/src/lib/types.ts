@@ -98,7 +98,29 @@ export type Generation = {
   hidden?: boolean;
   /** Marcada como favorita (filtro «Favoritas» de la biblioteca). */
   favorite?: boolean;
+  /** Proyecto y carpeta donde está guardada. */
+  project_id?: string | null;
+  folder_id?: string | null;
 };
+
+export type ProjectFolder = { id: string; project_id: string; name: string };
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  description: string;
+  cover: string | null;
+  created_at: string;
+  updated_at: string;
+  generations: number;
+  /** Salidas de sus últimas generaciones completadas (portada de respaldo). */
+  thumbnails: string[];
+};
+
+/** Proyecto con su brief (Markdown) y sus carpetas. */
+export type Project = ProjectSummary & { brief: string; folders: ProjectFolder[] };
+
+export type ElementCategory = "character" | "location" | "prop" | "other";
 
 export type ProviderInfo = {
   name: string;
@@ -243,6 +265,7 @@ export type StudioElement = {
   name: string;
   description: string;
   mention: string;
+  category?: ElementCategory;
   /** Rutas de la API (/v1/elements/{id}/images/{n}); en el navegador van por el proxy. */
   images: string[];
   created_at: string;
