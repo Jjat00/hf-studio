@@ -110,7 +110,9 @@ async def test_builtin_skills_are_installed_once(env):  # noqa: F811
     listed = [s["slug"] for s in (await http.get("/v1/skills")).json()["skills"]]
     assert "character-sheet" in listed
     sheet = (await http.get("/v1/skills/character-sheet")).json()
-    assert "sin la cabeza" in sheet["description"] and "BOTTOM" not in sheet["body"] and "16:9" in sheet["body"]
+    assert (
+        "sin la cabeza" in sheet["description"] and "BOTTOM" not in sheet["body"] and "16:9" in sheet["body"]
+    )
     await http.delete("/v1/skills/character-sheet")
     listed = [s["slug"] for s in (await http.get("/v1/skills")).json()["skills"]]
     assert "character-sheet" not in listed  # borrada por el usuario: no vuelve
