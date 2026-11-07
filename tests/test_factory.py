@@ -513,3 +513,19 @@ async def test_a_cancelled_script_request_is_not_run_again_with_the_same_key(env
     again = await http.post("/v1/factory/scripts", json=body, headers=headers)
     assert again.status_code == 502 and again.json()["error"]["code"] == "script_uncertain"
     assert len(calls) == 1  # la misma clave no vuelve a llamar a Claude tras una cancelación
+
+
+async def test_a_cut_edge_voice_is_requested_again(tmp_path, monkeypatch):
+    calls = []
+
+    async def once(text, voice, rate, out):
+        calls.append(1)
+        n = 2 if len(calls) == 1 else len(text.split())  # la primera respuesta llega cortada
+        return [Word(w, i * 0.2, i * 0.2 + 0.2) for i, w in enumerate(text.split()[:n])]
+
+    monkeypatch.setattr(fac, "_edge_once", once)
+    words = await fac.edge_scene(
+        "La transformada suma todas las muestras por una onda.", "v", "+0%", tmp_path / "a"
+    )
+    assert len(calls) == 2 and len(words) == 9
+    assert fac.spoken_ratio(words[:2], "uno dos tres cuatro") == 0.5

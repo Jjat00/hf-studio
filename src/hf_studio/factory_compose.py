@@ -6,16 +6,18 @@ tiempo, y devuelve el `index.html` de un proyecto HyperFrames de 1080×1920. Sin
 a fotograma; los contadores animan el `content` de un `::after`.
 
 Zonas seguras del 9:16: nada de texto en los 210 px de arriba ni en los 400 de abajo (ahí van la interfaz de
-TikTok, Reels y Shorts). El contenido vive entre y=300 y y=1300 y los subtítulos entre 1330 y 1510.
+TikTok, Reels y Shorts). El contenido vive entre y=300 y y=1300 y los subtítulos entre 1330 y 1510. El 16:9
+(1920×1080) y el 1:1 (1080×1080) tienen su propio marco (`FRAMES`): las plantillas técnicas (`factory_rich`) usan el
+escenario real y las de datos se dibujan en su caja de 920×1000 escalada al escenario.
 """
 
 from __future__ import annotations
 
 import html
-import json
 import math
 from dataclasses import dataclass, field
 
+from .factory_math import script_json
 from .factory_styles import FONTS
 from .factory_world import is_land
 
@@ -28,6 +30,33 @@ EASE = "cubic-bezier(0.16, 1, 0.3, 1)"
 EASE_IN_OUT = "cubic-bezier(0.65, 0, 0.35, 1)"
 # Ancho medio de un carácter respecto al tamaño de la fuente (para ajustar titulares sin medir en el navegador).
 CHAR_W = {"Anton": 0.5, "Geist": 0.6, "JetBrains Mono": 0.62, "Poppins": 0.66, "Liberation Serif": 0.55}
+
+
+@dataclass(frozen=True)
+class Frame:
+    """Geometría de un aspecto: lienzo, escenario (zona del contenido), banda de subtítulos y HUD."""
+
+    aspect: str
+    w: int
+    h: int
+    sx: int
+    sy: int
+    sw: int
+    sh: int
+    cap_top: int
+    cap_h: int
+    hud_top: int
+
+
+FRAMES = {
+    # 9:16: 210 px libres arriba y 400 abajo (interfaz de TikTok, Reels y Shorts).
+    "9:16": Frame("9:16", 1080, 1920, 80, 300, 920, 1000, 1330, 180, 226),
+    # 16:9 (YouTube): márgenes de título seguro del 6 % y subtítulos abajo, sobre la barra del reproductor.
+    "16:9": Frame("16:9", 1920, 1080, 120, 150, 1680, 690, 860, 140, 62),
+    # 1:1 (feed): HUD arriba, subtítulos abajo, márgenes de 80 px.
+    "1:1": Frame("1:1", 1080, 1080, 80, 140, 920, 640, 800, 150, 52),
+}
+DESIGN_W, DESIGN_H = STAGE_W, STAGE_H  # caja de las plantillas de datos (se escala fuera del 9:16)
 
 
 @dataclass
@@ -49,6 +78,11 @@ class _Ctx:
     lang: str
     anims: list = field(default_factory=list)
     n: int = 0
+    frame: Frame = FRAMES["9:16"]
+    width: float = STAGE_W  # ancho útil de la escena que se está construyendo
+    words: list = field(default_factory=list)
+    tex: list = field(default_factory=list)  # trozos de LaTeX que KaTeX dibuja al cargar
+    gl: list = field(default_factory=list)  # escenas 3D (three.js)
 
     def uid(self, prefix: str = "e") -> str:
         self.n += 1
@@ -196,7 +230,15 @@ def _hl(
 ) -> str:
     st = ctx.style
     font = st["fonts"]["display"]
-    size = fit_size(text, font, max_size * st["display_scale"], min_size, max_lines, upper=st["uppercase"])
+    size = fit_size(
+        text,
+        font,
+        max_size * st["display_scale"],
+        min_size,
+        max_lines,
+        width=ctx.width,
+        upper=st["uppercase"],
+    )
     el = ctx.uid("h")
     ctx.reveal(el, t)
     return f'<div id="{el}" class="{cls}" style="font-size:{size}px">{esc(text)}</div>'
@@ -800,6 +842,45 @@ def _background(ctx: _Ctx, total: float) -> str:
             f'<div id="{top}" class="hazard top"></div><div id="{bot}" class="hazard bottom"></div>'
             f'<div class="slab"></div>'
         )
+    if motif == "lab":
+        rnd = _rand(23)
+        pts = []
+        for cx, cy in ((830, 420), (240, 1560)):
+            for _ in range(26):
+                pts.append((cx + (rnd() - 0.5) * 520, cy + (rnd() - 0.5) * 420))
+        links = "".join(
+            f'<line x1="{a[0]:.0f}" y1="{a[1]:.0f}" x2="{b[0]:.0f}" y2="{b[1]:.0f}"/>'
+            for i, a in enumerate(pts)
+            for b in pts[i + 1 :]
+            if math.hypot(a[0] - b[0], a[1] - b[1]) < 120
+        )
+        dots = "".join(
+            f'<circle cx="{x:.0f}" cy="{y:.0f}" r="{2 + (k % 3) * 0.6:.1f}" class="c{k % 3}"/>'
+            for k, (x, y) in enumerate(pts)
+        )
+        net = ctx.uid("net")
+        ctx.anim(
+            net,
+            [{"transform": "translate(0px,0px)"}, {"transform": "translate(-30px,24px)"}],
+            0,
+            total,
+            "linear",
+        )
+        return (
+            f'<div class="labglow"></div><svg id="{net}" class="net" width="1080" height="1920">{links}{dots}</svg>'
+            f'<div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div>'
+            f'<div class="corner br"></div>'
+        )
+    if motif == "manim":
+        grid = "".join(f'<line x1="{x}" y1="0" x2="{x}" y2="1920"/>' for x in range(0, 1081, 90))
+        grid += "".join(f'<line x1="0" y1="{y}" x2="1080" y2="{y}"/>' for y in range(30, 1920, 90))
+        plane = ctx.uid("plane")
+        ctx.anim(plane, [{"opacity": 0}, {"opacity": 1}], 0, 1.2)
+        return (
+            f'<svg id="{plane}" class="plane" width="1080" height="1920">{grid}'
+            f'<line x1="540" y1="0" x2="540" y2="1920" class="axis"/>'
+            f'<line x1="0" y1="1020" x2="1080" y2="1020" class="axis"/></svg><div class="vignette"></div>'
+        )
     return ""
 
 
@@ -816,12 +897,14 @@ def _font_faces() -> str:
 
 BASE_CSS = """
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:1080px;height:1920px;overflow:hidden;background:var(--bg)}
+html,body{overflow:hidden;background:var(--bg)}
 #root{position:relative;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
   font-family:var(--body),sans-serif}
-.bg{position:absolute;inset:0;overflow:hidden}
+.bg-clip{position:absolute;inset:0;overflow:hidden}
+.bg{position:absolute;left:0;top:0;width:1080px;height:1920px;overflow:hidden;transform-origin:0 0}
 .bg>*{position:absolute}
-.scene{position:absolute;left:80px;top:300px;width:920px;height:1000px}
+.scene{position:absolute}
+.design{position:absolute;left:0;top:0;width:920px;height:1000px;transform-origin:0 0}
 .col{display:flex;flex-direction:column;gap:26px;width:100%;height:100%}
 .col.center{justify-content:center;align-items:flex-start}
 .spacer{flex:1}
@@ -912,15 +995,15 @@ html,body{width:1080px;height:1920px;overflow:hidden;background:var(--bg)}
 .ti-when{font-family:var(--mono),monospace;font-weight:700;font-size:34px;color:var(--accent)}
 .ti-label{font-family:var(--display),sans-serif;font-weight:var(--dw);font-size:calc(48px * var(--ds));
   text-transform:var(--case);line-height:1.08;overflow-wrap:anywhere}
-.hud{position:absolute;left:80px;right:80px;top:226px;height:56px;display:flex;justify-content:space-between;
+.hud{position:absolute;height:56px;display:flex;justify-content:space-between;
   align-items:center;font-family:var(--mono),monospace;font-size:26px;letter-spacing:.12em;color:var(--muted);
   text-transform:uppercase}
 .hud-title{max-width:640px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hud-n{color:var(--ink);font-weight:700}
 .hud-n::after{content:""}
-.progress{position:absolute;left:80px;right:80px;top:284px;height:4px;background:color-mix(in srgb,var(--line) 35%,transparent)}
+.progress{position:absolute;height:4px;background:color-mix(in srgb,var(--line) 35%,transparent)}
 .progress div{width:100%;height:100%;background:var(--accent);transform-origin:left center}
-.cap{position:absolute;left:60px;right:60px;top:1330px;height:180px;display:flex;align-items:center;
+.cap{position:absolute;display:flex;align-items:center;
   justify-content:center}
 .cap-box{max-width:960px;text-align:center;font-family:var(--cap-font),sans-serif;font-weight:var(--cap-weight);
   font-size:var(--cap-size);line-height:1.12;text-transform:uppercase;padding:14px 26px;background:var(--cap-bg);
@@ -1035,6 +1118,37 @@ STYLE_CSS = {
 .kicker{color:var(--accent2)}
 .num{font-weight:400;font-family:var(--mono),monospace}
 """,
+    "lab": """
+#root{background:var(--bg)}
+.labglow{inset:0;background:radial-gradient(ellipse at 70% 20%,rgba(159,227,245,.08),transparent 55%),
+  radial-gradient(ellipse at 20% 85%,rgba(196,181,253,.08),transparent 55%)}
+.net{left:0;top:0;opacity:.38}
+.net line{stroke:#9fe3f5;stroke-width:1;opacity:.5}
+.net .c0{fill:#9fe3f5}.net .c1{fill:#c4b5fd}.net .c2{fill:#a8c5ff}
+.corner{width:44px;height:44px;border-color:#9fe3f5;border-style:solid;border-width:0;opacity:.7}
+.corner.tl{left:40px;top:250px;border-left-width:2px;border-top-width:2px}
+.corner.tr{right:40px;top:250px;border-right-width:2px;border-top-width:2px}
+.corner.bl{left:40px;top:1480px;border-left-width:2px;border-bottom-width:2px}
+.corner.br{right:40px;top:1480px;border-right-width:2px;border-bottom-width:2px}
+.kicker::before{content:"";display:inline-block;width:18px;height:18px;margin-right:14px;vertical-align:1px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2))}
+.num{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;
+  color:transparent}
+.bar-fill,.meter-fill,.sc-fill,.cmp-fill{background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.cap-box{border-radius:0}
+.badge{border-radius:0}
+""",
+    "manim": """
+#root{background:radial-gradient(ellipse at 50% 40%,var(--bg2),var(--bg) 75%)}
+.plane{left:0;top:0}
+.plane line{stroke:#58c4dd;stroke-width:1;opacity:.12}
+.plane line.axis{stroke:#f2f2f2;stroke-width:2;opacity:.18}
+.vignette{inset:0;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.5) 100%)}
+.hl{letter-spacing:-.01em}
+.kicker{color:var(--accent2);font-family:var(--mono),monospace}
+.num{color:var(--accent2)}
+.bar-fill.hi,.cmp-col.hi .cmp-fill{background:var(--accent2)}
+""",
     "concrete": """
 .paper{inset:0}
 .hazard{left:0;right:0;height:70px;background:repeating-linear-gradient(-45deg,var(--accent) 0 30px,var(--ink) 30px 60px);
@@ -1087,8 +1201,34 @@ def _vars(style: dict) -> str:
         "--cap-size": f"{cap_size}px",
         "--cap-weight": str(cap_weight),
         "--cap-radius": "14px",
+        "--stroke": str(style.get("stroke", 5)),
+        "--radius": f"{style.get('radius', 14)}px",
     }
     return ":root{" + ";".join(f"{k}:{v}" for k, v in values.items()) + "}"
+
+
+def _geometry(fr: Frame) -> str:
+    """Posiciones que dependen del aspecto: lienzo, escenario, HUD, barra de progreso, subtítulos y fondo."""
+    cover = max(fr.w / 1080, fr.h / 1920)
+    bx, by = (fr.w - 1080 * cover) / 2, (fr.h - 1920 * cover) / 2
+    cap_size = "" if fr.aspect == "9:16" else ".cap-box{font-size:calc(var(--cap-size) * 0.82)}"
+    return (
+        f"html,body{{width:{fr.w}px;height:{fr.h}px}}"
+        f".scene{{left:{fr.sx}px;top:{fr.sy}px;width:{fr.sw}px;height:{fr.sh}px}}"
+        f".hud{{left:{fr.sx}px;right:{fr.w - fr.sx - fr.sw}px;top:{fr.hud_top}px}}"
+        f".progress{{left:{fr.sx}px;right:{fr.w - fr.sx - fr.sw}px;top:{fr.hud_top + 58}px}}"
+        f".cap{{left:{fr.sx - 20}px;right:{fr.w - fr.sx - fr.sw - 20}px;top:{fr.cap_top}px;height:{fr.cap_h}px}}"
+        f".bg{{transform:translate({bx:.1f}px,{by:.1f}px) scale({cover:.4f})}}{cap_size}"
+    )
+
+
+def _design_box(fr: Frame) -> str:
+    """Estilo de la caja de 920×1000 de las plantillas de datos, escalada y centrada en el escenario."""
+    if fr.aspect == "9:16":
+        return ""
+    s = min(fr.sw / DESIGN_W, fr.sh / DESIGN_H)
+    left = (fr.sw - DESIGN_W * s) / 2
+    return f"left:{left:.1f}px;transform:scale({s:.4f})"
 
 
 def build_composition(
@@ -1098,9 +1238,13 @@ def build_composition(
     words: list[Word],
     lang: str = "es",
     total: float | None = None,
+    aspect: str = "9:16",
 ) -> str:
     """El `index.html` del episodio. `times` va en el orden de `script["scenes"]`."""
-    ctx = _Ctx(style=style, lang=lang)
+    from . import factory_rich as rich
+
+    fr = FRAMES.get(aspect, FRAMES["9:16"])
+    ctx = _Ctx(style=style, lang=lang, frame=fr, words=list(words))
     total = total or (times[-1].start + times[-1].duration if times else 1.0)
     es = lang.startswith("es")
     episode, episodes = script.get("episode"), script.get("episodes")
@@ -1116,17 +1260,26 @@ def build_composition(
             if episode and episodes and episode < episodes
             else None
         ),
+        "sources": script.get("sources") or [],
     }
     scenes = []
     counter = ctx.uid("hudn")
     n_scenes = len(script["scenes"])
     steps = []
+    design = _design_box(fr)
     for i, (sc, tm) in enumerate(zip(script["scenes"], times, strict=True)):
-        builder = LAYOUT_BUILDERS.get(sc["visual"]["layout"], layout_title)
-        body = builder(ctx, sc["visual"], tm.start, tm.duration, meta)
+        layout = sc["visual"]["layout"]
+        if layout in rich.RICH_BUILDERS:
+            ctx.width = fr.sw
+            body = rich.RICH_BUILDERS[layout](ctx, sc["visual"], tm.start, tm.duration, meta)
+        else:
+            ctx.width = STAGE_W
+            body = LAYOUT_BUILDERS.get(layout, layout_title)(ctx, sc["visual"], tm.start, tm.duration, meta)
+            if design:
+                body = f'<div class="design" style="{design}">{body}</div>'
         scenes.append(
             f'<section id="s{i + 1}" class="scene clip" data-start="{tm.start:.3f}" '
-            f'data-duration="{tm.duration:.3f}" data-track-index="2">{body}</section>'
+            f'data-duration="{tm.duration:.3f}" data-track-index="2" data-layout="{esc(layout)}">{body}</section>'
         )
         # Pasos discretos: cada valor se repite justo antes del siguiente (un `content` animado cambia a mitad de
         # camino entre dos fotogramas clave, así el cambio cae en el inicio de la escena).
@@ -1141,20 +1294,29 @@ def build_composition(
     background = _background(ctx, total)
     captions = _captions(ctx, words, total)
     hud_title = script.get("series_title") or script["title"]
-    css = _font_faces() + _vars(style) + BASE_CSS + STYLE_CSS.get(style["motif"], "")
-    anims = json.dumps(ctx.anims, ensure_ascii=False, separators=(",", ":"))
+    css = (
+        _font_faces()
+        + _vars(style)
+        + BASE_CSS
+        + _geometry(fr)
+        + rich.RICH_CSS
+        + STYLE_CSS.get(style["motif"], "")
+        + rich.RICH_STYLE_CSS.get(style["motif"], "")
+    )
+    anims = script_json(ctx.anims)
+    head_extra, body_extra = rich.runtime(ctx)
     return f"""<!doctype html>
 <html lang="{esc(lang[:2])}">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width={W}, height={H}" />
+<meta name="viewport" content="width={fr.w}, height={fr.h}" />
 <title>{esc(script["title"])}</title>
-<style>{css}</style>
+{head_extra}<style>{css}</style>
 </head>
 <body>
-<div id="root" data-composition-id="factory" data-start="0" data-width="{W}" data-height="{H}" data-duration="{total:.3f}">
+<div id="root" data-composition-id="factory" data-start="0" data-width="{fr.w}" data-height="{fr.h}" data-duration="{total:.3f}">
 {CHALK_FILTER if style["motif"] == "chalk" else ""}
-<div class="bg">{background}</div>
+<div class="bg-clip"><div class="bg">{background}</div></div>
 <div class="hud"><span class="hud-title">{esc(hud_title)}</span><span id="{counter}" class="hud-n"></span></div>
 <div class="progress"><div id="{progress}"></div></div>
 {"".join(scenes)}
@@ -1173,6 +1335,7 @@ def build_composition(
   }}
 }})();
 </script>
+{body_extra}
 </body>
 </html>
 """

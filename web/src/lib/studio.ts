@@ -174,15 +174,15 @@ export const studio = {
   factory: (lang = "es") => call<FactoryInfo>(`/v1/factory?lang=${encodeURIComponent(lang)}`),
   /** Claude escribe el guion de cada episodio (solo cuesta tokens de Claude, `cost_usd`). */
   /** Lo máximo que puede costar escribir ese guion (no llama a Claude). */
-  factoryScriptEstimate: (body: { topic: string; style: string; duration_seconds: number; episodes: number; language: string }) =>
-    call<{ max_usd: number; model: string; available: boolean }>("/v1/factory/scripts/estimate", {
+  factoryScriptEstimate: (body: FactoryScriptAsk) =>
+    call<{ max_usd: number; model: string; available: boolean; research: boolean; aspect: FactoryAspect }>("/v1/factory/scripts/estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
   /** Escribe el guion con el tope que vio el usuario (`max_usd`); la misma clave no vuelve a cobrar un reintento. */
   factoryScripts: (
-    body: { topic: string; style: string; duration_seconds: number; episodes: number; language: string; max_usd: number },
+    body: FactoryScriptAsk & { max_usd: number },
     idempotencyKey: string,
   ) =>
     call<FactoryScripts>("/v1/factory/scripts", {
@@ -539,8 +539,75 @@ export const studio = {
 /** Modelo del catálogo que renderiza los cortos de Content Factory. */
 export const FACTORY_MODEL = "hf-studio/content-factory";
 
-export type FactoryLayout = "title" | "counter" | "timer" | "map" | "chart" | "comparison" | "list" | "quote" | "scale" | "timeline" | "closing";
+export type FactoryLayout =
+  | "title"
+  | "counter"
+  | "timer"
+  | "map"
+  | "chart"
+  | "comparison"
+  | "list"
+  | "quote"
+  | "scale"
+  | "timeline"
+  | "closing"
+  | "equation"
+  | "plot"
+  | "signal"
+  | "spectrum"
+  | "surface3d"
+  | "objects3d"
+  | "globe3d"
+  | "bars3d"
+  | "particles3d"
+  | "diagram"
+  | "code"
+  | "sources";
+export type FactoryAspect = "9:16" | "16:9" | "1:1";
 export type FactoryItem = { label: string; value?: number; note?: string; lat?: number; lon?: number };
+/** Campos de las plantillas técnicas (ecuación, gráfica, señal, 3D, diagrama, código). */
+export type FactoryRich = {
+  steps?: { tex: string; cue?: string; note?: string }[];
+  curves?: { expr: string; label?: string }[];
+  x_range?: number[];
+  y_range?: number[];
+  t_range?: number[];
+  x_label?: string;
+  y_label?: string;
+  waves?: { freq: number; amp: number; phase?: number }[];
+  expr?: string;
+  nodes?: { id: string; label: string; note?: string }[];
+  edges?: { from: string; to: string; label?: string }[];
+  code?: string[];
+  language?: string;
+  highlight?: number[];
+};
+export type FactorySource = { title: string; url: string };
+export type FactoryFormat = {
+  id: string;
+  name: string;
+  description: string;
+  default_seconds: number;
+  min_seconds: number;
+  max_seconds: number;
+  aspects: FactoryAspect[];
+  aspect: FactoryAspect;
+  episodes: boolean;
+  research: boolean;
+  style: string;
+  layouts: FactoryLayout[];
+};
+export type FactoryScriptAsk = {
+  topic: string;
+  style: string;
+  format: string;
+  custom_format?: string;
+  aspect: FactoryAspect;
+  research: boolean;
+  duration_seconds: number;
+  episodes: number;
+  language: string;
+};
 export type FactoryVisual = {
   layout: FactoryLayout;
   headline: string;
@@ -550,7 +617,7 @@ export type FactoryVisual = {
   unit?: string;
   prefix?: string;
   items: FactoryItem[];
-};
+} & FactoryRich;
 export type FactoryScene = { narration: string; visual: FactoryVisual };
 /** Guion de un episodio (lo que recibe `hf-studio/content-factory` en `script`). */
 export type FactoryScript = {
@@ -561,6 +628,7 @@ export type FactoryScript = {
   episode?: number;
   episodes?: number;
   series_title?: string;
+  sources?: FactorySource[];
 };
 export type FactoryStyle = {
   id: string;
@@ -574,6 +642,8 @@ export type FactoryStyle = {
 export type FactoryInfo = {
   model: string;
   styles: FactoryStyle[];
+  formats: FactoryFormat[];
+  aspects: FactoryAspect[];
   layouts: FactoryLayout[];
   max_episodes: number;
   renderer: { available: boolean; reason: string | null };
@@ -583,6 +653,10 @@ export type FactoryInfo = {
 export type FactoryScripts = {
   series_title: string;
   episodes: FactoryScript[];
+  sources: FactorySource[];
+  searches: number;
+  aspect: FactoryAspect;
+  format: string;
   cost_usd: number;
   usage: { input_tokens: number; output_tokens: number };
   model: string;

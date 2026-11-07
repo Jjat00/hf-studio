@@ -89,6 +89,13 @@ from .elevenlabs_audio import estimate as audio_estimate
 from .elevenlabs_audio import remote_model as audio_remote_model
 from .elevenlabs_audio import run as run_audio_service
 from .factory import ContentFactoryJobs, is_factory, renderer_problem
+from .factory_formats import ASPECTS as FACTORY_ASPECTS
+from .factory_formats import CUSTOM as FACTORY_CUSTOM
+from .factory_formats import DEFAULT_FORMAT as FACTORY_DEFAULT_FORMAT
+from .factory_formats import FORMATS as FACTORY_FORMATS
+from .factory_formats import MAX_CUSTOM_CHARS as FACTORY_CUSTOM_CHARS
+from .factory_formats import check_request as factory_check_request
+from .factory_formats import public_formats as factory_formats
 from .factory_script import MAX_EPISODES, ScriptError, write_scripts
 from .factory_script import max_cost_usd as factory_max_cost
 from .factory_styles import STYLES as FACTORY_STYLES
@@ -497,7 +504,19 @@ class FactoryScriptIn(BaseModel):
         min_length=3, max_length=500, description="Escenario, p. ej. «¿Qué pasaría si la Luna desapareciera?»"
     )
     style: str = Field("neon-grid", max_length=40, description="Estilo visual (GET /v1/factory)")
-    duration_seconds: int = Field(60, ge=30, le=90, description="Duración aproximada de cada episodio")
+    format: str = Field(
+        FACTORY_DEFAULT_FORMAT, max_length=40, description="Formato del video (GET /v1/factory)"
+    )
+    custom_format: str | None = Field(
+        None,
+        max_length=FACTORY_CUSTOM_CHARS,
+        description="Con format=custom: el formato descrito por el usuario (o sus instrucciones)",
+    )
+    aspect: str | None = Field(None, description="9:16, 16:9 o 1:1 (por defecto, el del formato)")
+    research: bool | None = Field(
+        None, description="Buscar en la web cifras y fechas (por defecto, lo que diga el formato); cuesta más"
+    )
+    duration_seconds: int = Field(60, ge=20, le=300, description="Duración aproximada de cada episodio")
     episodes: int = Field(1, ge=1, le=MAX_EPISODES, description="Episodios de la serie")
     language: str = Field("es", pattern=r"^[a-z]{2}$", description="Idioma del guion y la voz")
     max_usd: float | None = Field(
@@ -3972,6 +3991,8 @@ def create_app(
         return {
             "model": "hf-studio/content-factory",
             "styles": factory_styles(lang),
+            "formats": factory_formats(lang),
+            "aspects": list(FACTORY_ASPECTS),
             "layouts": list(LAYOUTS),
             "max_episodes": MAX_EPISODES,
             "renderer": {"available": renderer_problem() is None, "reason": renderer_problem()},
@@ -3979,17 +4000,34 @@ def create_app(
             "elevenlabs": app.state.eleven.configured,
         }
 
-    def factory_script_max(body: FactoryScriptIn) -> float:
+    def factory_request(body: FactoryScriptIn) -> dict:
+        """El pedido completo con los valores del formato (aspecto y búsqueda), validado."""
         if body.style not in FACTORY_STYLES:
             raise ServiceError(422, "unknown_style", f"Unknown style: {body.style}")
-        return factory_max_cost(body.topic, body.duration_seconds, body.episodes, body.language, body.style)
+        problem = factory_check_request(body.format, body.duration_seconds, body.episodes, body.aspect)
+        if problem:
+            raise ServiceError(422, "bad_format", problem)
+        if body.format == FACTORY_CUSTOM and not (body.custom_format or "").strip():
+            raise ServiceError(422, "format_required", "Describe the custom format in custom_format")
+        fmt = FACTORY_FORMATS[body.format]
+        return {
+            "topic": body.topic, "duration_seconds": body.duration_seconds, "episodes": body.episodes,
+            "language": body.language, "style_id": body.style, "format_id": body.format,
+            "custom": body.custom_format if body.format == FACTORY_CUSTOM else None,
+            "aspect": body.aspect or fmt["aspect"],
+            "research": fmt["research"] if body.research is None else body.research,
+        }  # fmt: skip
+
+    def factory_script_max(body: FactoryScriptIn) -> float:
+        return factory_max_cost(**factory_request(body))
 
     @app.post("/v1/factory/scripts/estimate", tags=["content factory"])
     async def factory_scripts_estimate(body: FactoryScriptIn, _: Owner) -> dict:
         """Lo máximo que puede costar escribir ese guion con Claude (no llama a Claude). Se aprueba pasándolo como
         `max_usd` a /v1/factory/scripts."""
-        return {"max_usd": factory_script_max(body), "model": DEFAULT_CLAUDE,
-                "available": app.state.assistant_jobs.available}  # fmt: skip
+        req = factory_request(body)
+        return {"max_usd": factory_script_max(body), "model": DEFAULT_CLAUDE, "research": req["research"],
+                "aspect": req["aspect"], "available": app.state.assistant_jobs.available}  # fmt: skip
 
     @app.post("/v1/factory/scripts", tags=["content factory"])
     async def factory_scripts(
@@ -4046,10 +4084,14 @@ def create_app(
 
     async def run_factory_script(jobs, body: FactoryScriptIn) -> dict:
         try:
-            return await write_scripts(
-                jobs.api_key, body.topic, body.style, body.duration_seconds, body.episodes, body.language,
-                base_url=settings.secret("ANTHROPIC_BASE_URL") or None, http_client_factory=jobs.http_client_factory,
+            req = factory_request(body)
+            result = await write_scripts(
+                jobs.api_key, req["topic"], req["style_id"], req["duration_seconds"], req["episodes"],
+                req["language"], base_url=settings.secret("ANTHROPIC_BASE_URL") or None,
+                http_client_factory=jobs.http_client_factory, format_id=req["format_id"], custom=req["custom"],
+                aspect=req["aspect"], research=req["research"],
             )  # fmt: skip
+            return {**result, "aspect": req["aspect"], "format": req["format_id"]}
         except ScriptError as exc:
             raise ServiceError(exc.status, exc.code, exc.message) from None
 

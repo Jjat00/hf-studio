@@ -14,7 +14,7 @@ from typing import Any
 
 from .catalog import ALIASES, Catalog
 from .elements import element_ids, is_element_id
-from .factory import is_factory, renderer_problem
+from .factory import is_factory, renderer_problem, script_problem
 from .factory import quote as factory_quote
 from .pricing import fill_placeholders, quote
 from .providers.base import Provider, ProviderError
@@ -153,7 +153,7 @@ class Router:
             return Plan(model["id"], [option], [], hints, forced=only is not None)
         if is_factory(model["id"]):
             # Content Factory: render local con HyperFrames; solo la voz de ElevenLabs cuesta.
-            problem = renderer_problem()
+            problem = renderer_problem() or script_problem(logical)
             if problem:
                 excluded = [{"provider": FACTORY_PROVIDER, "title": "Content Factory", "reason": problem}]
                 return Plan(model["id"], [], excluded, hints, forced=only is not None)

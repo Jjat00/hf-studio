@@ -14,7 +14,10 @@ import {
   formatUsd,
   studio,
   type Estimate,
+  type FactoryAspect,
   type FactoryInfo,
+  type FactoryRich,
+  type FactorySource,
   type FactoryItem,
   type FactoryLayout,
   type FactoryScene,
@@ -23,15 +26,52 @@ import {
 import type { FreeVoice, Voice } from "@/lib/types";
 
 const LANGUAGES = ["es", "en", "pt", "fr", "it", "de"];
-const DURATIONS = [30, 45, 60, 75, 90];
+const DURATIONS = [20, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
 const RATES = ["-10%", "+0%", "+10%", "+20%"];
 const ELEVEN_MODELS = ["eleven_v4", "eleven_v4_turbo", "eleven_flash_v2_5"];
-const LAYOUTS: FactoryLayout[] = ["title", "counter", "timer", "map", "chart", "comparison", "list", "quote", "scale", "timeline", "closing"];
+const LAYOUTS: FactoryLayout[] = [
+  "title",
+  "counter",
+  "timer",
+  "map",
+  "chart",
+  "comparison",
+  "list",
+  "quote",
+  "scale",
+  "timeline",
+  "equation",
+  "plot",
+  "signal",
+  "spectrum",
+  "diagram",
+  "code",
+  "surface3d",
+  "objects3d",
+  "globe3d",
+  "bars3d",
+  "particles3d",
+  "sources",
+  "closing",
+];
 /** Qué campos usa cada plantilla (el resto se oculta en el editor). */
 const NUMBER_LAYOUTS = new Set<FactoryLayout>(["counter", "timer"]);
-const UNIT_LAYOUTS = new Set<FactoryLayout>(["counter", "timer", "chart", "comparison", "scale"]);
-const ITEM_LAYOUTS = new Set<FactoryLayout>(["map", "chart", "comparison", "list", "scale", "timeline"]);
-const VALUE_ITEMS = new Set<FactoryLayout>(["chart", "comparison", "scale"]);
+const UNIT_LAYOUTS = new Set<FactoryLayout>(["counter", "timer", "chart", "comparison", "scale", "bars3d"]);
+const ITEM_LAYOUTS = new Set<FactoryLayout>(["map", "chart", "comparison", "list", "scale", "timeline", "objects3d", "globe3d", "bars3d"]);
+const VALUE_ITEMS = new Set<FactoryLayout>(["chart", "comparison", "scale", "bars3d"]);
+const GEO_ITEMS = new Set<FactoryLayout>(["map", "globe3d"]);
+/** Campos técnicos de cada plantilla: se editan como JSON (la API los valida al cotizar). */
+const RICH_FIELDS: Partial<Record<FactoryLayout, (keyof FactoryRich)[]>> = {
+  equation: ["steps"],
+  plot: ["curves", "x_range", "y_range", "t_range", "x_label", "y_label"],
+  signal: ["waves"],
+  spectrum: ["waves"],
+  surface3d: ["expr"],
+  particles3d: ["expr"],
+  diagram: ["nodes", "edges"],
+  code: ["language", "code", "highlight"],
+};
+const RICH_KEYS: (keyof FactoryRich)[] = ["steps", "curves", "x_range", "y_range", "t_range", "x_label", "y_label", "waves", "expr", "nodes", "edges", "code", "language", "highlight"];
 const NOTE_ITEMS = new Set<FactoryLayout>(["list", "timeline"]);
 const LIMITS = { headline: 110, kicker: 60, unit: 30, prefix: 8, label: 60, note: 80, narration: 700, items: 6, scenes: 20 };
 
@@ -52,8 +92,16 @@ function cleanScript(s: FactoryScript): FactoryScript {
     ...(s.episode ? { episode: s.episode } : {}),
     ...(s.episodes ? { episodes: s.episodes } : {}),
     ...(opt(s.series_title) ? { series_title: opt(s.series_title) } : {}),
+    ...(s.sources?.length ? { sources: s.sources } : {}),
     scenes: s.scenes.map((sc) => {
       const v = sc.visual;
+      // Solo los campos técnicos de la plantilla elegida, y sin vacíos.
+      const rich: FactoryRich = {};
+      for (const k of RICH_FIELDS[v.layout] ?? []) {
+        const val = v[k];
+        if (val === undefined || val === null || val === "" || (Array.isArray(val) && !val.length)) continue;
+        (rich as Record<string, unknown>)[k] = val;
+      }
       return {
         narration: sc.narration.trim(),
         visual: {
@@ -64,6 +112,7 @@ function cleanScript(s: FactoryScript): FactoryScript {
           ...(opt(v.prefix) ? { prefix: opt(v.prefix) } : {}),
           ...(v.value !== undefined ? { value: v.value } : {}),
           ...(v.from_value !== undefined ? { from_value: v.from_value } : {}),
+          ...rich,
           items: v.items
             .filter((it) => it.label.trim())
             .map((it) => ({
@@ -103,6 +152,12 @@ export function ContentFactory() {
   const [info, setInfo] = useState<FactoryInfo | null>(null);
   const [infoError, setInfoError] = useState<string | null>(null);
   const [style, setStyle] = useState("neon-grid");
+  const [format, setFormat] = useState("what-if");
+  const [customFormat, setCustomFormat] = useState("");
+  const [aspect, setAspect] = useState<FactoryAspect>("9:16");
+  const [research, setResearch] = useState(false);
+  const [sources, setSources] = useState<FactorySource[]>([]);
+  const [searches, setSearches] = useState(0);
   const [topic, setTopic] = useState("");
   const [duration, setDuration] = useState(60);
   const [episodes, setEpisodes] = useState(1);
@@ -134,6 +189,7 @@ export function ContentFactory() {
       .then((i) => {
         setInfo(i);
         setStyle((s) => (i.styles.some((x) => x.id === s) ? s : (i.styles[0]?.id ?? s)));
+        setFormat((f) => (i.formats.some((x) => x.id === f) ? f : (i.formats[0]?.id ?? f)));
       })
       .catch((e) => setInfoError(e instanceof Error ? e.message : String(e)));
   }, [locale]);
@@ -192,9 +248,23 @@ export function ContentFactory() {
     [engine, voiceId, rate, elevenModel],
   );
 
+  const fmt = info?.formats.find((x) => x.id === format) ?? null;
+  const durations = fmt ? DURATIONS.filter((d) => d >= fmt.min_seconds && d <= fmt.max_seconds) : DURATIONS.slice(1, 6);
+
+  function pickFormat(id: string) {
+    const next = info?.formats.find((x) => x.id === id);
+    setFormat(id);
+    if (!next) return;
+    setDuration(next.default_seconds);
+    setAspect(next.aspect);
+    setResearch(next.research);
+    if (!next.episodes) setEpisodes(1);
+    if (info?.styles.some((x) => x.id === next.style)) setStyle(next.style);
+  }
+
   const inputs = useMemo(
-    () => scripts.map((s) => ({ script: cleanScript(s), style, voice, aspect: "9:16", language })),
-    [scripts, style, voice, language],
+    () => scripts.map((s) => ({ script: cleanScript(s), style, voice, aspect, format, language })),
+    [scripts, style, voice, aspect, format, language],
   );
   const inputsKey = JSON.stringify(inputs);
   const ready = scripts.length > 0 && !!voiceId;
@@ -216,13 +286,23 @@ export function ContentFactory() {
 
   // Tope del guion: se cotiza (sin llamar a Claude) cada vez que cambia la petición y es lo que se aprueba al pulsar.
   const scriptAsk = useMemo(
-    () => ({ topic: topic.trim(), style, duration_seconds: duration, episodes, language }),
-    [topic, style, duration, episodes, language],
+    () => ({
+      topic: topic.trim(),
+      style,
+      format,
+      ...(format === "custom" ? { custom_format: customFormat.trim() } : {}),
+      aspect,
+      research,
+      duration_seconds: duration,
+      episodes,
+      language,
+    }),
+    [topic, style, format, customFormat, aspect, research, duration, episodes, language],
   );
   const scriptAskKey = JSON.stringify(scriptAsk);
   const [scriptQuote, setScriptQuote] = useState<{ key: string; max: number } | null>(null);
   useEffect(() => {
-    if (scriptAsk.topic.length < 3) return;
+    if (scriptAsk.topic.length < 3 || (scriptAsk.format === "custom" && !scriptAsk.custom_format)) return;
     const timer = setTimeout(() => {
       studio.factoryScriptEstimate(scriptAsk).then(
         (q) => setScriptQuote({ key: scriptAskKey, max: q.max_usd }),
@@ -239,6 +319,10 @@ export function ContentFactory() {
       setError(f.topicRequired);
       return;
     }
+    if (format === "custom" && !customFormat.trim()) {
+      setError(f.customRequired);
+      return;
+    }
     if (scriptMax === null) return;
     setWriting(true);
     setError(null);
@@ -251,6 +335,9 @@ export function ContentFactory() {
       const r = await studio.factoryScripts({ ...scriptAsk, max_usd: scriptMax }, key);
       setScripts(r.episodes.map((s) => ({ ...s, scenes: s.scenes.map((sc) => ({ ...sc, visual: { ...sc.visual, items: sc.visual.items ?? [] } })) })));
       setScriptCost(r.cost_usd);
+      setSources(r.sources ?? []);
+      setSearches(r.searches ?? 0);
+      if (r.aspect) setAspect(r.aspect);
       setActive(0);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -339,6 +426,8 @@ export function ContentFactory() {
               onClick={() => {
                 setScripts([]);
                 setScriptCost(null);
+                setSources([]);
+                setSearches(0);
               }}
               className="ml-auto flex items-center gap-1.5 text-xs text-fg-3 hover:text-fg"
             >
@@ -357,6 +446,39 @@ export function ContentFactory() {
           )}
 
           <p className="px-1 pt-1 text-[13px] font-semibold text-fg-2">{f.stepIdea}</p>
+          <SettingCard label={f.format}>
+            <div className="grid grid-cols-2 gap-2">
+              {(info?.formats ?? []).map((x) => (
+                <button
+                  key={x.id}
+                  type="button"
+                  onClick={() => pickFormat(x.id)}
+                  title={x.description}
+                  className={clsx(
+                    "rounded-xl border px-3 py-2 text-left transition-colors",
+                    format === x.id ? "border-lime bg-lime/5" : "border-line hover:border-line-2",
+                  )}
+                >
+                  <p className="truncate text-[13px] font-semibold">{x.name}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-fg-3">
+                    {f.formatInfo(x.min_seconds, x.max_seconds)} · {x.aspects.join(" / ")}
+                    {x.episodes ? ` · ${f.seriesOk}` : ""}
+                  </p>
+                </button>
+              ))}
+            </div>
+            {fmt && <p className="mt-2 text-xs text-fg-3">{fmt.description}</p>}
+            {format === "custom" && (
+              <textarea
+                value={customFormat}
+                onChange={(e) => setCustomFormat(e.target.value.slice(0, 6000))}
+                rows={5}
+                placeholder={f.customFormatPlaceholder}
+                aria-label={f.customFormat}
+                className={clsx(inputCls, "mt-2 resize-y leading-relaxed")}
+              />
+            )}
+          </SettingCard>
           <SettingCard label={f.style}>
             <div className="grid grid-cols-3 gap-2">
               {(info?.styles ?? []).map((s) => (
@@ -406,7 +528,7 @@ export function ContentFactory() {
           <div className="grid grid-cols-2 gap-3">
             <SettingCard label={f.duration}>
               <div className="flex flex-wrap gap-1.5">
-                {DURATIONS.map((d) => (
+                {durations.map((d) => (
                   <Chip key={d} active={duration === d} onClick={() => setDuration(d)}>
                     {f.seconds(d)}
                   </Chip>
@@ -415,12 +537,30 @@ export function ContentFactory() {
             </SettingCard>
             <SettingCard label={f.episodes}>
               <div className="flex flex-wrap gap-1.5">
-                {Array.from({ length: info?.max_episodes ?? 5 }, (_, i) => i + 1).map((n) => (
+                {Array.from({ length: fmt && !fmt.episodes ? 1 : (info?.max_episodes ?? 5) }, (_, i) => i + 1).map((n) => (
                   <Chip key={n} active={episodes === n} onClick={() => setEpisodes(n)}>
                     {n}
                   </Chip>
                 ))}
               </div>
+            </SettingCard>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <SettingCard label={f.aspect}>
+              <div className="flex flex-wrap gap-1.5">
+                {(fmt?.aspects ?? info?.aspects ?? ["9:16"]).map((a) => (
+                  <Chip key={a} active={aspect === a} onClick={() => setAspect(a)}>
+                    {f.aspects[a] ?? a}
+                  </Chip>
+                ))}
+              </div>
+            </SettingCard>
+            <SettingCard label={f.research}>
+              <label className="flex items-start gap-2 text-xs text-fg-3">
+                <input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} className="mt-0.5 accent-lime" />
+                <span>{f.researchHint}</span>
+              </label>
             </SettingCard>
           </div>
 
@@ -504,7 +644,25 @@ export function ContentFactory() {
               <PenLine className="size-4" /> {f.blankScript}
             </button>
           </div>
-          {scriptCost !== null && <p className="px-1 text-xs text-fg-3">{f.scriptCost(formatUsd(scriptCost))}</p>}
+          {scriptCost !== null && (
+            <p className="px-1 text-xs text-fg-3">
+              {f.scriptCost(formatUsd(scriptCost))}
+              {searches > 0 ? ` · ${f.searches(searches)}` : ""}
+            </p>
+          )}
+          {sources.length > 0 && (
+            <SettingCard label={f.sources}>
+              <ul className="space-y-1 text-xs">
+                {sources.map((src) => (
+                  <li key={src.url} className="truncate">
+                    <a href={src.url} target="_blank" rel="noreferrer noopener" className="text-fg-2 underline decoration-line hover:text-lime">
+                      {src.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </SettingCard>
+          )}
 
           {script && (
             <>
@@ -771,6 +929,14 @@ function ScriptEditor({ script, onChange }: { script: FactoryScript; onChange: (
             {ITEM_LAYOUTS.has(layout) && (
               <ItemsEditor layout={layout} items={v.items} onChange={(items) => setScene(i, (s) => ({ ...s, visual: { ...s.visual, items } }))} />
             )}
+            {RICH_FIELDS[layout] && (
+              <RichEditor
+                key={`${i}-${layout}`}
+                fields={RICH_FIELDS[layout]!}
+                visual={v}
+                onChange={(patch) => setScene(i, (s) => ({ ...s, visual: { ...s.visual, ...patch } }))}
+              />
+            )}
           </div>
         );
       })}
@@ -791,7 +957,7 @@ function ItemsEditor({ layout, items, onChange }: { layout: FactoryLayout; items
   const { t } = useI18n();
   const f = t.factory;
   const set = (i: number, patch: Partial<FactoryItem>) => onChange(items.map((it, k) => (k === i ? { ...it, ...patch } : it)));
-  const isMap = layout === "map";
+  const isMap = GEO_ITEMS.has(layout);
   return (
     <div className="mt-3">
       <p className="mb-1 text-[11px] text-fg-3">{f.items}</p>
@@ -838,6 +1004,40 @@ function ItemsEditor({ layout, items, onChange }: { layout: FactoryLayout; items
           <Plus className="size-3.5" /> {f.addItem}
         </button>
       )}
+    </div>
+  );
+}
+
+/** Campos técnicos de una escena como JSON: se aplica solo cuando el texto es JSON válido. */
+function RichEditor({ fields, visual, onChange }: { fields: (keyof FactoryRich)[]; visual: FactoryRich; onChange: (patch: FactoryRich) => void }) {
+  const { t } = useI18n();
+  const f = t.factory;
+  const pick = () => Object.fromEntries(fields.map((k) => [k, visual[k] ?? null]));
+  const [text, setText] = useState(() => JSON.stringify(pick(), null, 2));
+  const [bad, setBad] = useState(false);
+  return (
+    <div className="mt-3">
+      <p className="mb-1 text-[11px] text-fg-3">{f.richFields}</p>
+      <textarea
+        value={text}
+        spellCheck={false}
+        rows={Math.min(14, Math.max(4, text.split("\n").length))}
+        onChange={(e) => {
+          setText(e.target.value);
+          try {
+            const parsed = JSON.parse(e.target.value) as Record<string, unknown>;
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object");
+            const patch: Record<string, unknown> = {};
+            for (const k of RICH_KEYS) if (fields.includes(k)) patch[k] = parsed[k] ?? undefined;
+            setBad(false);
+            onChange(patch as FactoryRich);
+          } catch {
+            setBad(true);
+          }
+        }}
+        className={clsx(inputCls, "resize-y font-mono text-[12px] leading-snug", bad && "ring-1 ring-danger/60")}
+      />
+      <p className={clsx("mt-1 text-[11px]", bad ? "text-danger" : "text-fg-4")}>{bad ? f.richInvalid : f.richHint}</p>
     </div>
   );
 }

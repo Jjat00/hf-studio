@@ -33,11 +33,14 @@ import unicodedata
 from pathlib import Path
 
 import edge_tts
+from pydantic import ValidationError
 
 from .audio import duration
 from .config import Settings
 from .elevenlabs_audio import TTS_USD_PER_1K
 from .factory_compose import SceneTime, Word, build_composition
+from .factory_formats import ASPECTS
+from .factory_rich import assets_needed
 from .factory_script import Script, narration_chars, script_schema
 from .factory_styles import DEFAULT_STYLE, STYLES
 from .space_tools import FACTORY_PROVIDER, BackgroundProvider
@@ -79,7 +82,8 @@ def _input_schema() -> dict:
                     "model_id": {"type": "string", "enum": list(TTS_USD_PER_1K)},
                 },
             },
-            "aspect": {"type": "string", "enum": ["9:16"], "default": "9:16"},
+            "aspect": {"type": "string", "enum": list(ASPECTS), "default": "9:16", "title": "Aspect ratio"},
+            "format": {"type": "string", "maxLength": 40, "title": "Format (for reference)"},
             "language": {"type": "string", "maxLength": 5, "default": "es"},
         },
     }
@@ -88,7 +92,10 @@ def _input_schema() -> dict:
 FACTORY_NODE = {
     "id": FACTORY_MODEL,
     "title": "Content Factory — Faceless shorts API",
-    "summary": "A 9:16 'What if…?' short: code-drawn data graphics, word-synced captions and one narrator voice.",
+    "summary": (
+        "A narrated video in any format (9:16, 16:9 or 1:1): code-drawn data graphics, equations, plots, 3D, "
+        "word-synced captions and one narrator voice."
+    ),
     "workflow": "Faceless shorts",
     "family": "HF Studio",
     "output": "video",
@@ -148,6 +155,18 @@ def renderer_problem() -> str | None:
             problem = f"HyperFrames needs Node.js {MIN_NODE}+ (found {major or 'none'})"
     _status = (time.monotonic(), problem)
     return problem
+
+
+def script_problem(arguments: dict) -> str | None:
+    """Por qué el guion no se puede producir (None si se puede): la validación estricta (LaTeX, expresiones,
+    nodos del diagrama…) que el JSON Schema del catálogo no expresa."""
+    try:
+        Script.model_validate(arguments.get("script") or {})
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = "/".join(str(p) for p in first["loc"])
+        return f"Invalid script ({where}: {first['msg']})"
+    return None
 
 
 def quote(arguments: dict) -> dict:
@@ -218,7 +237,28 @@ def words_from_alignment(alignment: dict) -> list[Word]:
     return words
 
 
+EDGE_ATTEMPTS = 3
+
+
+def spoken_ratio(words: list[Word], text: str) -> float:
+    """Qué parte de las palabras del texto llegó con su marca de tiempo (edge-tts a veces corta el audio)."""
+    expected = [t for t in (_norm(x) for x in text.split()) if t]
+    return min(1.0, len(words) / len(expected)) if expected else 1.0
+
+
 async def edge_scene(text: str, voice: str, rate: str, out: Path) -> list[Word]:
+    """Voz de una escena con edge-tts. Si el servicio corta la respuesta (llegan bastantes menos palabras que las
+    del texto), se pide otra vez: un corte deja la escena muda a mitad de frase."""
+    words: list[Word] = []
+    for _ in range(EDGE_ATTEMPTS):
+        words = await _edge_once(text, voice, rate, out)
+        if spoken_ratio(words, text) >= 0.85:
+            break
+        log.warning("edge-tts devolvió %d palabras de %d; se repite", len(words), len(text.split()))
+    return words
+
+
+async def _edge_once(text: str, voice: str, rate: str, out: Path) -> list[Word]:
     comm = edge_tts.Communicate(text, voice, rate=rate or "+0%", boundary="WordBoundary")
     words: list[Word] = []
     with out.open("wb") as f:
@@ -325,10 +365,11 @@ class ContentFactoryJobs(BackgroundProvider):
     async def produce(self, folder: Path, model: str, arguments: dict) -> tuple[str, str, str]:
         # Absoluta: el render corre con otro `cwd` y `storage_dir` puede ser relativo (data/files por defecto).
         folder = folder.resolve()
-        script = Script.model_validate(arguments["script"]).model_dump(exclude_none=True)
+        script = Script.model_validate(arguments["script"]).model_dump(exclude_none=True, by_alias=True)
         style = STYLES.get(arguments.get("style") or DEFAULT_STYLE, STYLES[DEFAULT_STYLE])
         voice = arguments["voice"]
         lang = arguments.get("language") or "es"
+        aspect = arguments.get("aspect") if arguments.get("aspect") in ASPECTS else "9:16"
         audio = folder / "voice"
         audio.mkdir()
         durations: list[float] = []
@@ -372,9 +413,10 @@ class ContentFactoryJobs(BackgroundProvider):
         (project / "fonts").mkdir(parents=True)
         for font in (ASSETS / "fonts").glob("*.woff2"):
             shutil.copyfile(font, project / "fonts" / font.name)
-        (project / "index.html").write_text(
-            build_composition(script, style, times, words, lang, total), "utf-8"
-        )
+        html = build_composition(script, style, times, words, lang, total, aspect)
+        for name in assets_needed(html):  # KaTeX y three.js, solo si alguna escena los usa
+            shutil.copytree(ASSETS / "vendor" / name, project / "vendor" / name)
+        (project / "index.html").write_text(html, "utf-8")
         silent = folder / "render.mp4"
         async with self.slots:
             await self._render(project, silent, total)

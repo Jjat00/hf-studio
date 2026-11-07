@@ -35,6 +35,8 @@ def _style(
     display_weight: int = 700,
     uppercase: bool = True,
     display_scale: float = 1.0,
+    stroke: float = 5,
+    radius: int = 14,
 ) -> dict:
     return {
         "id": sid,
@@ -46,6 +48,8 @@ def _style(
         "display_weight": display_weight,
         "uppercase": uppercase,
         "display_scale": display_scale,
+        "stroke": stroke,
+        "radius": radius,
         "preview": f"/factory/{sid}.jpg",
     }
 
@@ -270,6 +274,71 @@ STYLES: dict[str, dict] = {
             "Geist",
             display_weight=400,
             display_scale=1.12,
+        ),
+        _style(
+            "lab",
+            ("Laboratorio oscuro", "Dark lab"),
+            (
+                (
+                    "Casi negro con acentos pastel cian y violeta, red de partículas, todo esquinado: para explicar "
+                    "ciencia y software."
+                ),
+                (
+                    "Near-black with pastel cyan and violet accents, a particle network and sharp corners: for "
+                    "explaining science and software."
+                ),
+            ),
+            "lab",
+            {
+                "bg": "#0a0a0a",
+                "bg2": "#111110",
+                "ink": "#ededed",
+                "muted": "#a1a09a",
+                "accent": "#9fe3f5",
+                "accent2": "#c4b5fd",
+                "line": "#3a3a38",
+                "cap_bg": "rgba(10,10,10,0.82)",
+                "cap_ink": "#ededed",
+                "hi": "#9fe3f5",
+            },
+            "Anton",
+            "Geist",
+            display_weight=400,
+            display_scale=1.0,
+            stroke=4,
+            radius=0,
+        ),
+        _style(
+            "manim",
+            ("Pizarra matemática", "Math board"),
+            (
+                (
+                    "Fondo gris pizarra con plano cartesiano tenue, trazos azul, amarillo y verde y tipografía serif: "
+                    "ecuaciones y gráficas como en una clase de matemáticas animada."
+                ),
+                (
+                    "Slate background with a faint coordinate plane, blue, yellow and green strokes and serif type: "
+                    "equations and plots like an animated math lesson."
+                ),
+            ),
+            "manim",
+            {
+                "bg": "#16181d",
+                "bg2": "#1f232b",
+                "ink": "#f2f2f2",
+                "muted": "#9aa3b2",
+                "accent": "#58c4dd",
+                "accent2": "#f4d35e",
+                "line": "#4a5568",
+                "cap_bg": "rgba(16,18,22,0.85)",
+                "cap_ink": "#f2f2f2",
+                "hi": "#f4d35e",
+            },
+            "Liberation Serif",
+            "Geist",
+            uppercase=False,
+            stroke=5,
+            radius=10,
         ),
     )
 }
