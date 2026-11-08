@@ -8,7 +8,7 @@ import { KatanaModal } from "./media-sources";
 
 function Panel({ src, poster, label, accent, video = true }: { src: string; poster?: string; label?: string; accent?: boolean; video?: boolean }) {
   return (
-    <div className="relative aspect-[9/16] h-56 overflow-hidden rounded-2xl bg-surface-4 md:h-80">
+    <div className="relative aspect-[9/16] h-48 overflow-hidden rounded-2xl bg-surface-4 md:h-64">
       {src && (video ? (
         <video src={src} poster={poster} muted loop autoPlay playsInline className="absolute inset-0 size-full object-cover" />
       ) : (
@@ -30,7 +30,8 @@ export function HowItWorks({ presets, onClose, onExplore }: { presets: KatanaPre
   const [n, setN] = useState(0);
   const total = k.howSteps.length;
   const s = k.howSteps[n];
-  const full = presets.find((p) => p.person_url && p.result_url) ?? presets[0];
+  const complete = presets.filter((p) => p.person_url && p.result_url);
+  const full = complete.find((p) => p.id === "daytona-drift") ?? complete[0] ?? presets[0];
   const versions = presets.filter((p) => p.result_url || p.video_url).slice(0, 4);
 
   let visual: React.ReactNode = null;
@@ -85,13 +86,13 @@ export function HowItWorks({ presets, onClose, onExplore }: { presets: KatanaPre
 
   return (
     <KatanaModal title={k.how} onClose={onClose} wide={false}>
-      <div className="flex flex-col items-center gap-6 py-4 text-center">
+      <div className="flex flex-col items-center gap-4 py-2 text-center">
         <p className="text-sm text-fg-3">{k.howSubtitle}</p>
-        <div className="flex min-h-64 w-full items-center justify-center overflow-x-auto md:min-h-80">{visual}</div>
+        <div className="flex min-h-56 w-full items-center justify-center overflow-x-auto md:min-h-72">{visual}</div>
         <p className="text-xs text-fg-3">{k.stepOf(n + 1, total)}</p>
         <p className="text-sm font-semibold tracking-wide text-lime">{s.kicker}</p>
-        <h3 className="text-3xl font-black uppercase tracking-tight md:text-4xl">{s.title}</h3>
-        <p className="max-w-xl text-lg text-fg-2">{s.body}</p>
+        <h3 className="text-2xl font-black uppercase tracking-tight md:text-3xl">{s.title}</h3>
+        <p className="max-w-xl text-fg-2">{s.body}</p>
         <div className="flex gap-3 pt-2">
           {n > 0 && (
             <button type="button" onClick={() => setN(n - 1)} className="h-12 rounded-xl bg-surface-4 px-6 text-[17px] font-semibold hover:bg-white/10">{k.back}</button>

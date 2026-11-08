@@ -97,7 +97,7 @@ export function KatanaStudio() {
   const side = list.filter((p) => p.thumbnail_url);
 
   return (
-    <div className="w-full">
+    <div className="min-h-screen w-full bg-black">
       {/* Portada */}
       <section className="relative isolate flex flex-col items-center justify-center gap-6 overflow-hidden px-4 pb-10 pt-16 md:min-h-[520px] md:pt-10">
         <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 hidden md:block">
@@ -131,7 +131,7 @@ export function KatanaStudio() {
       </section>
 
       {/* Pestañas */}
-      <div className="flex flex-wrap items-center gap-2 px-4 pb-6 md:px-6">
+      <div className="flex flex-wrap items-center gap-1 px-4 pb-6 md:px-6">
         <TabButton active={tab === "all"} onClick={() => setTab("all")}>{k.tabAll}</TabButton>
         {tabs.map((c) => (
           <TabButton key={c.id} active={tab === c.id} onClick={() => setTab(c.id)} icon={CATEGORY_ICON[c.id]}>
@@ -140,8 +140,8 @@ export function KatanaStudio() {
         ))}
         <TabButton active={tab === "mine"} onClick={() => setTab("mine")}>{k.tabMine}{projects.length ? ` · ${projects.length}` : ""}</TabButton>
         <button type="button" onClick={() => setPublish(true)}
-          className="ml-auto flex h-12 items-center gap-2 rounded-full bg-surface-3 px-5 text-[17px] font-semibold hover:bg-surface-4">
-          <Upload className="size-5" />
+          className="ml-auto flex h-11 shrink-0 items-center gap-2 rounded-full bg-surface-3 px-5 text-[15px] font-semibold hover:bg-surface-4">
+          <Upload className="size-4" />
           {k.publish}
         </button>
       </div>
@@ -181,7 +181,7 @@ export function KatanaStudio() {
 function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick}
-      className={clsx("flex h-12 items-center gap-2 rounded-full px-5 text-[17px] font-medium transition",
+      className={clsx("flex h-11 shrink-0 items-center gap-2 rounded-full px-4 text-[15px] font-medium transition",
         active ? "bg-white text-black" : "text-fg-2 hover:bg-white/5")}>
       {icon}
       {children}
@@ -209,7 +209,7 @@ function PresetCard({ preset, onRecreate }: { preset: KatanaPreset; onRecreate: 
       className="group relative cursor-pointer overflow-hidden rounded-3xl border border-white/10 bg-surface-2"
       onMouseLeave={() => setInfo(false)}>
       <LazyVideo src={preset.video_url} poster={preset.thumbnail_url || undefined} muted={muted} className="block w-full" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 transition group-hover:opacity-100" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/60 to-transparent" />
       <div className="absolute right-4 top-4 flex flex-col gap-3 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
         <IconButton label={k.info} onClick={() => setInfo((v) => !v)}><Info className="size-5" /></IconButton>
         <IconButton label={muted ? k.unmute : k.mute} onClick={() => setMuted((v) => !v)}>
