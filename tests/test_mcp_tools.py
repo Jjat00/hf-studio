@@ -55,7 +55,7 @@ TOOLS = {
     "update_space": (False, True, False, False),
     "estimate_space_run": (False, False, False, True),
     "katana_create": (False, False, False, True),  # descarga y analiza la referencia
-    "katana_presets": READ,
+    "katana_presets": (True, False, True, True),  # lee el CMS público de Higgsfield
     "katana_get": READ,
     "katana_plan": SPEND,  # tokens de Claude (sin max_usd solo cotiza)  # cotiza y puede subir salidas previas a Higgsfield
     "run_space": SPEND,

@@ -83,9 +83,11 @@ export function fieldErrors(e: unknown): { path: string; message: string }[] | n
 async function fetchRetrying(url: string, init?: RequestInit): Promise<Response> {
   const method = (init?.method ?? "GET").toUpperCase();
   const headers = new Headers(init?.headers);
-  // El guion de Content Factory deduplica solo en memoria: un reinicio del servidor la olvida, así que nunca se
-  // reintenta solo (otra llamada pagada necesita otra aprobación del usuario).
-  const paidOnce = url.includes("/v1/factory/scripts") && !url.includes("/estimate");
+  // Llamadas pagadas a Claude que no se reintentan solas (otra llamada necesita otra aprobación del usuario): el
+  // guion de Content Factory deduplica solo en memoria, y el plan de Katana responde 409 mientras sigue en curso.
+  const paidOnce =
+    (url.includes("/v1/factory/scripts") && !url.includes("/estimate")) ||
+    (/\/v1\/katana\/projects\/[^/]+\/plan$/.test(url.split("?")[0]));
   const safe = !paidOnce && (method === "GET" || headers.has("Idempotency-Key") || url.includes("/estimate"));
   const streamed = typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream;
   for (let attempt = 0; ; attempt++) {

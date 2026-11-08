@@ -1573,12 +1573,14 @@ def katana_create(reference_url: str, title: str | None = None) -> dict:
 @mcp.tool(
     title="List Katana presets",
     annotations=ToolAnnotations(
-        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
     ),
 )
-def katana_presets() -> dict:
-    """Presets públicos de la galería de Katana: su video_url sirve de referencia en katana_create."""
-    return _call("GET", "/v1/katana/presets")
+def katana_presets(lang: Literal["es", "en"] = "es") -> dict:
+    """La galería de Katana de higgsfield.ai (la lee de su CMS público): categorías y presets de la comunidad con
+    descripción y autor. El video_url de un preset sirve de referencia en katana_create; su description se puede
+    pasar como preset_context a katana_plan."""
+    return _call("GET", "/v1/katana/presets", params={"lang": lang})
 
 
 @mcp.tool(
@@ -1611,6 +1613,7 @@ def katana_plan(
     max_video_seconds: int = 30,
     music: str = "reference",
     language: str = "es",
+    preset_context: str | None = None,
     max_usd: float | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
@@ -1618,10 +1621,12 @@ def katana_plan(
     Seedance 2.5 y el EDL con la energía medida) y se crea un Space que lo produce, terminado en hf-studio/katana-edit.
     subject_urls: fotos del sujeto (upload_media). Sin max_usd solo cotiza (no gasta): dile al usuario el max_usd
     (tokens de Claude) y, con su OK, repite con ese max_usd. Planear no genera video: después
-    estimate_space_run(space_id) y, con el OK del usuario sobre ese total, run_space."""
+    estimate_space_run(space_id) y, con el OK del usuario sobre ese total, run_space. preset_context: la
+    description del preset de katana_presets, si la referencia es uno. Reintenta con la misma idempotency_key: no
+    vuelve a cobrar (409 si cambia el encargo)."""
     body = {"subject_urls": subject_urls, "brief": brief, "aspect": aspect, "duration": duration,
             "resolution": resolution, "max_clips": max_clips, "max_video_seconds": max_video_seconds,
-            "music": music, "language": language}  # fmt: skip
+            "music": music, "language": language, "preset_context": preset_context}  # fmt: skip
     if max_usd is None:
         return _call("POST", f"/v1/katana/projects/{project_id}/plan/estimate", json=body)
     headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}

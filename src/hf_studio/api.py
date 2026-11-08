@@ -47,6 +47,7 @@ from .db import (
     Element,
     Folder,
     Job,
+    KatanaPlanAttempt,
     KatanaProject,
     Preset,
     Project,
@@ -648,7 +649,6 @@ def create_app(
         # Un candado por chat para escribir sus propuestas (vincular, generar en automático, guardar un turno):
         # ninguna escritura pisa a otra ni el tope automático se reparte dos veces.
         app.state.chat_locks = {}
-        app.state.katana_plans = {}  # planes por (cliente, proyecto, Idempotency-Key)
         app.state.factory_scripts = {}  # guiones por (cliente, Idempotency-Key): un reintento no vuelve a cobrar
         app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
@@ -678,6 +678,7 @@ def create_app(
         await app.state.audio_jobs.aclose()
         await app.state.assistant_jobs.aclose()
         await app.state.factory_jobs.aclose()
+        await app.state.katana_jobs.aclose()
         await app.state.eleven.aclose()
         await engine.dispose()
 
@@ -4949,32 +4950,71 @@ def create_app(
                 raise ServiceError(
                     422, "untrusted_source", "Subject photos must be your uploads or generations"
                 )
-        cache: dict = app.state.katana_plans
-        key = (owner.id, project_id, idempotency_key) if idempotency_key else None
-        entry = (
-            cache.setdefault(key, {"lock": asyncio.Lock(), "result": None, "error": None}) if key else None
-        )
-        if entry is None:
+        if not idempotency_key:
             return await run_katana_plan(session, owner, catalog, project, body)
-        async with entry["lock"]:
-            if entry["result"] is not None:
-                return {**entry["result"], "deduplicated": True}
-            if entry["error"] is not None:
-                status, code, message = entry["error"]
-                raise ServiceError(status, code, f"{message} (already attempted with this Idempotency-Key)")
+        fingerprint = hashlib.sha256(
+            json.dumps(body.model_dump(exclude={"max_usd"}), sort_keys=True).encode()
+        ).hexdigest()
+        # Reserva el intento en la base antes de llamar a Claude: un reintento (también tras reiniciar) no cobra dos
+        # veces. La misma clave con otro encargo es un conflicto, no el plan anterior.
+        async with app.state.sessions() as s:
+            s.add(KatanaPlanAttempt(owner_id=owner.id, project_id=project_id, key=idempotency_key,
+                                    fingerprint=fingerprint))  # fmt: skip
             try:
-                result = await run_katana_plan(session, owner, catalog, project, body)
-            except ServiceError as exc:
-                entry["error"] = (exc.status, exc.code, exc.message)
-                raise
-            except BaseException as exc:
-                entry["error"] = (502, "plan_uncertain", f"The plan request ended unexpectedly: {exc!r}")
-                raise
-            entry["result"] = result
-            if len(cache) > 200:
-                for old in list(cache)[:50]:
-                    cache.pop(old, None)
-            return result
+                await s.commit()
+                reserved = True
+            except IntegrityError:
+                await s.rollback()
+                reserved = False
+            if not reserved:
+                attempt = await s.scalar(
+                    select(KatanaPlanAttempt).where(
+                        KatanaPlanAttempt.owner_id == owner.id,
+                        KatanaPlanAttempt.project_id == project_id,
+                        KatanaPlanAttempt.key == idempotency_key,
+                    )
+                )
+                if attempt is None:
+                    raise ServiceError(409, "plan_in_progress", "Retry this plan in a moment")
+                if attempt.fingerprint != fingerprint:
+                    raise ServiceError(409, "idempotency_conflict",
+                                       "This Idempotency-Key was used for a different plan request")  # fmt: skip
+                if attempt.state == "done" and attempt.result:
+                    return {**attempt.result, "deduplicated": True}
+                if attempt.state == "failed" and attempt.error:
+                    err = attempt.error
+                    raise ServiceError(int(err.get("status", 502)), str(err.get("code", "plan_failed")),
+                                       f"{err.get('message', '')} (already attempted with this Idempotency-Key)")  # fmt: skip
+                raise ServiceError(409, "plan_in_progress",
+                                   "This plan is still being written (or ended uncertainly): quote it again")  # fmt: skip
+
+        async def settle(**fields) -> None:
+            async with app.state.sessions() as s:
+                attempt = await s.scalar(
+                    select(KatanaPlanAttempt).where(
+                        KatanaPlanAttempt.owner_id == owner.id,
+                        KatanaPlanAttempt.project_id == project_id,
+                        KatanaPlanAttempt.key == idempotency_key,
+                    )
+                )
+                if attempt is not None:
+                    for name, value in fields.items():
+                        setattr(attempt, name, value)
+                    await s.commit()
+
+        try:
+            result = await run_katana_plan(session, owner, catalog, project, body)
+        except ServiceError as exc:
+            await settle(
+                state="failed", error={"status": exc.status, "code": exc.code, "message": exc.message}
+            )
+            raise
+        except BaseException as exc:
+            # Resultado incierto (Claude pudo cobrar): queda en `running` y un reintento con la clave da 409.
+            log.warning("katana plan ended unexpectedly: %r", exc)
+            raise
+        await settle(state="done", result=json.loads(json.dumps(result, default=str)))
+        return result
 
     async def run_katana_plan(
         session: AsyncSession, owner: ApiClient, catalog: Catalog, project: KatanaProject, body: KatanaPlanIn

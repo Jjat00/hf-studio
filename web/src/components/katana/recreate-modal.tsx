@@ -86,7 +86,10 @@ export function RecreateModal({
   const sig = JSON.stringify([project?.id, assets.map((x) => x.url), brief, aspect, duration, resolution, maxClips, maxSeconds, music, language]);
   const quote = quoted && quoted.sig === sig ? quoted : null;
 
+  const analyzing = useRef<string | null>(null); // referencia que se está analizando
+
   function chooseReference(p: Picked) {
+    if (busy) return; // no se cambia la referencia mientras se analiza o se sube otra
     setReference(p);
     if (project && project.reference_url !== p.url) {
       setProject(null);
@@ -96,12 +99,16 @@ export function RecreateModal({
 
   async function dropReference(files: FileList | null) {
     const f = files?.[0];
-    if (!f || !f.type.startsWith("video/")) return;
+    if (!f || !f.type.startsWith("video/") || busy) return;
     setBusy("drop");
     setError("");
     try {
       const up = await studio.upload(f);
-      chooseReference({ key: `up:${up.id}`, url: up.url, title: f.name.replace(/\.[^.]+$/, "") });
+      setReference({ key: `up:${up.id}`, url: up.url, title: f.name.replace(/\.[^.]+$/, "") });
+      if (project && project.reference_url !== up.url) {
+        setProject(null);
+        setPlanned(null);
+      }
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -115,14 +122,17 @@ export function RecreateModal({
     if (project && project.reference_url === reference.url) return setStep("assets");
     setBusy("analyze");
     setError("");
+    analyzing.current = reference.url;
     try {
       const p = await studio.katanaCreate(reference.url, reference.title);
-      setProject(p);
       onProject(p);
+      if (analyzing.current !== p.reference_url) return; // la referencia cambió: se descarta este análisis
+      setProject(p);
       setStep("assets");
     } catch (e) {
       setError(errorText(e));
     } finally {
+      analyzing.current = null;
       setBusy("");
     }
   }
@@ -133,8 +143,11 @@ export function RecreateModal({
     );
   }
 
+  // El proyecto debe ser el de la referencia que se ve (o uno abierto desde «Mis presets»).
+  const matches = !!project && (!reference || project.reference_url === reference.url);
+
   async function estimate() {
-    if (!project) return;
+    if (!project || !matches) return;
     setBusy("estimate");
     setError("");
     try {
@@ -149,7 +162,7 @@ export function RecreateModal({
   }
 
   async function plan() {
-    if (!project || !quote) return;
+    if (!project || !quote || !matches) return;
     setBusy("plan");
     setError("");
     if (!planKey.current) planKey.current = crypto.randomUUID();
@@ -174,8 +187,8 @@ export function RecreateModal({
   };
   const reachable: Record<Step, boolean> = {
     reference: true,
-    assets: done.reference,
-    instructions: done.reference && assets.length > 0,
+    assets: done.reference && !busy,
+    instructions: done.reference && assets.length > 0 && !busy,
     plan: !!project?.plan,
   };
   const steps: [Step, string][] = [
@@ -217,7 +230,7 @@ export function RecreateModal({
     footer = (
       <>
         <button type="button" className={secondary} onClick={() => setStep("reference")}>{k.back}</button>
-        <button type="button" className={primary} disabled={!assets.length} onClick={() => setStep("instructions")}>{k.continue}</button>
+        <button type="button" className={primary} disabled={!assets.length || !matches} onClick={() => setStep("instructions")}>{k.continue}</button>
       </>
     );
   else if (step === "instructions")
@@ -225,12 +238,12 @@ export function RecreateModal({
       <>
         <button type="button" className={secondary} disabled={!!busy} onClick={() => setStep("assets")}>{k.back}</button>
         {!quote ? (
-          <button type="button" className={primary} disabled={!!busy || !assets.length} onClick={estimate}>
+          <button type="button" className={primary} disabled={!!busy || !assets.length || !matches} onClick={estimate}>
             {busy === "estimate" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {k.estimate}
           </button>
         ) : (
-          <button type="button" className={primary} disabled={!!busy || !quote.available} onClick={plan}>
+          <button type="button" className={primary} disabled={!!busy || !quote.available || !matches} onClick={plan}>
             {busy === "plan" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
             {busy === "plan" ? k.planning : k.approvePlan}
           </button>

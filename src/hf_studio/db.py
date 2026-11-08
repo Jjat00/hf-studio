@@ -254,6 +254,26 @@ class KatanaProject(Base):
         return data
 
 
+class KatanaPlanAttempt(Base):
+    """Un intento pagado de plan de Katana por (cliente, proyecto, Idempotency-Key). Se reserva (estado `running`)
+    antes de llamar a Claude, así que un reintento tras un corte o un reinicio no vuelve a cobrar: devuelve el
+    resultado guardado, el error, o `409` si sigue en curso o si la misma clave llega con otro encargo (`fingerprint`).
+    """
+
+    __tablename__ = "katana_plan_attempts"
+    __table_args__ = (UniqueConstraint("owner_id", "project_id", "key", name="uq_katana_plan_attempt"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    key: Mapped[str] = mapped_column(String(200))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(16), default="running")  # running | done | failed
+    result: Mapped[dict | None] = mapped_column(JSON)
+    error: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Shot(Base):
     """Toma de la lista de tomas de un proyecto (AI Director). `take_job_ids` son todas las generaciones de la toma,
     `board_job_id` su fotograma de storyboard y `selected_job_id` la toma buena. Estados: planned, boarded,

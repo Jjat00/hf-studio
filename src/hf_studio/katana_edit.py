@@ -263,12 +263,15 @@ class KatanaEditJobs(BackgroundProvider):
             )  # fmt: skip
         else:
             if len(labels) == 1:
-                graph = ";".join(chains) + f";{labels[0]}alimiter=limit=0.89:level=disabled[out]"
+                graph = (
+                    ";".join(chains)
+                    + f";{labels[0]}alimiter=limit=0.89:level=disabled,apad=whole_dur={total:.3f}[out]"
+                )
             else:
                 graph = (
                     ";".join(chains)
-                    + f";{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=first,"
-                    "alimiter=limit=0.79:attack=1:release=40:level=disabled[out]"
+                    + f";{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=longest,"
+                    f"alimiter=limit=0.79:attack=1:release=40:level=disabled,apad=whole_dur={total:.3f}[out]"
                 )
             code, msg = await run_proc(
                 "ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", graph,

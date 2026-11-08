@@ -12,11 +12,12 @@ from pathlib import Path
 import httpx
 import httpx2
 import pytest
+from sqlalchemy import select
 
 from hf_studio import katana as kmod
 from hf_studio.api import create_app
 from hf_studio.config import Settings
-from hf_studio.db import ApiClient, Job, hash_token
+from hf_studio.db import ApiClient, Job, KatanaPlanAttempt, hash_token
 from hf_studio.katana_analysis import analyze, aspect_of
 from hf_studio.katana_compose import Edl, build
 from hf_studio.katana_edit import KATANA_EDIT_MODEL, KatanaEditJobs, edl_problem
@@ -388,6 +389,15 @@ async def test_project_analyzes_plans_and_builds_a_space(kenv, tmp_path):
     again = await http.post(f"/v1/katana/projects/{pid}/plan", json={**ask, "max_usd": quote["max_usd"]},
                             headers={"Idempotency-Key": "p1"})  # fmt: skip
     assert again.json()["deduplicated"] is True and len(claude.requests) == 1
+    # El intento vive en la base: tras reiniciar (sin nada en memoria) la misma clave tampoco vuelve a cobrar.
+    async with app.state.sessions() as s:
+        attempt = await s.scalar(select(KatanaPlanAttempt).where(KatanaPlanAttempt.key == "p1"))
+        assert attempt.state == "done" and attempt.result["space_id"] == body["space_id"]
+    other = await http.post(f"/v1/katana/projects/{pid}/plan",
+                            json={**ask, "brief": "otro encargo", "max_usd": quote["max_usd"]},
+                            headers={"Idempotency-Key": "p1"})  # fmt: skip
+    assert other.status_code == 409 and other.json()["error"]["code"] == "idempotency_conflict"
+    assert len(claude.requests) == 1
     sent = claude.requests[0]
     assert sent["output_config"]["format"]["type"] == "json_schema"
     images = [b for b in sent["messages"][0]["content"] if b["type"] == "image"]
@@ -453,3 +463,27 @@ async def test_edit_node_with_bad_indices_is_not_quoted(kenv):
     edl = {"duration": 2, "shots": [{"kind": "video", "source": 3, "start": 0, "duration": 2}]}
     r = await http.post("/v1/estimate", json={"model": KATANA_EDIT_MODEL, "input": {"edl": edl}})
     assert r.status_code == 200 and not r.json()["options"] and "clip 4" in r.json()["excluded"][0]["reason"]
+
+
+@needs_ffmpeg
+async def test_mix_without_music_keeps_late_sound_effects(kenv, tmp_path):
+    app, _, _, _ = kenv
+    silent = tmp_path / "v.mp4"
+    ffmpeg("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=size=64x64:rate=24:duration=3",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", str(silent))  # fmt: skip
+    sfx = tmp_path / "s.wav"
+    ffmpeg("ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=880:duration=0.1", str(sfx))
+    jobs = app.state.katana_jobs
+
+    async def local(url: str) -> str:
+        return str(sfx)
+
+    jobs._media = local  # type: ignore[method-assign]
+    edl = Edl.model_validate({"duration": 3, "shots": [{"kind": "video", "source": 0, "start": 0, "duration": 3}],
+                              "audio": {"sfx": [{"source": 0, "t": 0.2}, {"source": 0, "t": 2.0}]}})  # fmt: skip
+    out = tmp_path / "out.mp4"
+    await jobs._mix(silent, {"music_url": None, "sfx_urls": ["https://cdn.test/s.wav"]}, edl, tmp_path, out)
+    probe = await asyncio.to_thread(
+        subprocess.run, ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration",
+                         "-of", "csv=p=0", str(out)], capture_output=True, text=True, check=True)  # fmt: skip
+    assert float(probe.stdout.strip()) >= 2.9  # el segundo efecto sigue y el audio dura lo que el video
