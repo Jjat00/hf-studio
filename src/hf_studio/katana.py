@@ -13,13 +13,30 @@ from __future__ import annotations
 
 import re
 import shutil
+import time
 from pathlib import Path
 from urllib.parse import urlparse
+
+import httpx
 
 PRESET_HOST = "static-public-media.higgsfield.ai"
 PRESET_PREFIX = "/katana-presets/"
 FILE_GROUPS = {"sheets": "sheets", "shots": "shots"}
 FILE_NAME = re.compile(r"^(sheet|key)-[0-9]{3}\.jpg$")
+PRESET_PATH = re.compile(
+    r"^/katana-presets/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.mp4$"
+)
+
+# Galería de Katana tal como la sirve higgsfield.ai/katana (API pública de su CMS, solo lectura, a 2026-11-08):
+# categorías y presets de la comunidad con su video de referencia, la recreación de Katana y el límite de fotos.
+CMS_URL = "https://fnf-api-gw.higgsfield.ai/fnf-cms-api"
+CATEGORIES = [
+    {"id": "personalized_edits", "name": "Personalized edits", "icon": "video-trim"},
+    {"id": "style_transfer", "name": "Style transfer", "icon": "colors"},
+    {"id": "motion_transfer", "name": "Motion transfer", "icon": "reduce-motion"},
+]
+GALLERY_TTL = 1800.0
+_gallery: dict[str, tuple[float, list[dict]]] = {}  # idioma -> (cuándo, presets)
 
 # Presets públicos de la galería de Katana de Higgsfield (a 2026-11-07): solo enlaces a sus videos de muestra,
 # que sirven de referencia como cualquier otro video. No se copian ni se publican aquí.
@@ -70,16 +87,101 @@ def _media(asset: str, ext: str) -> str:
     return f"https://{PRESET_HOST}{PRESET_PREFIX}{asset}.{ext}" if asset else ""
 
 
-def presets() -> list[dict[str, str]]:
+STYLE_TRANSFER = {"monolith", "comic"}
+
+
+def presets() -> list[dict]:
+    """Respaldo sin red: los presets escritos a mano, con el mismo formato que la galería."""
     return [
-        {"id": p["id"], "name": p["name"], "video_url": _media(p["video"], "mp4"),
-         "thumbnail_url": _media(p["thumb"], "webp")}
+        {"id": p["id"], "name": p["name"], "description": "",
+         "category": "style_transfer" if p["id"] in STYLE_TRANSFER else "personalized_edits",
+         "video_url": _media(p["video"], "mp4"), "thumbnail_url": _media(p["thumb"], "webp"),
+         "result_url": "", "result_thumbnail_url": "", "person_url": "", "author": "", "author_avatar": "",
+         "max_images": 5}
         for p in PRESETS
     ]  # fmt: skip
 
 
+def _url(media: dict | None) -> str:
+    url = (media or {}).get("url") or ""
+    return url if isinstance(url, str) and url.startswith(f"https://{PRESET_HOST}{PRESET_PREFIX}") else ""
+
+
+def _title(item: dict) -> str:
+    title = str(item.get("title") or "").strip()
+    slug = str(item.get("slug") or "")
+    if not title or title == slug:  # algunos llegan con el slug como título
+        title = slug.replace("-", " ").strip().capitalize()
+    return title[:120]
+
+
+def _preset(item: dict) -> dict | None:
+    """Un preset del CMS en nuestro formato. La tarjeta muestra la referencia (o la recreación si no hay)."""
+    reference, result = _url(item.get("reference_video_media")), _url(item.get("video_media"))
+    video = reference or result
+    if not video or not item.get("slug"):
+        return None
+    try:
+        max_images = max(1, min(40, int((item.get("character_limits") or {}).get("media.images") or 5)))
+    except (TypeError, ValueError):
+        max_images = 5
+    author = item.get("author") or {}
+    avatar = str(author.get("avatar_url") or "")
+    return {
+        "id": str(item["slug"])[:120],
+        "name": _title(item),
+        "description": str(item.get("description") or "")[:2000],
+        "category": item.get("category")
+        if item.get("category") in {c["id"] for c in CATEGORIES}
+        else "personalized_edits",
+        "video_url": video,
+        "thumbnail_url": _url(item.get("reference_thumbnail_media"))
+        if reference
+        else _url(item.get("thumbnail_media")),
+        "result_url": result if reference else "",
+        "result_thumbnail_url": _url(item.get("thumbnail_media")) if reference else "",
+        "person_url": _url(item.get("person_image")),
+        "author": str(author.get("username") or "")[:60],
+        "author_avatar": avatar if avatar.startswith("https://") else "",
+        "max_images": max_images,
+    }
+
+
+async def gallery(client: httpx.AsyncClient, lang: str = "es") -> list[dict]:
+    """Los presets de la galería real (paginada, en caché 30 min por idioma). Sin red, los escritos a mano."""
+    lang = lang if lang in ("es", "en") else "es"
+    cached = _gallery.get(lang)
+    if cached and time.monotonic() - cached[0] < GALLERY_TTL:
+        return cached[1]
+    items: list[dict] = []
+    cursor: str | None = None
+    try:
+        for _ in range(10):
+            params = {"lang": lang, "limit": "50", **({"cursor": cursor} if cursor else {})}
+            res = await client.get(f"{CMS_URL}/katana-presets", params=params, timeout=15)
+            res.raise_for_status()
+            data = res.json()
+            items += [p for p in map(_preset, data.get("items") or []) if p]
+            cursor = data.get("next_cursor")
+            if not cursor:
+                break
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        items = []
+    if not items:
+        return cached[1] if cached else presets()
+    seen: set[str] = set()
+    items = [p for p in items if not (p["id"] in seen or seen.add(p["id"]))]
+    _gallery[lang] = (time.monotonic(), items)
+    return items
+
+
+def _known() -> list[dict]:
+    return [p for _, items in _gallery.values() for p in items] + presets()
+
+
 def is_preset_video(url: str) -> bool:
-    """Un video de la galería pública de Katana (solo esas rutas exactas, nada más de ese dominio)."""
+    """Un video de la galería pública de Katana: solo `https://static-public-media.higgsfield.ai/katana-presets/
+    <uuid>.mp4`, sin puerto ni query; nada más de ese dominio."""
     try:
         parsed = urlparse(url)
     except ValueError:
@@ -89,12 +191,26 @@ def is_preset_video(url: str) -> bool:
         and parsed.hostname == PRESET_HOST
         and parsed.port is None
         and not parsed.query
-        and any(parsed.path == f"{PRESET_PREFIX}{p['video']}.mp4" for p in PRESETS)
+        and not parsed.fragment
+        and bool(PRESET_PATH.match(parsed.path))
     )
 
 
+def preset_info(url: str) -> dict | None:
+    """El preset cuyo video (referencia o recreación) es `url`, si se conoce."""
+    for p in _known():
+        if url in (p["video_url"], p["result_url"]) or url == _media(_static_video(p["id"]), "mp4"):
+            return p
+    return None
+
+
+def _static_video(preset_id: str) -> str:
+    return next((p["video"] for p in PRESETS if p["id"] == preset_id), "")
+
+
 def preset_for(url: str) -> str | None:
-    return next((p["id"] for p in PRESETS if url.endswith(f"{p['video']}.mp4")), None)
+    info = preset_info(url)
+    return info["id"] if info else None
 
 
 def folder(storage_dir: str | Path, project_id: str) -> Path:

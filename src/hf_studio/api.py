@@ -4837,9 +4837,11 @@ def create_app(
                 "language": body.language}  # fmt: skip
 
     @app.get("/v1/katana/presets", tags=["katana"])
-    async def katana_presets(_: Owner) -> dict:
-        """Presets públicos de la galería de Katana: su video de muestra sirve de referencia."""
-        return {"presets": katana_mod.presets()}
+    async def katana_presets(_: Owner, lang: Literal["es", "en"] = "es") -> dict:
+        """La galería de Katana de higgsfield.ai (categorías y presets de la comunidad): el `video_url` de un
+        preset sirve de referencia. Sin conexión devuelve los presets guardados."""
+        presets = await katana_mod.gallery(app.state.hf.plain, lang)
+        return {"categories": katana_mod.CATEGORIES, "presets": presets}
 
     @app.get("/v1/katana/projects", tags=["katana"])
     async def list_katana(session: Session, owner: Owner) -> dict:
@@ -4854,8 +4856,9 @@ def create_app(
         """Copia la referencia y la analiza (gratis, local): cortes, destellos, sacudidas, movimientos de cámara,
         golpes de audio, tempo y hojas de contacto. Tarda unos segundos por cada segundo de video."""
         url = body.reference_url.strip()
-        preset = katana_mod.preset_for(url) if katana_mod.is_preset_video(url) else None
-        if preset is None and not await trusted_media(session, owner, url):
+        from_gallery = katana_mod.is_preset_video(url)
+        preset = katana_mod.preset_for(url) if from_gallery else None
+        if not from_gallery and not await trusted_media(session, owner, url):
             raise ServiceError(
                 422,
                 "untrusted_source",

@@ -530,7 +530,8 @@ export const studio = {
   uploads: (limit = 60) =>
     call<{ uploads: { id: string; url: string; content_type: string; size: number; filename: string | null; created_at: string }[] }>(`/v1/uploads?limit=${limit}`),
   /** Katana: presets públicos (su video de muestra sirve de referencia). */
-  katanaPresets: () => call<{ presets: KatanaPreset[] }>("/v1/katana/presets"),
+  katanaPresets: (lang: "es" | "en" = "es") =>
+    call<{ categories: KatanaCategory[]; presets: KatanaPreset[] }>(`/v1/katana/presets?lang=${lang}`),
   katanaProjects: () => call<{ projects: KatanaProject[] }>("/v1/katana/projects"),
   katanaProject: (id: string) => call<KatanaProject>(`/v1/katana/projects/${id}`),
   /** Copia la referencia y la analiza (gratis, en local). */
@@ -565,7 +566,22 @@ export const studio = {
   },
 };
 
-export type KatanaPreset = { id: string; name: string; video_url: string; thumbnail_url: string };
+export type KatanaCategory = { id: string; name: string; icon: string };
+/** Preset de la galería de Katana de higgsfield.ai: `video_url` es la referencia; `result_url`, la recreación. */
+export type KatanaPreset = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  video_url: string;
+  thumbnail_url: string;
+  result_url: string;
+  result_thumbnail_url: string;
+  person_url: string;
+  author: string;
+  author_avatar: string;
+  max_images: number;
+};
 export type KatanaPlanAsk = {
   subject_urls: string[];
   brief: string;
@@ -576,6 +592,7 @@ export type KatanaPlanAsk = {
   max_video_seconds: number;
   music: "reference" | "none";
   language: string;
+  preset_context?: string;
 };
 export type KatanaEvent = { t: number; end: number | null; kind: string; strength: number; data: Record<string, unknown> };
 export type KatanaAnalysis = {

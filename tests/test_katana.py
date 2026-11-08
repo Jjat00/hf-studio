@@ -243,7 +243,54 @@ def test_presets_only_accept_the_gallery_videos():
     url = kmod.presets()[0]["video_url"]
     assert kmod.is_preset_video(url) and kmod.preset_for(url) == "kinetic-tech-edit"
     assert not kmod.is_preset_video("https://static-public-media.higgsfield.ai/other/x.mp4")
+    assert not kmod.is_preset_video("https://static-public-media.higgsfield.ai/katana-presets/../x.mp4")
     assert not kmod.is_preset_video(url + "?a=1") and not kmod.is_preset_video(url.replace("https", "http"))
+    assert not kmod.is_preset_video(url + "#x") and not kmod.is_preset_video(url.replace(".ai/", ".ai:444/"))
+
+
+CMS_ITEM = {
+    "slug": "candy-pop", "title": "candy-pop", "description": "Pastel scrapbook edit", "category": "personalized_edits",
+    "character_limits": {"media.images": 10}, "author": {"username": "heyfinch", "avatar_url": "https://cdn.x/a.webp"},
+    "reference_video_media": {"url": f"https://{kmod.PRESET_HOST}/katana-presets/11822042-be42-495c-be1d-cdf2f8754534.mp4"},
+    "reference_thumbnail_media": {"url": f"https://{kmod.PRESET_HOST}/katana-presets/89ab2718-8b7f-4895-b097-bcbc050e65f1.webp"},
+    "video_media": {"url": f"https://{kmod.PRESET_HOST}/katana-presets/18188271-4cc2-48c4-9529-33842cb5fd26.mp4"},
+    "thumbnail_media": {"url": f"https://{kmod.PRESET_HOST}/katana-presets/645f3f9c-7655-4b7e-8a99-43ef130009b5.webp"},
+    "person_image": {"url": "https://evil.example/p.webp"},
+}  # fmt: skip
+
+
+async def test_gallery_reads_the_cms_and_falls_back_offline(monkeypatch):
+    monkeypatch.setattr(kmod, "_gallery", {})
+    pages = [
+        {"items": [CMS_ITEM, {"slug": "no-video"}], "next_cursor": "c2"},
+        {"items": [CMS_ITEM], "next_cursor": None},
+    ]
+    seen: list = []
+
+    def cms(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json=pages[len(seen) - 1])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(cms)) as client:
+        items = await kmod.gallery(client, "es")
+        assert await kmod.gallery(client, "es") is items  # en caché: no vuelve a pedir
+    assert [p.get("cursor") for p in seen] == [None, "c2"]
+    [p] = items  # sin video se descarta y el repetido también
+    assert p["name"] == "Candy pop" and p["max_images"] == 10 and p["author"] == "heyfinch"
+    assert p["video_url"].endswith("11822042-be42-495c-be1d-cdf2f8754534.mp4") and p["result_url"].endswith(
+        "18188271-4cc2-48c4-9529-33842cb5fd26.mp4"
+    )
+    assert p["person_url"] == ""  # solo medios del CDN de los presets
+    assert kmod.preset_for(p["result_url"]) == "candy-pop" and kmod.is_preset_video(p["video_url"])
+
+    def down(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(down)) as client:
+        fallback = await kmod.gallery(client, "en")
+    assert fallback == kmod.presets() and {x["category"] for x in fallback} <= {
+        c["id"] for c in kmod.CATEGORIES
+    }
 
 
 # --------------------------------------------------------------------------------------------- rutas
