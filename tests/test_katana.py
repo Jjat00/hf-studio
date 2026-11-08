@@ -487,3 +487,26 @@ async def test_mix_without_music_keeps_late_sound_effects(kenv, tmp_path):
         subprocess.run, ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration",
                          "-of", "csv=p=0", str(out)], capture_output=True, text=True, check=True)  # fmt: skip
     assert float(probe.stdout.strip()) >= 2.9  # el segundo efecto sigue y el audio dura lo que el video
+
+
+@needs_ffmpeg
+async def test_plan_error_after_writes_is_saved_and_replayed(kenv, tmp_path):
+    app, http, claude, _ = kenv
+    bad = raw_plan("stylised")
+    bad["stills"][0]["refs"].append("location:L1")  # válido para parse_plan, pero el lienzo queda en ciclo
+    claude.plan = bad
+    ref_url = await upload(http, make_reference(tmp_path / "ref.mp4"), "ref.mp4", "video/mp4")
+    photo = await upload(http, PNG, "me.png", "image/png")
+    pid = (await http.post("/v1/katana/projects", json={"reference_url": ref_url})).json()["id"]
+    ask = {"subject_urls": [photo]}
+    quote = (await http.post(f"/v1/katana/projects/{pid}/plan/estimate", json=ask)).json()
+    first = await http.post(f"/v1/katana/projects/{pid}/plan", json={**ask, "max_usd": quote["max_usd"]},
+                            headers={"Idempotency-Key": "bad-graph"})  # fmt: skip
+    assert first.status_code == 422 and first.json()["error"]["code"] == "invalid_graph", first.text
+    async with app.state.sessions() as s:
+        attempt = await s.scalar(select(KatanaPlanAttempt).where(KatanaPlanAttempt.key == "bad-graph"))
+        assert attempt.state == "failed" and attempt.error["code"] == "invalid_graph"
+    again = await http.post(f"/v1/katana/projects/{pid}/plan", json={**ask, "max_usd": quote["max_usd"]},
+                            headers={"Idempotency-Key": "bad-graph"})  # fmt: skip
+    assert again.status_code == 422 and "already attempted" in again.json()["error"]["message"]
+    assert len(claude.requests) == 1

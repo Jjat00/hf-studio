@@ -4988,11 +4988,13 @@ def create_app(
                 raise ServiceError(409, "plan_in_progress",
                                    "This plan is still being written (or ended uncertainly): quote it again")  # fmt: skip
 
+        owner_id = owner.id  # tras un rollback los objetos de la sesión expiran: no volver a leerlos
+
         async def settle(**fields) -> None:
             async with app.state.sessions() as s:
                 attempt = await s.scalar(
                     select(KatanaPlanAttempt).where(
-                        KatanaPlanAttempt.owner_id == owner.id,
+                        KatanaPlanAttempt.owner_id == owner_id,
                         KatanaPlanAttempt.project_id == project_id,
                         KatanaPlanAttempt.key == idempotency_key,
                     )
@@ -5005,6 +5007,9 @@ def create_app(
         try:
             result = await run_katana_plan(session, owner, catalog, project, body)
         except ServiceError as exc:
+            # El plan pudo escribir antes de fallar (subidas, flush): se deshace para soltar el bloqueo de SQLite
+            # antes de guardar el error en otra sesión.
+            await session.rollback()
             await settle(
                 state="failed", error={"status": exc.status, "code": exc.code, "message": exc.message}
             )
@@ -5012,6 +5017,7 @@ def create_app(
         except BaseException as exc:
             # Resultado incierto (Claude pudo cobrar): queda en `running` y un reintento con la clave da 409.
             log.warning("katana plan ended unexpectedly: %r", exc)
+            await session.rollback()
             raise
         await settle(state="done", result=json.loads(json.dumps(result, default=str)))
         return result
