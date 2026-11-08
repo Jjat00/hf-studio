@@ -31,9 +31,10 @@ TOOL_PROVIDER = "hf-studio"
 AUDIO_PROVIDER = "elevenlabs"
 ASSISTANT_PROVIDER = "anthropic"
 FACTORY_PROVIDER = "factory"  # Content Factory (factory.py)
+KATANA_PROVIDER = "katana"  # Katana Edit (katana_edit.py)
 # Proveedores internos del worker que trabajan dentro de este proceso (salidas `local://`): su copia guardada
 # es obligatoria y se pueden cancelar en curso.
-BACKGROUND_PROVIDERS = (TOOL_PROVIDER, AUDIO_PROVIDER, ASSISTANT_PROVIDER, FACTORY_PROVIDER)
+BACKGROUND_PROVIDERS = (TOOL_PROVIDER, AUDIO_PROVIDER, ASSISTANT_PROVIDER, FACTORY_PROVIDER, KATANA_PROVIDER)
 LOCAL_SCHEME = "local://"
 MAX_COMBINE = 10
 MAX_MIX_AUDIO = 4

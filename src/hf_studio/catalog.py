@@ -40,6 +40,7 @@ class Catalog:
         # y nodos de audio de ElevenLabs para Spaces (voz, efecto, música).
         # y el nodo Assistant (Claude) para Spaces.
         from .factory import FACTORY_NODE
+        from .katana_edit import KATANA_EDIT_NODE
         from .space_assistant import ASSISTANT_NODE
         from .space_audio import AUDIO_NODES
         from .space_tools import TOOLS
@@ -50,6 +51,7 @@ class Catalog:
             **AUDIO_NODES,
             ASSISTANT_NODE["id"]: ASSISTANT_NODE,
             FACTORY_NODE["id"]: FACTORY_NODE,
+            KATANA_EDIT_NODE["id"]: KATANA_EDIT_NODE,
         }.items():
             self.models.setdefault(tool_id, tool)
         # Modelos que solo venden APIMart y KIE (`store: True`): si Higgsfield publica el mismo id, gana el suyo.

@@ -105,6 +105,9 @@ run_space con ese quote_id (si falla de forma ambigua, repítelo con el mismo qu
 corrida) → get_space_run hasta que termine. Si la corrida queda en awaiting_approval (un
 paso no cabe en el tope, no tiene precio o su respaldo cuesta más), dile el motivo y el nuevo total
 (pause.needed_total_usd) y, con su OK, approve_space_run; cancel_space_run la detiene.
+Katana (remixar un edit de referencia con el sujeto del usuario): katana_presets o upload_media del video →
+katana_create (análisis gratis) → katana_plan sin max_usd (cotiza los tokens de Claude) → OK del usuario →
+katana_plan con max_usd (crea el Space) → estimate_space_run → OK del usuario sobre ese total → run_space.
 Tarjeta en el chat: en los clientes con widgets (Claude Desktop), generate, generate_batch, run_preset,
 approve_fallback y las herramientas de audio abren una tarjeta que sigue el estado sola y muestra el video,
 la imagen o el audio al terminar; si el usuario solo quiere verlo, no hace falta que sondees ni que
@@ -1551,6 +1554,80 @@ def delete_preset(slug: str) -> dict:
 def delete_space(space_id: str) -> dict:
     """Borra un lienzo de Spaces y sus corridas; sus generaciones siguen en el historial. Confirma antes."""
     return _call("DELETE", f"/v1/spaces/{space_id}")
+
+
+@mcp.tool(
+    title="Create Katana remix (analyze reference)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def katana_create(reference_url: str, title: str | None = None) -> dict:
+    """Katana (remix de un edit de referencia con el sujeto del usuario), paso 1: copia la referencia (URL de
+    upload_media o de una generación propia, o el video_url de un preset de katana_presets) y la analiza gratis en
+    local: cortes, destellos, sacudidas, movimientos de cámara, golpes de audio, tempo y hojas de contacto. Devuelve
+    el proyecto con `analysis`; sigue con katana_plan."""
+    return _call("POST", "/v1/katana/projects", json={"reference_url": reference_url, "title": title})
+
+
+@mcp.tool(
+    title="List Katana presets",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def katana_presets() -> dict:
+    """Presets públicos de la galería de Katana: su video_url sirve de referencia en katana_create."""
+    return _call("GET", "/v1/katana/presets")
+
+
+@mcp.tool(
+    title="Get Katana remix",
+    annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    ),
+)
+def katana_get(project_id: str | None = None) -> dict:
+    """Un proyecto de Katana (análisis, plan y space_id), o la lista si no se pasa project_id."""
+    if project_id:
+        return _call("GET", f"/v1/katana/projects/{project_id}")
+    return _call("GET", "/v1/katana/projects")
+
+
+@mcp.tool(
+    title="Plan Katana remix (spends credits)",
+    annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
+    ),
+)
+def katana_plan(
+    project_id: str,
+    subject_urls: list[str],
+    brief: str = "",
+    aspect: str | None = None,
+    duration: float | None = None,
+    resolution: str = "720p",
+    max_clips: int = 3,
+    max_video_seconds: int = 30,
+    music: str = "reference",
+    language: str = "es",
+    max_usd: float | None = None,
+    idempotency_key: str | None = None,
+) -> dict:
+    """Katana, paso 2: Claude escribe el plan del remix (concepto, placas de lugar, fotograma clave, clips de
+    Seedance 2.5 y el EDL con la energía medida) y se crea un Space que lo produce, terminado en hf-studio/katana-edit.
+    subject_urls: fotos del sujeto (upload_media). Sin max_usd solo cotiza (no gasta): dile al usuario el max_usd
+    (tokens de Claude) y, con su OK, repite con ese max_usd. Planear no genera video: después
+    estimate_space_run(space_id) y, con el OK del usuario sobre ese total, run_space."""
+    body = {"subject_urls": subject_urls, "brief": brief, "aspect": aspect, "duration": duration,
+            "resolution": resolution, "max_clips": max_clips, "max_video_seconds": max_video_seconds,
+            "music": music, "language": language}  # fmt: skip
+    if max_usd is None:
+        return _call("POST", f"/v1/katana/projects/{project_id}/plan/estimate", json=body)
+    headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
+    return _call(
+        "POST", f"/v1/katana/projects/{project_id}/plan", json={**body, "max_usd": max_usd}, headers=headers
+    )
 
 
 def main() -> None:

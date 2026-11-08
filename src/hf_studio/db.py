@@ -223,6 +223,37 @@ class Project(Base):
         return {**data, "brief": self.brief} if full else data
 
 
+class KatanaProject(Base):
+    """Remix de Katana: la referencia analizada (`analysis`, archivos en `storage/katana/<id>/`), lo que pidió el
+    usuario (`inputs`: fotos del sujeto, encargo, opciones), el plan de Claude (`plan`) y el Space que lo produce."""
+
+    __tablename__ = "katana_projects"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("api_clients.id"), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    reference_url: Mapped[str] = mapped_column(Text)
+    preset: Mapped[str | None] = mapped_column(String(120))
+    analysis: Mapped[dict | None] = mapped_column(JSON)
+    inputs: Mapped[dict | None] = mapped_column(JSON)
+    plan: Mapped[dict | None] = mapped_column(JSON)
+    plan_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    space_id: Mapped[str | None] = mapped_column(String(36))
+    music_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+    def out(self, full: bool = False) -> dict:
+        data = {"id": self.id, "title": self.title, "reference_url": self.reference_url, "preset": self.preset,
+                "space_id": self.space_id, "planned": self.plan is not None,
+                "plan_cost_usd": round(self.plan_cost_usd or 0.0, 4),
+                "created_at": self.created_at.replace(tzinfo=UTC).isoformat(),
+                "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
+        if full:
+            data.update({"analysis": self.analysis, "inputs": self.inputs, "plan": self.plan})
+        return data
+
+
 class Shot(Base):
     """Toma de la lista de tomas de un proyecto (AI Director). `take_job_ids` son todas las generaciones de la toma,
     `board_job_id` su fotograma de storyboard y `selected_job_id` la toma buena. Estados: planned, boarded,

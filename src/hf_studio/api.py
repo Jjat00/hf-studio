@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from . import director as dr
+from . import katana as katana_mod
 from . import projects
 from . import skills as skill_files
 from . import supercomputer as sc
@@ -46,6 +47,7 @@ from .db import (
     Element,
     Folder,
     Job,
+    KatanaProject,
     Preset,
     Project,
     ProjectDocument,
@@ -102,7 +104,21 @@ from .factory_styles import STYLES as FACTORY_STYLES
 from .factory_styles import public_styles as factory_styles
 from .free_voices import FreeVoiceError, free_sample, free_voices
 from .higgsfield import UPLOAD_CONTENT_TYPES
-from .media import cached_source, local_duration, matches_type
+from .katana_analysis import AnalysisError
+from .katana_analysis import analyze as analyze_reference
+from .katana_edit import KatanaEditJobs, is_katana_edit
+from .katana_plan import (
+    PlanError,
+    generated_seconds,
+    music_wanted,
+    parse_plan,
+    ref_shots_needed,
+    to_graph,
+    write_plan,
+)
+from .katana_plan import build_content as katana_content
+from .katana_plan import max_cost_usd as katana_plan_max
+from .media import _head, cached_source, is_media_container, local_duration, matches_type
 from .media import download as download_media
 from .presets import BUILTIN, render, resolve_values, variables_in
 from .pricing import fill_placeholders, total
@@ -150,6 +166,7 @@ from .space_tools import (
     AUDIO_PROVIDER,
     BACKGROUND_PROVIDERS,
     FACTORY_PROVIDER,
+    KATANA_PROVIDER,
     TOOL_PROVIDER,
     LocalTools,
     is_tool,
@@ -575,8 +592,16 @@ def create_app(
         app.state.audio_jobs.sweep()
         app.state.assistant_jobs = AnthropicJobs(settings, transport)
         app.state.assistant_jobs.sweep()
-        app.state.factory_jobs = ContentFactoryJobs(settings, app.state.eleven, transport)
+        # Content Factory y Katana Edit comparten la cola de render: cada render ya lanza varios Chrome.
+        app.state.render_slots = asyncio.Semaphore(1)
+        app.state.factory_jobs = ContentFactoryJobs(
+            settings, app.state.eleven, transport, slots=app.state.render_slots
+        )
         app.state.factory_jobs.sweep()
+        app.state.katana_jobs = KatanaEditJobs(
+            settings, transport, plain=app.state.hf.plain, slots=app.state.render_slots
+        )
+        app.state.katana_jobs.sweep()
         app.state.worker = Worker(
             app.state.sessions,
             {
@@ -585,6 +610,7 @@ def create_app(
                 AUDIO_PROVIDER: app.state.audio_jobs,
                 ASSISTANT_PROVIDER: app.state.assistant_jobs,
                 FACTORY_PROVIDER: app.state.factory_jobs,
+                KATANA_PROVIDER: app.state.katana_jobs,
             },
             settings,
         )
@@ -622,6 +648,7 @@ def create_app(
         # Un candado por chat para escribir sus propuestas (vincular, generar en automático, guardar un turno):
         # ninguna escritura pisa a otra ni el tope automático se reparte dos veces.
         app.state.chat_locks = {}
+        app.state.katana_plans = {}  # planes por (cliente, proyecto, Idempotency-Key)
         app.state.factory_scripts = {}  # guiones por (cliente, Idempotency-Key): un reintento no vuelve a cobrar
         app.state.voice_quotes = {}
         # Un cambio de voz corre dentro de este proceso: si se reinició a medias, no va a terminar.
@@ -973,7 +1000,7 @@ def create_app(
         if is_audio_node(model["id"]) and not app.state.eleven.configured:
             # ServiceError (no VoiceError): también la entiende el motor de corridas, que marca el paso fallido.
             raise ServiceError(503, "elevenlabs_not_configured", "Set ELEVENLABS_API_KEY in .env")
-        if is_tool(model["id"]):
+        if is_tool(model["id"]) or is_katana_edit(model["id"]):
             # ffmpeg abre estos archivos en local: solo subidas o salidas propias (como keep_source_audio).
             for url in tool_media(arguments):
                 if not await trusted_media(session, owner, url):
@@ -4757,5 +4784,252 @@ def create_app(
             if job:
                 await app.state.worker.refresh(session, job)
                 await app.state.worker.commit(session, job_id)
+
+    # --- Katana: remix de un edit de referencia ------------------------------------------------------------------
+
+    class KatanaProjectIn(BaseModel):
+        reference_url: str = Field(
+            max_length=2000, description="Subida o generación propia, o un preset de Katana"
+        )
+        title: str | None = Field(None, max_length=120)
+
+    class KatanaPlanIn(BaseModel):
+        subject_urls: list[str] = Field(
+            min_length=1, max_length=5, description="Fotos del sujeto (/v1/uploads)"
+        )
+        brief: str = Field("", max_length=4000)
+        aspect: Literal["9:16", "16:9", "1:1", "4:3", "3:4", "21:9"] | None = None
+        duration: float | None = Field(None, ge=3, le=60)
+        resolution: Literal["480p", "720p", "1080p"] = "720p"
+        max_clips: int = Field(3, ge=1, le=6)
+        max_video_seconds: int = Field(30, ge=4, le=90)
+        music: Literal["reference", "none"] = "reference"
+        language: str = Field("es", max_length=5)
+        preset_context: str | None = Field(None, max_length=2000)
+        max_usd: float | None = Field(None, ge=0, description="Tope aprobado de /plan/estimate")
+
+    async def owned_katana(session: AsyncSession, owner: ApiClient, project_id: str) -> KatanaProject:
+        project = await session.get(KatanaProject, project_id)
+        if project is None or (project.owner_id != owner.id and not owner.sees_all):
+            raise ServiceError(404, "not_found", "Katana project not found")
+        return project
+
+    async def store_upload(
+        session: AsyncSession, owner: ApiClient, data: bytes, content_type: str, filename: str
+    ) -> str:
+        url = await app.state.hf.upload(data, content_type)
+        session.add(
+            Upload(owner_id=owner.id, filename=filename, content_type=content_type, size=len(data), url=url)
+        )
+        return url
+
+    def katana_options(project: KatanaProject, body: KatanaPlanIn) -> dict:
+        analysis = project.analysis or {}
+        ref_aspect = analysis.get("aspect")
+        aspect = body.aspect or (
+            ref_aspect if ref_aspect in ("9:16", "16:9", "1:1", "4:3", "3:4", "21:9") else "9:16"
+        )
+        ref_duration = float((analysis.get("energy") or {}).get("duration") or 15)
+        duration = body.duration or min(30.0, max(5.0, ref_duration))
+        music = body.music if (analysis.get("music") or body.music == "none") else "none"
+        return {"aspect": aspect, "duration": round(duration, 2), "resolution": body.resolution,
+                "max_clips": body.max_clips, "max_video_seconds": body.max_video_seconds, "music": music,
+                "language": body.language}  # fmt: skip
+
+    @app.get("/v1/katana/presets", tags=["katana"])
+    async def katana_presets(_: Owner) -> dict:
+        """Presets públicos de la galería de Katana: su video de muestra sirve de referencia."""
+        return {"presets": katana_mod.presets()}
+
+    @app.get("/v1/katana/projects", tags=["katana"])
+    async def list_katana(session: Session, owner: Owner) -> dict:
+        query = select(KatanaProject)
+        if not owner.sees_all:
+            query = query.where(KatanaProject.owner_id == owner.id)
+        rows = await session.scalars(query.order_by(KatanaProject.updated_at.desc()).limit(100))
+        return {"projects": [p.out() for p in rows]}
+
+    @app.post("/v1/katana/projects", tags=["katana"], status_code=201)
+    async def create_katana(body: KatanaProjectIn, session: Session, owner: Owner) -> dict:
+        """Copia la referencia y la analiza (gratis, local): cortes, destellos, sacudidas, movimientos de cámara,
+        golpes de audio, tempo y hojas de contacto. Tarda unos segundos por cada segundo de video."""
+        url = body.reference_url.strip()
+        preset = katana_mod.preset_for(url) if katana_mod.is_preset_video(url) else None
+        if preset is None and not await trusted_media(session, owner, url):
+            raise ServiceError(
+                422,
+                "untrusted_source",
+                "The reference must be one of your uploads or generations, or a Katana preset",
+            )
+        project = KatanaProject(owner_id=owner.id, title=(body.title or preset or "Katana remix")[:120],
+                                reference_url=url, preset=preset)  # fmt: skip
+        session.add(project)
+        await session.flush()
+        work = katana_mod.folder(settings.storage_dir, project.id)
+        work.mkdir(parents=True, exist_ok=True)
+        ref = work / "ref.mp4"
+        try:
+            if not await download_media(url, app.state.hf.plain, settings.max_upload_bytes, ref):
+                raise ServiceError(422, "reference_unreachable", "Could not download the reference video")
+            if not is_media_container(_head(ref)):
+                raise ServiceError(415, "not_a_video", "The reference is not a video")
+            try:
+                analysis = await analyze_reference(str(ref), work)
+            except AnalysisError as exc:
+                raise ServiceError(422, "reference_unreadable", str(exc)) from None
+        except BaseException:
+            katana_mod.remove(settings.storage_dir, project.id)
+            raise
+        project.analysis = analysis
+        await session.commit()
+        return project.out(full=True)
+
+    @app.get("/v1/katana/projects/{project_id}", tags=["katana"])
+    async def get_katana(project_id: str, session: Session, owner: Owner) -> dict:
+        return (await owned_katana(session, owner, project_id)).out(full=True)
+
+    @app.delete("/v1/katana/projects/{project_id}", tags=["katana"], status_code=204)
+    async def delete_katana(project_id: str, session: Session, owner: Owner) -> None:
+        """Borra el proyecto y su análisis; el Space y sus generaciones se quedan."""
+        project = await owned_katana(session, owner, project_id)
+        await session.delete(project)
+        await session.commit()
+        katana_mod.remove(settings.storage_dir, project_id)
+
+    @app.get("/v1/katana/projects/{project_id}/files/{group}/{name}", tags=["katana"])
+    async def katana_file(
+        project_id: str, group: str, name: str, session: Session, owner: Owner
+    ) -> FileResponse:
+        await owned_katana(session, owner, project_id)
+        path = katana_mod.file_path(settings.storage_dir, project_id, group, name)
+        if path is None:
+            raise ServiceError(404, "not_found", "File not found")
+        return FileResponse(path, media_type="image/jpeg")
+
+    @app.post("/v1/katana/projects/{project_id}/plan/estimate", tags=["katana"])
+    async def katana_plan_estimate(
+        project_id: str, body: KatanaPlanIn, session: Session, owner: Owner
+    ) -> dict:
+        """Lo máximo que puede costar que Claude escriba el plan (no llama a Claude). Se aprueba como `max_usd`."""
+        project = await owned_katana(session, owner, project_id)
+        if not project.analysis:
+            raise ServiceError(409, "not_analyzed", "The reference has not been analyzed")
+        return {"max_usd": katana_plan_max(project.analysis, len(body.subject_urls), body.brief),
+                "options": katana_options(project, body), "available": app.state.assistant_jobs.available}  # fmt: skip
+
+    @app.post("/v1/katana/projects/{project_id}/plan", tags=["katana"])
+    async def katana_plan(
+        project_id: str,
+        body: KatanaPlanIn,
+        session: Session,
+        owner: Owner,
+        catalog: CatalogDep,
+        idempotency_key: Annotated[str | None, Header(max_length=200)] = None,
+    ) -> dict:
+        """Claude escribe el plan del remix y se crea el Space que lo produce (placas, fotogramas clave, clips de
+        Seedance 2.5 y el montaje). No genera nada: el Space se cotiza y corre aparte, con el OK del usuario.
+        Repetir con la misma Idempotency-Key devuelve el mismo resultado sin volver a llamar a Claude."""
+        jobs = app.state.assistant_jobs
+        if not jobs.available:
+            raise ServiceError(
+                503, "anthropic_not_configured", "Set ANTHROPIC_API_KEY in .env to plan remixes"
+            )
+        project = await owned_katana(session, owner, project_id)
+        if not project.analysis:
+            raise ServiceError(409, "not_analyzed", "The reference has not been analyzed")
+        cap = katana_plan_max(project.analysis, len(body.subject_urls), body.brief)
+        if body.max_usd is None or body.max_usd + 1e-9 < cap:
+            raise ServiceError(409, "quote_required", f"Planning can cost up to {cap} USD: approve it as max_usd",
+                               {"max_usd": cap})  # fmt: skip
+        for url in body.subject_urls:
+            if not await trusted_media(session, owner, url):
+                raise ServiceError(
+                    422, "untrusted_source", "Subject photos must be your uploads or generations"
+                )
+        cache: dict = app.state.katana_plans
+        key = (owner.id, project_id, idempotency_key) if idempotency_key else None
+        entry = (
+            cache.setdefault(key, {"lock": asyncio.Lock(), "result": None, "error": None}) if key else None
+        )
+        if entry is None:
+            return await run_katana_plan(session, owner, catalog, project, body)
+        async with entry["lock"]:
+            if entry["result"] is not None:
+                return {**entry["result"], "deduplicated": True}
+            if entry["error"] is not None:
+                status, code, message = entry["error"]
+                raise ServiceError(status, code, f"{message} (already attempted with this Idempotency-Key)")
+            try:
+                result = await run_katana_plan(session, owner, catalog, project, body)
+            except ServiceError as exc:
+                entry["error"] = (exc.status, exc.code, exc.message)
+                raise
+            except BaseException as exc:
+                entry["error"] = (502, "plan_uncertain", f"The plan request ended unexpectedly: {exc!r}")
+                raise
+            entry["result"] = result
+            if len(cache) > 200:
+                for old in list(cache)[:50]:
+                    cache.pop(old, None)
+            return result
+
+    async def run_katana_plan(
+        session: AsyncSession, owner: ApiClient, catalog: Catalog, project: KatanaProject, body: KatanaPlanIn
+    ) -> dict:
+        analysis = project.analysis
+        work = katana_mod.folder(settings.storage_dir, project.id)
+        options = katana_options(project, body)
+        content = katana_content(analysis, work / "sheets", body.subject_urls, body.brief, options,
+                                 body.preset_context)  # fmt: skip
+        jobs = app.state.assistant_jobs
+        try:
+            raw, cost = await write_plan(jobs.api_key, content, base_url=settings.secret("ANTHROPIC_BASE_URL") or None,
+                                         http_client_factory=jobs.http_client_factory)  # fmt: skip
+            shots = len(analysis["energy"]["shots"])
+            plan = parse_plan(raw, len(body.subject_urls), shots)
+        except PlanError as exc:
+            raise ServiceError(exc.status, exc.code, exc.message) from None
+        ref_urls: dict[int, str] = {}
+        frames = {f["shot"]: f["file"] for f in analysis.get("shot_frames") or []}
+        for n in ref_shots_needed(plan):
+            name = frames.get(n)
+            if name is None:
+                continue
+            data = (work / "shots" / name).read_bytes()
+            ref_urls[n] = await store_upload(session, owner, data, "image/jpeg", f"katana-ref-{n}.jpg")
+        music_url = None
+        if options["music"] == "reference" and music_wanted(plan) != "none" and analysis.get("music"):
+            if project.music_url and await trusted_media(session, owner, project.music_url):
+                music_url = project.music_url
+            else:
+                data = (work / analysis["music"]).read_bytes()
+                music_url = await store_upload(session, owner, data, "audio/wav", "katana-music.wav")
+                project.music_url = music_url
+        try:
+            graph = to_graph(plan, body.subject_urls, ref_urls, music_url, body.resolution)
+        except PlanError as exc:
+            raise ServiceError(exc.status, exc.code, exc.message) from None
+        await session.flush()
+        graph = valid_graph(graph, catalog)
+        await check_refs(session, owner, None, graph)
+        space = Space(owner_id=owner.id, title=f"Katana · {plan.title}"[:120], graph=graph)
+        session.add(space)
+        await session.flush()
+        project.plan = plan.model_dump()
+        project.plan_cost_usd = (project.plan_cost_usd or 0.0) + cost
+        project.inputs = {**body.model_dump(exclude={"max_usd"}), "options": options}
+        project.space_id = space.id
+        project.title = plan.title[:120]
+        project.updated_at = utcnow()
+        await session.commit()
+        warnings = []
+        if generated_seconds(plan) > body.max_video_seconds:
+            warnings.append(
+                f"The plan generates {generated_seconds(plan)} s of video, over the {body.max_video_seconds} s asked"
+            )
+        if len(plan.clips) > body.max_clips:
+            warnings.append(f"The plan uses {len(plan.clips)} clips, over the {body.max_clips} asked")
+        return {**project.out(full=True), "space": space.summary(), "cost_usd": round(cost, 6),
+                "generated_seconds": generated_seconds(plan), "warnings": warnings}  # fmt: skip
 
     return app

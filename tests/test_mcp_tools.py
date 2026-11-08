@@ -53,7 +53,11 @@ TOOLS = {
     "get_space": READ,
     "create_space": (False, False, False, False),
     "update_space": (False, True, False, False),
-    "estimate_space_run": (False, False, False, True),  # cotiza y puede subir salidas previas a Higgsfield
+    "estimate_space_run": (False, False, False, True),
+    "katana_create": (False, False, False, True),  # descarga y analiza la referencia
+    "katana_presets": READ,
+    "katana_get": READ,
+    "katana_plan": SPEND,  # tokens de Claude (sin max_usd solo cotiza)  # cotiza y puede subir salidas previas a Higgsfield
     "run_space": SPEND,
     "get_space_run": READ,
     "approve_space_run": SPEND,
@@ -102,7 +106,7 @@ def test_every_tool_declares_all_four_hints(name):
 
 def test_tools_that_spend_credits_say_so_in_the_title():
     for name in ("generate", "generate_batch", "run_preset", "change_voice", "text_to_speech",
-                 "sound_effect", "compose_music", "isolate_voice", "design_voice", "run_space", "approve_space_run"):  # fmt: skip
+                 "sound_effect", "compose_music", "isolate_voice", "design_voice", "run_space", "approve_space_run", "katana_plan"):  # fmt: skip
         assert "spends credits" in _listed()[name].title
 
 

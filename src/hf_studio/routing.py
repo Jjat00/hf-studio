@@ -16,6 +16,7 @@ from .catalog import ALIASES, Catalog
 from .elements import element_ids, is_element_id
 from .factory import is_factory, renderer_problem, script_problem
 from .factory import quote as factory_quote
+from .katana_edit import edl_problem, is_katana_edit
 from .pricing import fill_placeholders, quote
 from .providers.base import Provider, ProviderError
 from .providers.prices import PriceBook
@@ -23,7 +24,14 @@ from .providers.registry import DEFAULT_PROVIDER, PROVIDERS
 from .providers.routes import Route, routes_for, with_defaults
 from .space_assistant import assistant_quote, is_assistant
 from .space_audio import audio_quote, is_audio_node
-from .space_tools import ASSISTANT_PROVIDER, AUDIO_PROVIDER, FACTORY_PROVIDER, TOOL_PROVIDER, is_tool
+from .space_tools import (
+    ASSISTANT_PROVIDER,
+    AUDIO_PROVIDER,
+    FACTORY_PROVIDER,
+    KATANA_PROVIDER,
+    TOOL_PROVIDER,
+    is_tool,
+)
 from .store.seedance_draft import FINAL_ID as DRAFT_FINAL
 
 BALANCE_TTL = 60.0
@@ -160,6 +168,15 @@ class Router:
             est = factory_quote(logical)
             option = Option(FACTORY_PROVIDER, "Content Factory (local)", model["id"], logical, est["usd"], est["kind"],
                             basis=est["basis"])  # fmt: skip
+            return Plan(model["id"], [option], [], hints, forced=only is not None)
+        if is_katana_edit(model["id"]):
+            # Katana Edit: render local con HyperFrames, gratis; un EDL que no cuadra con sus medios no se cotiza.
+            problem = renderer_problem() or edl_problem(logical)
+            if problem:
+                excluded = [{"provider": KATANA_PROVIDER, "title": "Katana Edit", "reason": problem}]
+                return Plan(model["id"], [], excluded, hints, forced=only is not None)
+            option = Option(KATANA_PROVIDER, "Katana Edit (local)", model["id"], logical, 0.0, "exact",
+                            basis="Katana Edit (local render): free")  # fmt: skip
             return Plan(model["id"], [option], [], hints, forced=only is not None)
         if is_assistant(model["id"]):
             # Nodo Assistant de Spaces: la API de Claude, cotizada con su cota superior (aproximada).

@@ -529,6 +529,32 @@ export const studio = {
   deleteUpload: (id: string) => call<void>(`/v1/uploads/${id}`, { method: "DELETE" }),
   uploads: (limit = 60) =>
     call<{ uploads: { id: string; url: string; content_type: string; size: number; filename: string | null; created_at: string }[] }>(`/v1/uploads?limit=${limit}`),
+  /** Katana: presets públicos (su video de muestra sirve de referencia). */
+  katanaPresets: () => call<{ presets: KatanaPreset[] }>("/v1/katana/presets"),
+  katanaProjects: () => call<{ projects: KatanaProject[] }>("/v1/katana/projects"),
+  katanaProject: (id: string) => call<KatanaProject>(`/v1/katana/projects/${id}`),
+  /** Copia la referencia y la analiza (gratis, en local). */
+  katanaCreate: (referenceUrl: string, title?: string) =>
+    call<KatanaProject>("/v1/katana/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reference_url: referenceUrl, ...(title ? { title } : {}) }),
+    }),
+  katanaDelete: (id: string) => call<void>(`/v1/katana/projects/${id}`, { method: "DELETE" }),
+  katanaFile: (id: string, group: "sheets" | "shots", name: string) => `${BASE}/v1/katana/projects/${id}/files/${group}/${name}`,
+  /** Lo máximo que puede costar que Claude escriba el plan (no llama a Claude). */
+  katanaPlanEstimate: (id: string, body: KatanaPlanAsk) =>
+    call<{ max_usd: number; available: boolean; options: Record<string, unknown> }>(`/v1/katana/projects/${id}/plan/estimate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** Claude escribe el plan y se crea el Space que lo produce (no genera nada todavía). */
+  katanaPlan: (id: string, body: KatanaPlanAsk & { max_usd: number }, idempotencyKey: string) =>
+    call<KatanaProject & { space: { id: string }; cost_usd: number; generated_seconds: number; warnings: string[] }>(
+      `/v1/katana/projects/${id}/plan`,
+      { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey }, body: JSON.stringify(body) },
+    ),
   upload: async (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -537,6 +563,65 @@ export const studio = {
       body: form,
     });
   },
+};
+
+export type KatanaPreset = { id: string; name: string; video_url: string; thumbnail_url: string };
+export type KatanaPlanAsk = {
+  subject_urls: string[];
+  brief: string;
+  aspect?: string;
+  duration?: number;
+  resolution: "480p" | "720p" | "1080p";
+  max_clips: number;
+  max_video_seconds: number;
+  music: "reference" | "none";
+  language: string;
+};
+export type KatanaEvent = { t: number; end: number | null; kind: string; strength: number; data: Record<string, unknown> };
+export type KatanaAnalysis = {
+  probe: { width: number; height: number; fps: string; frames: number; duration: number; has_audio: boolean };
+  aspect: string;
+  energy: {
+    duration: number;
+    cuts: number[];
+    shots: { index: number; start: number; end: number; frames: number }[];
+    flashes: KatanaEvent[];
+    shakes: KatanaEvent[];
+    camera_moves: KatanaEvent[];
+    hits: KatanaEvent[];
+    tempo_bpm: number | null;
+    rates: Record<string, number>;
+    curve: number[];
+  };
+  sheets: { file: string; start: number; end: number }[];
+  shot_frames: { shot: number; t: number; file: string }[];
+  music: string | null;
+};
+export type KatanaPlanOut = {
+  title: string;
+  trick: string;
+  concept: string;
+  look: string;
+  aspect: string;
+  duration: number;
+  locations: { id: string; prompt: string }[];
+  stills: { id: string; kind: string; prompt: string; refs: string[] }[];
+  clips: { id: string; duration: number; prompt: string; refs: string[] }[];
+  notes: string;
+};
+export type KatanaProject = {
+  id: string;
+  title: string;
+  reference_url: string;
+  preset: string | null;
+  space_id: string | null;
+  planned: boolean;
+  plan_cost_usd: number;
+  created_at: string;
+  updated_at: string;
+  analysis?: KatanaAnalysis | null;
+  plan?: KatanaPlanOut | null;
+  inputs?: Record<string, unknown> | null;
 };
 
 /** Modelo del catálogo que renderiza los cortos de Content Factory. */
