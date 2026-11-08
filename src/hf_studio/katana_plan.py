@@ -55,6 +55,11 @@ MAX_OUTPUT_TOKENS = 24000
 REF_RE = re.compile(r"^(subject|ref_shot|still|location):([A-Za-z0-9_-]{1,16})$")
 
 
+NOT_CHARGED = {
+    "claude_rejected"
+}  # errores sin cobro: el intento no se guarda y la misma clave puede reintentar
+
+
 class PlanError(Exception):
     def __init__(self, status: int, code: str, message: str):
         super().__init__(message)
@@ -69,8 +74,10 @@ _INT = {"type": "integer"}
 _BOOL = {"type": "boolean"}
 
 
-def _null(kind: str) -> dict:
-    return {"anyOf": [{"type": kind}, {"type": "null"}]}
+# Sin anyOf ni null: cada unión agranda mucho la gramática compilada (la API rechaza el esquema por tamaño).
+# "Ninguno" se escribe "" en los textos y -1 en los enteros; la validación los convierte en None.
+_OPT_STR = {"type": "string"}
+_OPT_INT = {"type": "integer"}
 
 
 def _obj(props: dict) -> dict:
@@ -92,14 +99,14 @@ _SHOT = _obj(
         "camera_move": _STR,
         "camera_amount": _NUM,
         "grade": _STR,
-        "tint": _null("string"),
+        "tint": _OPT_STR,
         "transition_in": _STR,
         "transition_s": _NUM,
         "focus_x": _NUM,
         "focus_y": _NUM,
     }
 )
-_EFFECT = _obj({"type": _STR, "t": _NUM, "duration": _NUM, "intensity": _NUM, "color": _null("string")})
+_EFFECT = _obj({"type": _STR, "t": _NUM, "duration": _NUM, "intensity": _NUM, "color": _OPT_STR})
 _TEXT = _obj(
     {
         "text": _STR,
@@ -108,7 +115,7 @@ _TEXT = _obj(
         "font": _STR,
         "size": _NUM,
         "color": _STR,
-        "accent": _null("string"),
+        "accent": _OPT_STR,
         "uppercase": _BOOL,
         "tracking": _NUM,
         "x": _NUM,
@@ -116,8 +123,8 @@ _TEXT = _obj(
         "align": _STR,
         "animation": _STR,
         "exit": _STR,
-        "stroke": _null("string"),
-        "background": _null("string"),
+        "stroke": _OPT_STR,
+        "background": _OPT_STR,
         "blend": _STR,
     }
 )
@@ -127,12 +134,12 @@ _OUTPUT = _obj(
         "trick": _STR,
         "concept": _STR,
         "look": _STR,  # photoreal | stylised
-        "style_shot": _null("integer"),
-        "style_descriptors": _null("string"),
+        "style_shot": _OPT_INT,
+        "style_descriptors": _OPT_STR,
         "hero": _obj({"identity": _STR, "garments": _STR}),
         "aspect": _STR,
         "duration": _NUM,
-        "locations": _arr(_obj({"id": _STR, "prompt": _STR, "evidence_shot": _null("integer")})),
+        "locations": _arr(_obj({"id": _STR, "prompt": _STR, "evidence_shot": _OPT_INT})),
         "stills": _arr(_obj({"id": _STR, "kind": _STR, "prompt": _STR, "refs": _arr(_STR)})),
         "clips": _arr(
             _obj(
@@ -158,7 +165,7 @@ _OUTPUT = _obj(
                         "scanlines": _NUM,
                         "letterbox": _NUM,
                         "chroma": _NUM,
-                        "border": _null("string"),
+                        "border": _OPT_STR,
                     }
                 ),
                 "audio": _obj({"music": _STR, "music_start": _NUM, "fade_in": _NUM, "fade_out": _NUM}),
@@ -173,11 +180,23 @@ OUTPUT_FORMAT = {"type": "json_schema", "schema": _OUTPUT}
 # ------------------------------------------------------------------------------------- validación del plan
 
 
+def _none_if_empty(v: Any) -> Any:
+    """El esquema no admite null: "" y los enteros negativos significan «ninguno»."""
+    if v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, int) and v < 0):
+        return None
+    return v
+
+
 class Location(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(pattern=r"^L[0-9]{1,2}$")
     prompt: str = Field(min_length=10, max_length=4000)
     evidence_shot: int | None = None
+
+    @field_validator("evidence_shot", mode="before")
+    @classmethod
+    def _shot(cls, v: Any) -> Any:
+        return _none_if_empty(v)
 
 
 class Still(BaseModel):
@@ -226,6 +245,11 @@ class Plan(BaseModel):
     clips: list[Clip] = Field(min_length=1, max_length=MAX_CLIPS)
     edl: dict[str, Any]
     notes: str = ""
+
+    @field_validator("style_shot", "style_descriptors", mode="before")
+    @classmethod
+    def _optional(cls, v: Any) -> Any:
+        return _none_if_empty(v)
 
     @field_validator("look")
     @classmethod
@@ -294,7 +318,8 @@ Method:
 Rules: the hero always wears the clothing from the user's photo; never the reference performer's outfit, face or
 props. A hidden face stays hidden. No text, logos or watermarks in generated media. Hands and anatomy simple. Keep
 the plan finite and cheap: images are cheap, video seconds are the real cost. Do not ask questions; decide.
-Write every prompt in English. `notes` lists, in the user's language, what was adapted and any limitation."""
+Optional fields have no null: write "" for an absent text or color and -1 for an absent shot index (style_shot
+and evidence_shot when not stylised). Write every prompt in English. `notes` lists, in the user's language, what was adapted and any limitation."""
 
 
 def _summary(analysis: dict) -> str:
@@ -404,7 +429,9 @@ async def write_plan(
         ) as stream:
             response = await stream.get_final_message()
     except anthropic.APIStatusError as exc:
-        raise PlanError(502, "claude_error", f"Claude API error {exc.status_code}: {exc.message}") from None
+        # Un 4xx es un rechazo de la petición antes de generar: no se cobra y se puede reintentar.
+        code = "claude_rejected" if 400 <= exc.status_code < 500 else "claude_error"
+        raise PlanError(502, code, f"Claude API error {exc.status_code}: {exc.message}") from None
     except anthropic.APIConnectionError:
         raise PlanError(502, "claude_unreachable", "Could not reach the Claude API") from None
     finally:

@@ -108,6 +108,7 @@ from .higgsfield import UPLOAD_CONTENT_TYPES
 from .katana_analysis import AnalysisError
 from .katana_analysis import analyze as analyze_reference
 from .katana_edit import KatanaEditJobs, is_katana_edit
+from .katana_plan import NOT_CHARGED as KATANA_NOT_CHARGED
 from .katana_plan import (
     PlanError,
     generated_seconds,
@@ -5004,15 +5005,29 @@ def create_app(
                         setattr(attempt, name, value)
                     await s.commit()
 
+        async def forget() -> None:
+            async with app.state.sessions() as s:
+                await s.execute(
+                    delete(KatanaPlanAttempt).where(
+                        KatanaPlanAttempt.owner_id == owner_id,
+                        KatanaPlanAttempt.project_id == project_id,
+                        KatanaPlanAttempt.key == idempotency_key,
+                    )
+                )
+                await s.commit()
+
         try:
             result = await run_katana_plan(session, owner, catalog, project, body)
         except ServiceError as exc:
             # El plan pudo escribir antes de fallar (subidas, flush): se deshace para soltar el bloqueo de SQLite
             # antes de guardar el error en otra sesión.
             await session.rollback()
-            await settle(
-                state="failed", error={"status": exc.status, "code": exc.code, "message": exc.message}
-            )
+            if exc.code in KATANA_NOT_CHARGED:
+                await forget()
+            else:
+                await settle(
+                    state="failed", error={"status": exc.status, "code": exc.code, "message": exc.message}
+                )
             raise
         except BaseException as exc:
             # Resultado incierto (Claude pudo cobrar): queda en `running` y un reintento con la clave da 409.

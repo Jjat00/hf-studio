@@ -301,9 +301,14 @@ class PlanClaude:
     def __init__(self, plan: dict):
         self.plan = plan
         self.requests: list = []
+        self.reject = False
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
+        if self.reject:
+            self.reject = False
+            error = {"type": "invalid_request_error", "message": "The compiled grammar is too large"}
+            return httpx2.Response(400, json={"type": "error", "error": error})
         text = json.dumps(self.plan)
         events = [
             ("message_start", {"type": "message_start", "message": {
@@ -510,3 +515,31 @@ async def test_plan_error_after_writes_is_saved_and_replayed(kenv, tmp_path):
                             headers={"Idempotency-Key": "bad-graph"})  # fmt: skip
     assert again.status_code == 422 and "already attempted" in again.json()["error"]["message"]
     assert len(claude.requests) == 1
+
+
+async def test_rejected_plan_is_not_charged_and_can_retry(kenv, tmp_path):
+    app, http, claude, _ = kenv
+    claude.reject = True
+    ref_url = await upload(http, make_reference(tmp_path / "ref.mp4"), "ref.mp4", "video/mp4")
+    photo = await upload(http, PNG, "me.png", "image/png")
+    pid = (await http.post("/v1/katana/projects", json={"reference_url": ref_url})).json()["id"]
+    ask = {"subject_urls": [photo]}
+    quote = (await http.post(f"/v1/katana/projects/{pid}/plan/estimate", json=ask)).json()
+    body = {**ask, "max_usd": quote["max_usd"]}
+    first = await http.post(f"/v1/katana/projects/{pid}/plan", json=body, headers={"Idempotency-Key": "k1"})
+    assert first.status_code == 502 and first.json()["error"]["code"] == "claude_rejected", first.text
+    async with app.state.sessions() as s:
+        assert await s.scalar(select(KatanaPlanAttempt).where(KatanaPlanAttempt.key == "k1")) is None
+    again = await http.post(f"/v1/katana/projects/{pid}/plan", json=body, headers={"Idempotency-Key": "k1"})
+    assert again.status_code == 200, again.text
+    assert len(claude.requests) == 2
+
+
+def test_output_schema_has_no_unions_and_empty_means_none():
+    from hf_studio.katana_plan import OUTPUT_FORMAT, Location, Plan
+
+    text = json.dumps(OUTPUT_FORMAT)
+    assert "anyOf" not in text and "null" not in text
+    assert Location(id="L1", prompt="a plain street", evidence_shot=-1).evidence_shot is None
+    plan = Plan.model_validate({**raw_plan("photoreal"), "style_shot": -1, "style_descriptors": ""})
+    assert plan.style_shot is None and plan.style_descriptors is None
