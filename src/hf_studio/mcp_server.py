@@ -17,7 +17,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from mcp.server.apps import Apps, ResourceCsp
@@ -160,6 +160,23 @@ mcp = MCPServer("hf-studio", instructions=INSTRUCTIONS, extensions=[apps])
 # «spends credits»), o modifica algo (cancelar, etiquetar, escribir archivos). estimate_cost cuenta como
 # solo lectura: no gasta ni toca la base, aunque emite un quote_id en memoria (15 min, un solo uso).
 # list_sounds no lo es: antes de listar registra en la sonoteca los audios terminados que falten.
+
+
+def _is_studio_ref(url: str) -> bool:
+    """Ruta relativa a HF_STUDIO_URL (sin esquema, sin host y sin segmentos '..'). Solo esas viajan con el token
+    del cliente: httpx manda las cabeceras del cliente a cualquier URL absoluta, aunque el esquema venga en
+    mayúsculas."""
+    clean = str(url).strip()
+    if not clean or "\\" in clean or not clean.startswith("/") or clean.startswith("//"):
+        return False
+    try:
+        parsed = httpx.URL(clean)
+    except httpx.InvalidURL:
+        return False
+    parts = urlsplit(clean)
+    if parts.scheme or parts.netloc or parsed.scheme or parsed.host:
+        return False
+    return ".." not in parts.path.split("/")
 
 
 def _client() -> httpx.Client:
@@ -892,12 +909,16 @@ def download_outputs(generation_id: str, dest_dir: str = ".") -> dict:
     with _client() as http:
         for i, out in enumerate(job["outputs"]):
             # Preferir la copia propia (no caduca); si no existe, la URL de Higgsfield (≥ 7 días).
-            if out.get("file_url"):
-                response = http.get(out["file_url"])
-            else:
-                response = httpx.get(out["url"], timeout=150, follow_redirects=True)
+            target_url = str(out.get("file_url") or out["url"]).strip()
+            if out.get("file_url") and _is_studio_ref(out["file_url"]):
+                response = http.get(target_url)
+            else:  # URL absoluta del proveedor: sin el token de HF Studio
+                parts = urlsplit(target_url)
+                if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+                    raise ToolError("Esa salida no tiene una URL válida")
+                response = httpx.get(target_url, timeout=150, follow_redirects=True)
             response.raise_for_status()
-            suffix = Path(out.get("file_url") or out["url"]).suffix.split("?")[0] or ".bin"
+            suffix = Path(target_url).suffix.split("?")[0] or ".bin"
             target = dest / f"{generation_id[:8]}-{i}-{out['kind']}{suffix}"
             target.write_bytes(response.content)
             saved.append(str(target.resolve()))
@@ -1397,14 +1418,18 @@ def generation_preview(generation_id: str, index: int = 0) -> dict:
     if job.get("status") != "completed" or not 0 <= index < len(outputs):
         raise ToolError("Esa salida no existe o la generación no ha terminado")
     out = outputs[index]
+    # La copia local primero (no caduca); si no hay, la URL del proveedor.
+    target = str(out.get("file_url") or out.get("url") or "").strip()
     try:
-        with _client() as http:
-            # La copia local primero (no caduca); si no hay, la URL del proveedor.
-            if out.get("file_url") or not str(out.get("url", "")).startswith("http"):
-                data, mime = _fetch_capped(http, out.get("file_url") or out["url"])
-            else:
-                with httpx.Client(timeout=150) as remote:
-                    data, mime = _fetch_capped(remote, out["url"])
+        if _is_studio_ref(target):
+            with _client() as http:
+                data, mime = _fetch_capped(http, target)
+        else:  # absoluta (https://, HTTPS://, //host…): nunca con el token de HF Studio
+            parts = urlsplit(target)
+            if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+                raise ToolError("Esa salida no tiene una URL válida")
+            with httpx.Client(timeout=150) as remote:
+                data, mime = _fetch_capped(remote, target)
     except httpx.HTTPError as exc:
         raise ToolError(f"No se pudo leer la salida: {exc}") from exc
     if not mime or mime == "application/octet-stream":
