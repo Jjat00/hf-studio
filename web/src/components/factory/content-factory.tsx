@@ -504,8 +504,8 @@ export function ContentFactory() {
                   <div className="bg-surface-2 px-2 py-1.5">
                     <p className="truncate text-xs font-semibold">{s.name}</p>
                     <div className="mt-1 flex gap-1">
-                      {s.colors.map((c) => (
-                        <span key={c} className="size-2.5 rounded-full border border-white/20" style={{ background: c }} />
+                      {s.colors.map((c, i) => (
+                        <span key={`${i}-${c}`} className="size-2.5 rounded-full border border-white/20" style={{ background: c }} />
                       ))}
                     </div>
                   </div>
