@@ -22,16 +22,23 @@ Fuentes (revisadas el 2026-10-17; 5.5 el 2026-11-11):
   1K/1.5K/2K; 10 relaciones sin 9:21; hasta 10 referencias; `background` auto/transparent/opaque,
   transparente solo en png; png por defecto). Precio `seedream-5-5|1K` (también 1.5K, lo dice la doc) y
   `|2K`. Cobra aparte cada imagen de entrada, la primera incluida, pero la tabla no publica ese importe: la
-  edición 5.5 no se ruta a APIMart (siempre tendría precio desconocido), solo el texto a imagen.
+  edición en APIMart tiene precio desconocido (`None`). `size: auto` es siempre 2K, así que la relación
+  `auto` se envía como el nivel solo (`size: 1.5K`), con el que el modelo elige la relación.
+  Descomposición en capas: el mismo id con `layer_decomposition: true`, una sola imagen, `size`
+  auto/1K/1.5K/2K y `layer_decomposition_options.max_images` (2 a 100, con la base).
   KIE: https://docs.kie.ai/market/seedream/5-5-text-to-image.md y .../5-5-image-to-image.md (`size`
   1K/1.5K/2K, 8 relaciones, `auto` solo en edición, hasta 10 imágenes, prompt de 5 a 5000 caracteres,
   `background`). Precios `seedream 5.5, text to image, 1k`, `seedream 5.5, image to image, 1k` y, por cada
   imagen de entrada, `seedream 5.5, input image, image to image / layer decomposition`.
+  .../5-5-layer-decomposition.md (`image_url`, prompt opcional hasta 2000, `size` auto/1K/1.5K/2K,
+  `max_images` 2 a 100): se cobra la imagen de entrada más cada imagen que sale (base y capas) al precio del
+  nivel. El número de capas no se sabe antes, así que en ambas tiendas el precio es desconocido (`None`).
+  Ambas devuelven la base primero y luego las capas como URLs, que el worker guarda como salidas; los
+  metadatos de cada capa (posición, nombre, OCR) se pierden, por eso no se ofrece `text_recognition`.
 
 Fuera a propósito: la generación en serie (`n`/`max_images`, que da un conjunto y no N variantes), la
-descomposición en capas (5.0 y 5.5: devuelve una base más un número variable de capas y se cobra por las que
-salen, así que el precio no se conoce antes; además trae metadatos de capas y OCR que el estudio no muestra) y
-el fondo transparente de 5.0 Pro/Flash. En 5.5 el fondo sí está: ambas tiendas lo aceptan igual.
+descomposición en capas de 5.0 y el fondo transparente de 5.0 Pro/Flash. En 5.5 el fondo sí está: ambas
+tiendas lo aceptan igual.
 """
 
 from __future__ import annotations
@@ -41,7 +48,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..providers.routes import Route, Spec, per_unit, unsupported
-from ._common import choice, model, prompt, upper, urls
+from ._common import choice, model, prompt, upper, url, urls
 
 DOCS = "https://docs.kie.ai/market/seedream/5-pro-text-to-image"
 # Relaciones que KIE acepta en 4.5 y 5.0 (obligatoria, sin `auto`).
@@ -70,9 +77,9 @@ class Version:
     seed: bool = False  # solo KIE en 3.0 y 4.0
     default_format: str = "jpeg"
     background: bool = False  # 5.5: auto, transparent u opaque en ambas tiendas
-    # False: la edición no va a APIMart (5.5: cobra cada imagen de entrada sin publicar el importe) y usa las
-    # relaciones de KIE, con `auto`.
-    apimart_edit: bool = True
+    # 5.5: ambas tiendas cobran cada imagen de entrada (APIMart sin publicar el importe) y KIE acepta `auto` en
+    # edición.
+    charges_inputs: bool = False
 
 
 APIMART_V4_RATIOS = frozenset(
@@ -103,7 +110,7 @@ VERSIONS = {
                 "seedream/5-pro-image-to-image", 10, output_format=True),
         Version("5.5", "Seedream 5.5", ("1k", "1.5k", "2k"), "2k", V5_RATIOS, 5000, 10, "seedream-5-5",
                 APIMART_V5_RATIOS, "seedream/5-5-text-to-image", "seedream/5-5-image-to-image", 10,
-                output_format=True, default_format="png", background=True, apimart_edit=False),
+                output_format=True, default_format="png", background=True, charges_inputs=True),
     )
 }  # fmt: skip
 # KIE `quality` según la resolución (4.5: basic=2K, high=4K; Lite: +ultra=4K con high=3K; Pro: 1K y 2K).
@@ -126,11 +133,10 @@ def _models() -> list[dict[str, Any]]:
     found = []
     for v in VERSIONS.values():
         for mode in _modes(v):
-            kie_only = mode == "edit" and not v.apimart_edit
-            ratios = list(KIE_RATIOS if kie_only else v.ratios) + (["auto"] if mode == "edit" else [])
+            ratios = list(v.ratios) + (["auto"] if mode == "edit" else [])
             if mode != "edit":
                 ratio_help = "Output aspect ratio."
-            elif kie_only:
+            elif v.charges_inputs:
                 ratio_help = "Output aspect ratio; auto lets the model choose."
             else:
                 ratio_help = "Output aspect ratio; auto follows the reference image (APIMart only)."
@@ -174,20 +180,15 @@ def _models() -> list[dict[str, Any]]:
                 notes.append(f"More than {v.kie_max_images} images only runs on APIMart.")
             if v.key == "4.0":
                 notes.append("Prompts over 1000 characters and a fixed seed only run on KIE.")
-            if kie_only:
-                notes = [
-                    ("ByteDance's Seedream. Higgsfield does not sell it, and APIMart does not publish what it "
-                     "charges per input image: edits run on KIE only."),
-                    "Every input image is charged on top of the output, the first one included.",
-                    "Prompts must have 5 characters or more.",
-                ]  # fmt: skip
-            elif set(v.ratios) - set(KIE_RATIOS):
+            if set(v.ratios) - set(KIE_RATIOS):
                 extra = ", ".join(r for r in v.ratios if r not in KIE_RATIOS and r not in KIE_V4_SIZES)
-                notes.append(
-                    f"Aspect ratios {extra}{' and auto' if mode == 'edit' else ''} only run on APIMart."
-                )
-            if v.key == "5.5" and not kie_only:
+                auto = " and auto" if mode == "edit" and not v.charges_inputs else ""
+                notes.append(f"Aspect ratios {extra}{auto} only run on APIMart.")
+            if v.key == "5.5":
                 notes.append("Prompts under 5 characters only run on APIMart.")
+            if v.charges_inputs and mode == "edit":
+                notes.append("Every input image is charged on top of the output, the first one included. APIMart "
+                             "does not publish that charge, so its price for edits is unknown.")  # fmt: skip
             if v.key == "5.0-pro":
                 notes.append("1.5k only runs on APIMart (same price as 1k). Each reference after the first adds a "
                              "small charge on KIE.")  # fmt: skip
@@ -207,7 +208,93 @@ def _models() -> list[dict[str, Any]]:
                     notes=notes,
                 )
             )
+    found.append(_layer_model())
     return found
+
+
+# --- Descomposición en capas (5.5) -------------------------------------------------------------
+
+LAYERS_ID = "bytedance/seedream-5.5/layer-decomposition"
+LAYER_SIZES = {"auto": "auto", "1k": "1K", "1.5k": "1.5K", "2k": "2K"}
+LAYER_PRICE_NOTE = (
+    (
+        "Billed per output image (the base plus each layer) at the size tier, plus the input image; the number of "
+        "layers is not known in advance, so the price is unknown"
+    ),
+)
+
+
+def _layer_model() -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "image_url": url("Image to split into layers (JPEG, PNG or WEBP up to 10 MB)."),
+        "prompt": prompt(
+            2000, "Optional: which elements to separate. Empty lets the model pick the main elements."
+        ),
+        "resolution": choice(
+            list(LAYER_SIZES), "auto",
+            "Output tier for the base and every layer; auto keeps the input size within 1k to 2k (billed as 2k).",
+        ),
+        "max_images": {
+            "type": "integer", "minimum": 2, "maximum": 100, "default": 30,
+            "description": "Most images to return, the base included (2 to 100). Each one is charged.",
+        },
+        "output_format": choice(["png", "jpeg"], "png", "Format of the base image; layers are always PNG."),
+    }  # fmt: skip
+    return model(
+        LAYERS_ID,
+        name="Seedream 5.5",
+        workflow="Layer decomposition",
+        family="seedream-5.5",
+        output="image",
+        capabilities=["edit"],
+        properties=properties,
+        required=["image_url"],
+        docs_url="https://docs.kie.ai/market/seedream/5-5-layer-decomposition",
+        notes=[
+            (
+                "ByteDance's Seedream 5.5 splits an image into a base image plus transparent PNG layers. Higgsfield "
+                "does not sell it: it runs on APIMart or KIE."
+            ),
+            (
+                "Unknown price: it is billed per output image (the base plus each layer) plus the input image, and "
+                "the number of layers is only known at the end. max_images caps it."
+            ),
+            (
+                "The outputs are the base first, then the layers. Layer positions, names and text recognition are not "
+                "kept."
+            ),
+        ],
+        summary="Split an image into a base and transparent layers with Seedream 5.5 through APIMart or KIE "
+        "(not offered by Higgsfield).",
+    )
+
+
+def _layer_limits(provider: str) -> Callable[[dict, dict], dict]:
+    def check(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+        if not out.get("prompt"):  # opcional: vacío es que el modelo elija los elementos
+            out.pop("prompt", None)
+        if provider == "apimart":
+            out["layer_decomposition"] = True
+            out["image_urls"] = [out.pop("image_url")]
+            options = {"max_images": out.pop("max_images")} if "max_images" in out else {}
+            if options:
+                out["layer_decomposition_options"] = options
+        return out
+
+    return check
+
+
+def _layer_routes(provider: str) -> Route:
+    name = "seedream-5-5" if provider == "apimart" else "seedream/5-5-layer-decomposition"
+    spec = Spec(
+        provider, name,
+        keep=("image_url", "prompt", "output_format", "max_images"),
+        rename={"resolution": "size"},
+        convert={"resolution": LAYER_SIZES.__getitem__},
+        allowed={"resolution": LAYER_SIZES},
+        build=_layer_limits(provider),
+    )  # fmt: skip
+    return Route(provider, name, spec, lambda i, h, p: None, notes=LAYER_PRICE_NOTE)
 
 
 MODELS = _models()
@@ -243,6 +330,8 @@ def _apimart_price(v: Version) -> Callable[..., float | None]:
     def price(i: dict[str, Any], h: dict[str, Any], p: dict[str, float]) -> float | None:
         if v.key in SURCHARGED and len(i.get("image_urls") or []) > 1:
             return None
+        if v.charges_inputs and i.get("image_urls"):  # cada imagen de entrada, sin importe publicado
+            return None
         if v.key in ("5.0-pro", "5.5"):  # 1.5K cuesta lo mismo que 1K
             return per_unit(p, f"{v.apimart}|{'2K' if i.get('resolution') == '2k' else '1K'}")
         return per_unit(p, f"{v.apimart}|default")
@@ -257,19 +346,37 @@ def apimart() -> dict[str, Route]:
         if not v.apimart:
             continue
         for mode in _modes(v):
-            if mode == "edit" and not v.apimart_edit:
-                continue
             ratios = set(v.apimart_ratios) | ({"auto"} if mode == "edit" else set())
+            build = _limits(provider, 1000 if v.key == "4.0" else None, 14 if v.max_images == 14 else 10)
             spec = Spec(
                 provider, v.apimart,
                 keep=("prompt", "image_urls", "output_format", "background"),
                 rename={"aspect_ratio": "size"},
                 convert={"resolution": upper},
                 allowed={"aspect_ratio": ratios},
-                build=_limits(provider, 1000 if v.key == "4.0" else None, 14 if v.max_images == 14 else 10),
+                build=_tier_only(build) if v.charges_inputs else build,
             )  # fmt: skip
-            routes[_id(v.key, mode)] = Route(provider, v.apimart, spec, _apimart_price(v))
+            notes = (
+                ("APIMart charges every input image without publishing the amount, so the price is unknown",)
+                if v.charges_inputs and mode == "edit"
+                else ()
+            )
+            routes[_id(v.key, mode)] = Route(provider, v.apimart, spec, _apimart_price(v), notes=notes)
+    routes[LAYERS_ID] = _layer_routes(provider)
     return routes
+
+
+def _tier_only(limits: Callable[[dict, dict], dict]) -> Callable[[dict, dict], dict]:
+    """5.5 en APIMart: `size: auto` es siempre 2K, así que `auto` se envía como el nivel solo (`size: 1.5K`), con
+    el que el modelo elige la relación y se respeta la resolución pedida."""
+
+    def build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+        out = limits(source, out)
+        if out.get("size") == "auto":
+            out["size"] = out.pop("resolution")
+        return out
+
+    return build
 
 
 def _kie_spec(v: Version, mode: str) -> Spec:
@@ -287,7 +394,7 @@ def _kie_spec(v: Version, mode: str) -> Spec:
             allowed={"aspect_ratio": sizes}, build=build,
         )  # fmt: skip
     if v.key in ("5.0-flash", "5.5"):
-        ratios = set(KIE_RATIOS) | ({"auto"} if not v.apimart_edit and mode == "edit" else set())
+        ratios = set(KIE_RATIOS) | ({"auto"} if v.charges_inputs and mode == "edit" else set())
         return Spec(
             provider, name, keep=keep, rename={"resolution": "size"}, convert={"resolution": upper},
             allowed={"aspect_ratio": ratios}, build=build,
@@ -352,6 +459,7 @@ def kie() -> dict[str, Route]:
         for mode in _modes(v):
             spec = _kie_spec(v, mode)
             routes[_id(v.key, mode)] = Route("kie", spec.model, spec, _kie_price(v, mode))
+    routes[LAYERS_ID] = _layer_routes("kie")
     return routes
 
 

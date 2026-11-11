@@ -65,6 +65,17 @@ def chosen(model_id: str, *extra: str) -> frozenset:
     return frozenset(requested(model_id)) | frozenset(extra)
 
 
+# Rutas sin precio a propósito: cobran por tokens, por capas o con tarifas ambiguas. Salen como «unavailable»
+# y solo se generan si el usuario acepta un costo desconocido.
+UNPRICED = {
+    ("apimart", "microsoft/mai-image-2.6/text-to-image"), ("apimart", "microsoft/mai-image-2.6/edit"),
+    ("apimart", "microsoft/mai-image-2.6-flash/text-to-image"), ("apimart", "microsoft/mai-image-2.6-flash/edit"),
+    ("apimart", "muse/muse-video/text-to-video"), ("apimart", "muse/muse-video/reference-to-video"),
+    ("apimart", "bytedance/seedream-5.5/edit"), ("apimart", "bytedance/seedream-5.5/layer-decomposition"),
+    ("kie", "bytedance/seedream-5.5/layer-decomposition"),
+}  # fmt: skip
+
+
 @pytest.mark.parametrize(("provider", "model_id", "channel"), ROUTED)
 def test_route_translates_and_prices_a_typical_request(provider, model_id, channel):
     assert get_catalog().get(model_id), f"{model_id} is not in the catalog"
@@ -79,6 +90,9 @@ def test_route_translates_and_prices_a_typical_request(provider, model_id, chann
     out = route.translate(logical, chosen(model_id))
     assert out and None not in out.values()
     usd = route.price(logical, {"input_video_seconds": 5, "input_audio_seconds": 5}, prices)
+    if (provider, model_id) in UNPRICED:
+        assert usd is None and route.notes, f"{provider} {model_id} must explain why it has no price"
+        return
     assert usd is not None and 0 < usd < 10, f"{provider} {model_id}: {usd}"
 
 

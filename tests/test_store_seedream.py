@@ -38,7 +38,8 @@ def unsupported(provider: str, model_id: str, **fields) -> None:
 def test_every_version_and_mode_is_listed():
     assert sorted(SCHEMAS) == sorted(
         [f"bytedance/seedream-{v}/{m}" for v in ("4.0", "4.5", "5.0-lite", "5.0-flash", "5.0-pro", "5.5")
-         for m in ("text-to-image", "edit")] + ["bytedance/seedream-3.0/text-to-image"]
+         for m in ("text-to-image", "edit")]
+        + ["bytedance/seedream-3.0/text-to-image", "bytedance/seedream-5.5/layer-decomposition"]
     )  # fmt: skip
     assert seedream.APIMART_IMAGE_MODELS == {
         "seedream-4-0", "seedream-4-5", "seedream-5-0-lite", "seedream-5-0-flash", "seedream-5-0-pro",
@@ -195,6 +196,44 @@ def test_seedream_5_5_edit_charges_every_input_image():
     assert usd == round(0.0315 + 2 * 0.0072, 4)  # cada imagen de entrada, la primera también
     assert run("kie", mid, image_urls=IMG[:1], resolution="1.5k")[2] == round(0.018 + 0.0072, 4)
     unsupported("kie", mid, image_urls=[f"https://cdn.test/{n}.png" for n in range(11)])
-    # APIMart cobra cada imagen de entrada sin publicar el importe: la edición 5.5 solo va a KIE, con sus relaciones.
-    assert not routes_for(PROVIDERS["apimart"].routes(), mid)
-    assert "2:1" not in SCHEMAS[mid]["properties"]["aspect_ratio"]["enum"]
+    # APIMart cobra cada imagen de entrada sin publicar el importe: precio desconocido. `size: auto` es siempre 2K,
+    # así que auto va como el nivel solo.
+    route = routes_for(PROVIDERS["apimart"].routes(), mid)[0]
+    assert route.notes
+    _, body, usd = run("apimart", mid, image_urls=IMG[:1], aspect_ratio="auto", resolution="1k")
+    assert body == {"prompt": "a fox", "size": "1K", "output_format": "png", "background": "auto",
+                    "image_urls": IMG[:1]}  # fmt: skip
+    assert usd is None
+    assert run("apimart", mid, image_urls=IMG, aspect_ratio="2:1")[1]["size"] == "2:1"  # 2:1 solo en APIMart
+    unsupported("kie", mid, image_urls=IMG, aspect_ratio="2:1")
+    unsupported("apimart", mid, image_urls=IMG, aspect_ratio="9:21")
+
+
+def test_seedream_5_5_layer_decomposition_has_an_unknown_price():
+    mid = "bytedance/seedream-5.5/layer-decomposition"
+    pic = "https://cdn.test/poster.png"
+    assert SCHEMAS[mid]["required"] == ["image_url"]
+    assert run("kie", mid, image_url=pic, prompt="", resolution="1.5k", max_images=10) == (
+        "seedream/5-5-layer-decomposition",
+        {"image_url": pic, "size": "1.5K", "max_images": 10, "output_format": "png"},
+        None,
+    )
+    model_id, body, usd = run("apimart", mid, image_url=pic, prompt="split the title")
+    assert (model_id, usd) == ("seedream-5-5", None)
+    assert body == {"prompt": "split the title", "size": "auto", "output_format": "png",
+                    "layer_decomposition": True, "image_urls": [pic],
+                    "layer_decomposition_options": {"max_images": 30}}  # fmt: skip
+    for provider in ("apimart", "kie"):
+        assert routes_for(PROVIDERS[provider].routes(), mid)[0].notes
+    unsupported("kie", mid, image_url=pic, resolution="4k")
+
+
+async def test_layer_outputs_keep_the_base_and_every_layer():
+    from hf_studio.providers.apimart import extract_outputs as apimart_outputs
+    from hf_studio.providers.kie import extract_outputs as kie_outputs
+
+    urls = ["https://cdn.test/base.png", "https://cdn.test/l1.png", "https://cdn.test/l2.png"]
+    assert [o["url"] for o in kie_outputs({"resultJson": json.dumps({"resultUrls": urls})})] == urls
+    assert [
+        o["url"] for o in apimart_outputs({"images": [{"url": urls, "layer_decomposition": True}]})
+    ] == urls
