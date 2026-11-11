@@ -234,13 +234,13 @@ def test_kling_26_and_25_turbo_keep_audio_and_cfg_exact():
     logical = sample("kling-video/v2.5-turbo/pro/text-to-video")
     assert turbo.translate({**logical, "cfg_scale": 0.7}, frozenset(logical))["cfg_scale"] == 0.7
     _unsupported(turbo, {**logical, "cfg_scale": 0.55})  # KIE va en pasos de 0,1
-    assert turbo.price(logical, {}, _prices("kie")) == 0.21
+    assert turbo.price(logical, {}, _prices("kie")) == 0.315
     i2v = route_of("kie", "kling-video/v2.6/pro/image-to-video")
     _unsupported(i2v, {**sample("kling-video/v2.6/pro/image-to-video"), "aspect_ratio": "9:16"})
 
 
 def test_motion_control_26_prices_by_the_motion_video():
-    for provider, tier, rate in (("apimart", "std", 0.05712), ("kie", "pro", 0.09)):
+    for provider, tier, rate in (("apimart", "std", 0.05712), ("kie", "pro", 0.101)):
         route = route_of(provider, f"kling-video/motion-control/{tier}")
         logical = sample(f"kling-video/motion-control/{tier}")
         assert route.translate(logical, frozenset(logical))
@@ -299,7 +299,7 @@ def test_kling4_translates_frames_mentions_and_prices_video_input():
     out = apimart.translate(refs, frozenset(refs))
     assert out["prompt"] == "@Image1 dances like @Video1" and out["aspect_ratio"] == "auto"
     # Salida + max(salida, entrada topada en 30 s), a la tarifa con video de entrada.
-    assert apimart.price(refs, {"input_video_seconds": 40}, _prices("apimart")) == round(0.094 * (10 + 30), 4)
+    assert apimart.price(refs, {"input_video_seconds": 40}, _prices("apimart")) == round(0.084 * (10 + 30), 4)
     assert route_of("kie", f"{k4}/reference-to-video").price(
         refs, {"input_video_seconds": 8}, _prices("kie")
     ) == round(0.085 * 20, 4)

@@ -268,6 +268,70 @@ def kling4() -> dict[str, Route]:
     }  # fmt: skip
 
 
+# --- Kling 4.0 Flash (2026-11-11) -----------------------------------------------------------------
+# Fuente: docs.kie.ai/market/kling/v4-flash-keyframe-to-video.md y .../v4-flash-reference-to-video.md, y la tabla
+# pública (`kling 4.0 flash, keyframe-to-video, 720P` y `…, reference-to-video, 720P with/no video input`, por
+# segundo). Solo 720p, de 3 a 20 s, prompt obligatorio (hasta 8000 caracteres). Fotogramas: solo el primero
+# (`first_frame_url`; sin él es texto a video), sin intermedios ni último. Referencias: los videos suman de 2 a
+# 20 s (fuera de eso la tarea falla al terminar). No tiene edición de video: se queda en Higgsfield y APIMart.
+# Fuera a propósito: `keep_original_sound` (se envía el valor por defecto, audio nuevo, como Higgsfield) y
+# `elements`, que el esquema de Higgsfield para Flash no tiene.
+
+K4F_FRAMES = "kling-4.0/flash-keyframe-to-video"
+K4F_REFS = "kling-4.0/flash-reference-to-video"
+K4F_MAX_INPUT = 20
+
+
+def _k4f_refs_length(source: dict, hints: dict) -> None:
+    seconds = video_seconds(hints)
+    if source.get("video_urls") and seconds is not None and not 2 <= seconds <= K4F_MAX_INPUT:
+        raise unsupported(P, "KIE takes reference videos of 2 to 20 s in total")
+
+
+def _k4f_price(row: str):
+    """Fotogramas y referencias sin video: segundos de salida. Con video: salida + max(salida, entrada), como
+    Higgsfield y APIMart (KIE no publica la fórmula: es la cota alta, igual que en Kling 4.0)."""
+
+    def price(i: dict, hints: dict, prices: dict) -> float | None:
+        output = i.get("duration")
+        if output is None:
+            return None
+        if row == "keyframe-to-video":
+            return per_second(prices, f"kling 4.0 flash, {row}, 720p", output)
+        if not i.get("video_urls"):
+            return per_second(prices, f"kling 4.0 flash, {row}, 720p no video input", output)
+        seconds = video_seconds(hints)
+        if seconds is None:
+            return None
+        return per_second(
+            prices, f"kling 4.0 flash, {row}, 720p with video input", output + max(output, seconds)
+        )
+
+    return price
+
+
+def kling4_flash() -> dict[str, Route]:
+    base = "kling-video/v4.0-flash"
+    common = ("prompt", "duration", "resolution")
+    frames = _k4f_price("keyframe-to-video")
+    return {
+        f"{base}/text-to-video": Route(
+            P, K4F_FRAMES, Spec(P, K4F_FRAMES, keep=(*common, "aspect_ratio"), build=_k4_prompt), frames
+        ),
+        f"{base}/image-to-video": Route(
+            P, K4F_FRAMES,
+            Spec(P, K4F_FRAMES, keep=common, rename={"image_url": "first_frame_url"}, build=_k4_prompt),
+            frames,
+        ),
+        f"{base}/reference-to-video": Route(
+            P, K4F_REFS,
+            Spec(P, K4F_REFS, keep=(*common, "image_urls", "video_urls"),
+                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v}, build=_k4_prompt),
+            _k4f_price("reference-to-video"), check=_k4f_refs_length,
+        ),
+    }  # fmt: skip
+
+
 # --- Wan ----------------------------------------------------------------------------------------
 
 
@@ -553,4 +617,6 @@ def _fixed_seed(value):
 def kie_routes() -> dict[str, Route]:
     from ..store import routes as store_routes
 
-    return {**seedance(), **kling(), **kling4(), **wan(), **others(), **recent(), **store_routes(P)}
+    return {
+        **seedance(), **kling(), **kling4(), **kling4_flash(), **wan(), **others(), **recent(), **store_routes(P)
+    }  # fmt: skip

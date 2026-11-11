@@ -129,4 +129,4 @@ async def test_audio_priced_models_ask_for_the_audio_length(env):  # noqa: F811
     body = (await http.post("/v1/estimate", json={
         "model": "kling/ai-avatar/standard", "input": avatar, "hints": {"input_audio_seconds": 10},
     })).json()  # fmt: skip
-    assert body["options"][0]["usd"] == 0.4 and body["options"][0]["kind"] == "exact"
+    assert body["options"][0]["usd"] == 0.505 and body["options"][0]["kind"] == "exact"

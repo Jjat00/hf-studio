@@ -5,7 +5,9 @@ Fuentes (revisadas el 2026-10-17):
 - KIE, API unificada (`jobs/createTask`), un id por modo:
   https://docs.kie.ai/market/wan/2-2-a14b-text-to-video-turbo.md, .../2-2-a14b-image-to-video-turbo.md y
   .../2-2-a14b-speech-to-video-turbo.md (480p/720p, en voz también 580p, `num_frames` y `frames_per_second`);
-  .../2-2-animate-move.md y .../2-2-animate-replace.md (video + imagen, sin prompt);
+  .../2-2-animate-move.md y .../2-2-animate-replace.md (video + imagen, sin prompt; move solo 720p desde el
+  2026-11-11: su `resolution` admite únicamente `720p` y la tabla ya no tiene sus filas de 480p y 580p, mientras
+  replace sigue con 480p, 580p y 720p);
   .../2-5-text-to-video.md y .../2-5-image-to-video.md (5 o 10 s, 720p/1080p, prompt hasta 800 caracteres);
   .../2-6-flash-image-to-video.md y .../2-6-flash-video-to-video.md (`audio` con o sin sonido);
   .../2-7-videoedit.md (un video de 2 a 10 s, una imagen de referencia, `audio_setting`).
@@ -143,6 +145,9 @@ def _turbo_models() -> list[dict[str, Any]]:
     return [t2v, i2v, s2v]
 
 
+ANIMATE_RESOLUTIONS = {"move": ["720p"], "replace": ["480p", "580p", "720p"]}
+
+
 def _animate_models() -> list[dict[str, Any]]:
     found = []
     for mode, workflow, caps, what in (
@@ -151,6 +156,7 @@ def _animate_models() -> list[dict[str, Any]]:
         ("replace", "Animate replace", ["video-edit", "video-input"],
          "The character in the image replaces the person in the video, keeping its scene and lighting."),
     ):  # fmt: skip
+        resolutions = ANIMATE_RESOLUTIONS[mode]
         found.append(
             model(
                 f"wan/v2.2-animate/{mode}",
@@ -162,7 +168,7 @@ def _animate_models() -> list[dict[str, Any]]:
                 properties={
                     "video_url": url("Driving video (MP4, MOV or MKV, up to 10 MB)."),
                     "image_url": url("Character image (JPEG, PNG or WEBP, up to 10 MB)."),
-                    "resolution": choice(["480p", "580p", "720p"], "480p", "Output resolution."),
+                    "resolution": choice(resolutions, resolutions[0], "Output resolution."),
                 },
                 required=["video_url", "image_url"],
                 docs_url=f"{KIE_DOCS}/2-2-animate-{mode}",
@@ -305,9 +311,11 @@ def _kie_animate() -> dict[str, Route]:
         name = f"wan/2-2-animate-{mode}"
         routes[f"wan/v2.2-animate/{mode}"] = Route(
             K, name,
-            Spec(K, name, keep=("video_url", "image_url", "resolution"), convert={"prompt": _no_value(K, "prompt")}),
+            Spec(K, name, keep=("video_url", "image_url"), convert={"prompt": _no_value(K, "prompt")},
+                 allowed={"resolution": ANIMATE_RESOLUTIONS[mode]}),
             lambda i, h, p, m=mode: per_second(
-                p, f"wan 2.2 animate, 2.2 animate {m}, 1.0s-{i.get('resolution', '480p')}", video_seconds(h)),
+                p, f"wan 2.2 animate, 2.2 animate {m}, 1.0s-{i.get('resolution', ANIMATE_RESOLUTIONS[m][0])}",
+                video_seconds(h)),
             notes=("Billed by the length of the driving video",),
         )  # fmt: skip
     return routes

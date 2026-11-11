@@ -1,6 +1,6 @@
-"""FLUX (Black Forest Labs) en las tiendas: FLUX.2 Flex/Pro/Max, FLUX 3 (imagen y video) y FLUX Kontext.
+"""FLUX (Black Forest Labs) en las tiendas: FLUX.2 Flex/Pro/Max, FLUX 3 (imagen, Klein y video) y FLUX Kontext.
 
-Fuentes (revisadas el 2026-10-17):
+Fuentes (revisadas el 2026-10-17; FLUX 3 Klein el 2026-11-11):
 - APIMart FLUX.2 (`flux-2-flex`, `flux-2-pro`, `flux-2-max`):
   https://docs.apimart.ai/en/api-reference/images/flux-2/generation.md. `resolution` 1MP–4MP, `size` relación
   o `auto`, hasta 8 `image_urls`, `seed`, una imagen por tarea. Precio `flux-2-pro|1MP`…
@@ -8,6 +8,16 @@ Fuentes (revisadas el 2026-10-17):
   no publica cuántos megapíxeles son: no se ruta allí porque el esquema promete megapíxeles exactos.
 - APIMart FLUX 3 imagen (`flux-3-image`): https://docs.apimart.ai/en/api-reference/images/flux-3-image/generation.md
   (`resolution` 768sq/1k/1.5k/2k/4k, hasta 10 referencias sin recargo, sin semilla). Precio `flux-3-image|1K`…
+- FLUX 3 Image Klein (2026-11-11). APIMart `flux-3-image-klein`, `POST /v1/images/generations`:
+  https://docs.apimart.ai/en/api-reference/images/flux-3-image-klein/generation.md (`resolution`
+  768sq/1k/1.5k/2k/4k, 15 relaciones o `auto`, hasta 10 referencias sin recargo, `seed` hasta 4294967295,
+  jpeg por defecto). Precio `flux-3-image-klein|1K`…, igual en texto a imagen y edición.
+  KIE `flux-3/klein-text-to-image` y `flux-3/klein-edit-image`: https://docs.kie.ai/market/flux3/klein-text-to-image.md
+  y .../klein-edit-image.md (`resolution` 1K/2K/4K, 9 relaciones, `auto` solo en edición, hasta 10 imágenes,
+  prompt hasta 5000, `seed` hasta 2147483647, png por defecto, `enhance_prompt` activo por defecto). Precios
+  `black forest labs flux 3 klein, text to image|image editing, 1k|2k|4k`. 1K/2K/4K son los niveles de la propia
+  API de BFL (https://docs.bfl.ml/flux_3/flux3_image_klein.md), no una equivalencia supuesta; BFL reescribe
+  siempre el prompt, así que en KIE se fija `enhance_prompt: true`.
 - APIMart FLUX 3 video (`flux-3-video`): https://docs.apimart.ai/en/api-reference/videos/flux-3-video/generation.md
   (texto, fotogramas clave o continuación de video; 5–20 s; hd/fhd; audio). Precio por segundo
   `flux-3-video|HD`, `|FHD` y `|V2V-HD`, `|V2V-FHD` para la continuación.
@@ -30,6 +40,7 @@ from ._common import choice, model, prompt, upper, url, urls
 VENDOR = "black-forest-labs"
 DOCS_FLUX2 = "https://docs.apimart.ai/en/api-reference/images/flux-2/generation"
 DOCS_FLUX3 = "https://docs.apimart.ai/en/api-reference/images/flux-3-image/generation"
+DOCS_KLEIN = "https://docs.apimart.ai/en/api-reference/images/flux-3-image-klein/generation"
 DOCS_FLUX3_VIDEO = "https://docs.apimart.ai/en/api-reference/videos/flux-3-video/generation"
 DOCS_KONTEXT = "https://docs.apimart.ai/en/api-reference/images/flux-kontext/generation"
 MODES = (("text-to-image", "Text to image"), ("edit", "Edit images"))
@@ -93,6 +104,46 @@ FLUX3_VIDEO_RATIOS = ["auto", "21:9", "2:1", "16:9", "4:3", "1:1", "3:4", "9:16"
 FLUX3_VIDEO_RES = {"720p": "hd", "1080p": "fhd"}
 
 
+KLEIN_KIE_RATIOS = {"1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "21:9", "9:21"}
+KLEIN_KIE_RES = {"1k", "2k", "4k"}
+KLEIN_SEED = {"type": "integer", "minimum": 0, "maximum": 4294967295,
+              "description": "Seed for reproducible results (above 2147483647 only runs on APIMart)."}  # fmt: skip
+
+
+def _klein_models() -> list[dict[str, Any]]:
+    found = []
+    for mode, workflow in MODES:
+        properties: dict[str, Any] = {
+            "prompt": prompt(None, "What to generate or, with images, what to change. No negative prompts."),
+            "aspect_ratio": choice(
+                FLUX3_RATIOS, "auto" if mode == "edit" else "1:1",
+                "Output aspect ratio; auto follows the first image or, without images, the prompt.",
+            ),
+            "resolution": choice(["768sq", "1k", "1.5k", "2k", "4k"], "1k",
+                                 "Output tier: 768sq ~0.6 MP, 1k ~1 MP, 1.5k ~2 MP, 2k ~4 MP, 4k ~16 MP."),
+            "output_format": choice(["jpeg", "png"], "jpeg", "Output image format."),
+            "seed": KLEIN_SEED,
+        }  # fmt: skip
+        required = ["prompt"]
+        if mode == "edit":
+            _refs(10, required, properties)
+        found.append(
+            model(
+                _id("flux-3-klein", mode), name="FLUX 3 Klein", workflow=workflow, family="flux-3-klein",
+                output="image", capabilities=_capabilities(mode), properties=properties, required=required,
+                docs_url=DOCS_KLEIN,
+                notes=[("Black Forest Labs' FLUX 3 Image Klein, the fast open-weights FLUX 3. Higgsfield does "
+                        "not sell it: it runs on APIMart or KIE."),
+                       "References add no charge; the price depends only on the resolution.",
+                       "The 768sq and 1.5k tiers, aspect ratios "
+                       + ("2:1, 7:5, 5:4, 4:5, 5:7 and 1:2" if mode == "edit" else
+                          "2:1, 7:5, 5:4, 4:5, 5:7, 1:2 and auto")
+                       + ", and prompts over 5000 characters only run on APIMart."],
+            )
+        )  # fmt: skip
+    return found
+
+
 def _flux3_models() -> list[dict[str, Any]]:
     found = []
     for mode, workflow in MODES:
@@ -116,6 +167,7 @@ def _flux3_models() -> list[dict[str, Any]]:
                        "References add no charge; the price depends only on the resolution."],
             )
         )  # fmt: skip
+    found.extend(_klein_models())
     video_modes = (
         ("text-to-video", "Text to video", ["text-to-video"]),
         ("image-to-video", "Image to video", ["image-to-video", "first-last-frame"]),
@@ -221,6 +273,15 @@ def apimart() -> dict[str, Route]:
             provider, "flux-3-image", flux3,
             lambda i, h, p: per_unit(p, f"flux-3-image|{str(i.get('resolution', '1k')).upper()}"),
         )  # fmt: skip
+    klein = Spec(
+        provider, "flux-3-image-klein",
+        keep=("prompt", "image_urls", "aspect_ratio", "output_format", "seed"), convert={"resolution": upper},
+    )  # fmt: skip
+    for mode, _ in MODES:
+        routes[_id("flux-3-klein", mode)] = Route(
+            provider, "flux-3-image-klein", klein,
+            lambda i, h, p: per_unit(p, f"flux-3-image-klein|{str(i.get('resolution', '1k')).upper()}"),
+        )  # fmt: skip
     routes.update(_flux3_video())
     for tier in KONTEXT:
         name = f"flux-kontext-{tier}"
@@ -279,11 +340,39 @@ def _kontext_kie_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str,
     return out
 
 
+KIE_MAX_SEED = 2147483647
+
+
+def _klein_kie_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    if len(source.get("prompt") or "") > 5000:
+        raise unsupported("kie", "KIE takes FLUX 3 Klein prompts of at most 5000 characters")
+    if (source.get("seed") or 0) > KIE_MAX_SEED:
+        raise unsupported("kie", f"KIE takes FLUX 3 Klein seeds up to {KIE_MAX_SEED}")
+    return out
+
+
 def kie() -> dict[str, Route]:
     provider = "kie"
     routes: dict[str, Route] = {}
     # FLUX.2 no va a KIE: KIE pide 1K/2K y no publica cuántos megapíxeles son, así que no se puede garantizar
     # la resolución en megapíxeles que pide el esquema (revisión 87).
+    for mode, label in (("text-to-image", "text to image"), ("edit", "image editing")):
+        name = "flux-3/klein-text-to-image" if mode == "text-to-image" else "flux-3/klein-edit-image"
+        spec = Spec(
+            provider, name,
+            keep=("prompt", "image_urls", "aspect_ratio", "output_format", "seed"),
+            convert={"resolution": upper},
+            allowed={"aspect_ratio": KLEIN_KIE_RATIOS | ({"auto"} if mode == "edit" else set()),
+                     "resolution": KLEIN_KIE_RES},
+            fixed={"enhance_prompt": True},  # la API de BFL siempre reescribe el prompt, como APIMart
+            build=_klein_kie_build,
+        )  # fmt: skip
+        routes[_id("flux-3-klein", mode)] = Route(
+            provider, name, spec,
+            lambda i, h, p, m=label: per_unit(
+                p, f"black forest labs flux 3 klein, {m}, {i.get('resolution', '1k')}"
+            ),
+        )  # fmt: skip
     for tier in KONTEXT:
         for mode, _ in MODES:
             ratios = KONTEXT_KIE_RATIOS | ({"auto"} if mode == "edit" else set())
@@ -304,5 +393,10 @@ def kie() -> dict[str, Route]:
 
 
 APIMART_IMAGE_MODELS = frozenset(
-    {*(f"flux-2-{t}" for t in FLUX2), "flux-3-image", *(f"flux-kontext-{t}" for t in KONTEXT)}
+    {
+        *(f"flux-2-{t}" for t in FLUX2),
+        "flux-3-image",
+        "flux-3-image-klein",
+        *(f"flux-kontext-{t}" for t in KONTEXT),
+    }
 )

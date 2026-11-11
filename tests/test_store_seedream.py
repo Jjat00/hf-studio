@@ -37,11 +37,12 @@ def unsupported(provider: str, model_id: str, **fields) -> None:
 
 def test_every_version_and_mode_is_listed():
     assert sorted(SCHEMAS) == sorted(
-        [f"bytedance/seedream-{v}/{m}" for v in ("4.0", "4.5", "5.0-lite", "5.0-flash", "5.0-pro")
+        [f"bytedance/seedream-{v}/{m}" for v in ("4.0", "4.5", "5.0-lite", "5.0-flash", "5.0-pro", "5.5")
          for m in ("text-to-image", "edit")] + ["bytedance/seedream-3.0/text-to-image"]
     )  # fmt: skip
     assert seedream.APIMART_IMAGE_MODELS == {
         "seedream-4-0", "seedream-4-5", "seedream-5-0-lite", "seedream-5-0-flash", "seedream-5-0-pro",
+        "seedream-5-5",
     }  # fmt: skip
     for model in seedream.APIMART_IMAGE_MODELS:
         assert APIMartProvider._submit_path(model) == "/v1/images/generations"
@@ -157,3 +158,43 @@ def test_apimart_reference_surcharge_leaves_the_price_unknown():
         two = {**one, "image_urls": ["https://cdn.test/a.png", "https://cdn.test/b.png"]}
         assert route.price(one, {}, prices) is not None
         assert route.price(two, {}, prices) is None
+
+
+def test_seedream_5_5_text_to_image_on_both_stores():
+    mid = "bytedance/seedream-5.5/text-to-image"
+    assert run("apimart", mid, aspect_ratio="2:1", resolution="1.5k", background="transparent") == (
+        "seedream-5-5",
+        {"prompt": "a fox", "size": "2:1", "resolution": "1.5K", "output_format": "png",
+         "background": "transparent"},
+        0.013,  # 1.5K cuesta como 1K
+    )  # fmt: skip
+    assert run("apimart", mid)[2] == 0.0227  # 2K por defecto (0.02275 redondeado)
+    assert run("kie", mid, aspect_ratio="21:9", resolution="1k") == (
+        "seedream/5-5-text-to-image",
+        {
+            "prompt": "a fox",
+            "aspect_ratio": "21:9",
+            "size": "1K",
+            "output_format": "png",
+            "background": "auto",
+        },
+        0.018,
+    )
+    assert run("kie", mid)[2] == 0.0315
+    unsupported("kie", mid, aspect_ratio="2:1")  # 2:1 y 1:2 solo en APIMart
+    unsupported("kie", mid, prompt="fox")  # KIE pide 5 caracteres o más
+    unsupported("apimart", mid, background="transparent", output_format="jpeg")
+    unsupported("kie", mid, background="transparent", output_format="jpeg")
+
+
+def test_seedream_5_5_edit_charges_every_input_image():
+    mid = "bytedance/seedream-5.5/edit"
+    _, body, usd = run("kie", mid, image_urls=IMG, aspect_ratio="auto")
+    assert body == {"prompt": "a fox", "aspect_ratio": "auto", "size": "2K", "output_format": "png",
+                    "background": "auto", "image_urls": IMG}  # fmt: skip
+    assert usd == round(0.0315 + 2 * 0.0072, 4)  # cada imagen de entrada, la primera también
+    assert run("kie", mid, image_urls=IMG[:1], resolution="1.5k")[2] == round(0.018 + 0.0072, 4)
+    unsupported("kie", mid, image_urls=[f"https://cdn.test/{n}.png" for n in range(11)])
+    # APIMart cobra cada imagen de entrada sin publicar el importe: la edición 5.5 solo va a KIE, con sus relaciones.
+    assert not routes_for(PROVIDERS["apimart"].routes(), mid)
+    assert "2:1" not in SCHEMAS[mid]["properties"]["aspect_ratio"]["enum"]

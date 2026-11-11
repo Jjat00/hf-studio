@@ -740,19 +740,28 @@ def _k4_frames(source: dict, out: dict) -> dict:
     return out
 
 
-def _k4_price(i: dict, hints: dict, prices: dict) -> float | None:
+def _k4_pricer(model: str, cap: int):
     """Con video de entrada (docs, «Billing»): salida + max(salida, segundos de entrada redondeados hacia
-    arriba y topados en 30) a la tarifa `-input`; sin video, los segundos de salida."""
-    res = str(i.get("resolution", "720p")).upper()
-    output = i.get("duration")
-    if output is None:
-        return None
-    if i.get("video_url") or i.get("video_urls"):
-        seconds = video_seconds(hints)
-        if seconds is None:
+    arriba y topados en `cap`) a la tarifa `-input`; sin video, los segundos de salida."""
+
+    def price(i: dict, hints: dict, prices: dict) -> float | None:
+        res = str(i.get("resolution", "720p")).upper()
+        output = i.get("duration")
+        if output is None:
             return None
-        return per_second(prices, f"{K4}|{res}-input", output + max(output, min(math.ceil(seconds), 30)))
-    return per_second(prices, f"{K4}|{res}", output)
+        if i.get("video_url") or i.get("video_urls"):
+            seconds = video_seconds(hints)
+            if seconds is None:
+                return None
+            return per_second(
+                prices, f"{model}|{res}-input", output + max(output, min(math.ceil(seconds), cap))
+            )
+        return per_second(prices, f"{model}|{res}", output)
+
+    return price
+
+
+_k4_price = _k4_pricer(K4, 30)
 
 
 def _k4_refs_length(source: dict, hints: dict) -> None:
@@ -793,6 +802,68 @@ def kling4() -> Routes:
                  fixed={"omni_reference_task_type": "edit"}, build=_k4_mentions),
             _k4_price, check=_k4_edit_length,
             notes=("APIMart keeps the source video's audio in edits; Higgsfield does not document it",),
+        ),
+    }  # fmt: skip
+
+
+# --- Kling 4.0 Flash (2026-11-11) -----------------------------------------------------------------
+# Fuente: docs.apimart.ai («Kling V4 Flash Video Generation», `kling-v4-flash`) y la tabla pública
+# (`kling-v4-flash|720P` y `|720P-input`, por segundo). Mismo esquema que `kling-v4`: el modo sale de los medios
+# y de `omni_reference_task_type`; solo 720p, de 3 a 20 s. Diferencias con Kling 4.0: imagen a video toma solo
+# el primer fotograma (sin intermedios ni último) y sin `aspect_ratio`; los videos de referencia duran al menos
+# 3 s cada uno y 20 s en total (no se recortan: más es HTTP 400); la edición toma un video de 3 a 20 s y genera
+# audio nuevo. Fuera a propósito: la extensión (`extend`), que Higgsfield no ofrece para Flash, y
+# `audio_setting: origin` (conservar el audio de la referencia), que Higgsfield no documenta.
+
+K4F = "kling-v4-flash"
+K4F_MAX_INPUT = 20
+
+
+def _k4f_refs_length(source: dict, hints: dict) -> None:
+    """Solo se conoce la suma: con un clip se comprueba exacto; con varios, lo que la suma ya hace imposible."""
+    count, seconds = len(source.get("video_urls") or []), video_seconds(hints)
+    if count and seconds is not None and not 3 * count <= seconds <= K4F_MAX_INPUT:
+        raise unsupported(P, "APIMart takes reference videos of at least 3 s each and up to 20 s in total")
+
+
+def _k4f_edit_length(source: dict, hints: dict) -> None:
+    seconds = video_seconds(hints)
+    if seconds is not None and not 3 <= seconds <= K4F_MAX_INPUT:
+        raise unsupported(P, "APIMart edits videos of 3 to 20 s")
+
+
+def _k4f_first_frame(source: dict, out: dict) -> dict:
+    out["first_frame_image"] = out.pop("image_url")
+    if not out.get("prompt"):
+        out.pop("prompt", None)  # opcional en imagen a video; una cadena vacía no se envía
+    return out
+
+
+def kling4_flash() -> Routes:
+    base = "kling-video/v4.0-flash"
+    common = ("prompt", "duration", "resolution")
+    price = _k4_pricer(K4F, K4F_MAX_INPUT)
+    return {
+        f"{base}/text-to-video": Route(
+            P, K4F, Spec(P, K4F, keep=(*common, "aspect_ratio"), build=_k4_mentions), price
+        ),
+        f"{base}/image-to-video": Route(
+            P, K4F, Spec(P, K4F, keep=(*common, "image_url"), build=_k4f_first_frame), price
+        ),
+        f"{base}/reference-to-video": Route(
+            P, K4F,
+            Spec(P, K4F, keep=(*common, "image_urls", "video_urls"),
+                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v},
+                 fixed={"omni_reference_task_type": "reference"}, build=_k4_mentions),
+            price, check=_k4f_refs_length,
+        ),
+        f"{base}/video-edit": Route(
+            P, K4F,
+            Spec(P, K4F, keep=(*common, "video_url", "image_urls"),
+                 convert={"aspect_ratio": lambda v: None if v == "adaptive" else v,
+                          "video_urls": _no_list("reference videos in an edit")},
+                 fixed={"omni_reference_task_type": "edit"}, build=_k4_mentions),
+            price, check=_k4f_edit_length,
         ),
     }  # fmt: skip
 
@@ -845,4 +916,7 @@ def images() -> Routes:
 def apimart_routes() -> Routes:
     from ..store import routes as store_routes
 
-    return {**seedance(), **kling(), **wan(), **others(), **omni(), **kling4(), **images(), **store_routes(P)}
+    return {
+        **seedance(), **kling(), **wan(), **others(), **omni(), **kling4(), **kling4_flash(), **images(),
+        **store_routes(P),
+    }  # fmt: skip

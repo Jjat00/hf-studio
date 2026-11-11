@@ -41,7 +41,8 @@ def unsupported(provider: str, model_id: str, **fields) -> None:
 
 def test_image_models_go_to_the_apimart_image_endpoint_and_video_does_not():
     assert flux.APIMART_IMAGE_MODELS == {
-        "flux-2-flex", "flux-2-pro", "flux-2-max", "flux-3-image", "flux-kontext-pro", "flux-kontext-max",
+        "flux-2-flex", "flux-2-pro", "flux-2-max", "flux-3-image", "flux-3-image-klein", "flux-kontext-pro",
+        "flux-kontext-max",
     }  # fmt: skip
     for model in flux.APIMART_IMAGE_MODELS:
         assert APIMartProvider._submit_path(model) == "/v1/images/generations"
@@ -151,3 +152,35 @@ async def test_kontext_is_sent_to_kie_create_task():
         "input": {"prompt": "a fox", "aspect_ratio": "16:9", "output_format": "png", "input_image": IMG[0],
                   "model": "flux-kontext-pro"},
     })]  # fmt: skip
+
+
+def test_flux_3_klein_on_both_stores():
+    mid = f"{BFL}/flux-3-klein/edit"
+    assert run("apimart", mid, image_urls=IMG, resolution="1.5k", seed=4000000000) == (
+        "flux-3-image-klein",
+        {"prompt": "a fox", "aspect_ratio": "auto", "resolution": "1.5K", "output_format": "jpeg",
+         "seed": 4000000000, "image_urls": IMG},
+        0.0088,  # las referencias no suman
+    )  # fmt: skip
+    assert run("kie", mid, image_urls=IMG, resolution="4k", seed=7) == (
+        "flux-3/klein-edit-image",
+        {"prompt": "a fox", "aspect_ratio": "auto", "resolution": "4K", "output_format": "jpeg", "seed": 7,
+         "image_urls": IMG, "enhance_prompt": True},
+        0.0325,
+    )  # fmt: skip
+    t2i = f"{BFL}/flux-3-klein/text-to-image"
+    assert run("kie", t2i, aspect_ratio="9:21")[:2] == (
+        "flux-3/klein-text-to-image",
+        {"prompt": "a fox", "aspect_ratio": "9:21", "resolution": "1K", "output_format": "jpeg",
+         "enhance_prompt": True},
+    )  # fmt: skip
+    assert run("kie", t2i, resolution="2k")[2] == 0.0125
+    assert run("apimart", t2i, resolution="768sq")[2] == 0.0064
+    # 768sq, 1.5k, ratios fuera de las 9 de KIE, auto al generar y semillas grandes solo en APIMart.
+    unsupported("kie", t2i, resolution="1.5k")
+    unsupported("kie", t2i, resolution="768sq")
+    unsupported("kie", t2i, aspect_ratio="5:4")
+    unsupported("kie", t2i, aspect_ratio="auto")
+    unsupported("kie", t2i, seed=2147483648)
+    unsupported("kie", t2i, prompt="x" * 5001)
+    unsupported("apimart", t2i, negative_prompt="blur")

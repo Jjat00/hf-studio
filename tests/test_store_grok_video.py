@@ -94,6 +94,9 @@ def test_v15_text_to_video_channels():
     kie = KIE[f"{V15}/text-to-video"]
     assert kie.model == "grok-imagine-video-1-5-preview" and not kie.official
     assert kie.price(logical, {}, PRICES["kie"]) == pytest.approx(0.0225 * 8)
+    # Tabla del 2026-11-11: 2,4 / 4,5 / 8 créditos por segundo (0,005 USD el crédito)
+    for res, rate in (("480p", 0.012), ("720p", 0.0225), ("1080p", 0.04)):
+        assert kie.price({**logical, "resolution": res}, {}, PRICES["kie"]) == pytest.approx(rate * 8)
     unsupported(kie, {**logical, "aspect_ratio": "4:3"})
 
 

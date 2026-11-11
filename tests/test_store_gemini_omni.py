@@ -48,7 +48,7 @@ def test_models_and_routes():
         "google/gemini-omni-flash/text-to-video",
         "google/gemini-omni-flash/reference-to-video",
     }
-    assert set(ROUTES["kie"]) == ids
+    assert {k for k in ROUTES["kie"] if "/gemini-omni-1.2-flash/" not in k} == ids
     v11 = {k: r for k, r in ROUTES["apimart"].items() if "/gemini-omni-1.2-flash/" not in k}
     assert set(v11) == {T2V, I2V, REF}
     assert all(not r.official and r.model == "gemini-omni-1.1-flash-ext" for r in v11.values())
@@ -88,7 +88,7 @@ def test_fields_without_equivalent_are_refused():
     refused("kie", "google/gemini-omni-flash/reference-to-video", image_urls=[IMG], end_image_url=END)
 
 
-# --- Gemini Omni 1.2 Flash (APIMart) ---------------------------------------------------------------
+# --- Gemini Omni 1.2 Flash (APIMart y KIE) ---------------------------------------------------------------
 
 V12 = "google/gemini-omni-1.2-flash"
 VID = "https://cdn.test/clip.mp4"
@@ -98,11 +98,12 @@ def test_v12_models_and_routes():
     ids = {m["id"] for m in g.MODELS if m["id"].startswith(V12)}
     modes = ("text-to-video", "image-to-video", "reference-to-video", "video-edit")
     assert ids == {f"{V12}/{m}" for m in modes}
-    assert ids <= set(ROUTES["apimart"])
-    assert not ids & set(ROUTES["kie"])
+    assert ids <= set(ROUTES["apimart"]) and ids <= set(ROUTES["kie"])
     for mid in ids:
         route = ROUTES["apimart"][mid]
         assert route.model == "gemini-omni-1.2-flash" and route.official and route.settles_later
+        kie = ROUTES["kie"][mid]
+        assert kie.model == "google/gemini-omni-flash-1-2" and kie.official and not kie.settles_later
 
 
 def test_v12_bodies():
@@ -134,3 +135,33 @@ def test_v12_prices_and_reserve():
     assert edit.price(entry, {}, PRICES["apimart"]) is None  # sin la duración del video de entrada
     assert edit.price(entry, {"input_video_seconds": 6}, PRICES["apimart"]) == 0.36
     assert edit.reserve(entry, {}, PRICES["apimart"]) == 0.9
+
+
+def test_v12_kie_bodies():
+    assert body("kie", f"{V12}/text-to-video", duration=15, resolution="4k", aspect_ratio="9:16") == {
+        "prompt": "a fox", "duration": 15, "aspect_ratio": "9:16", "resolution": "4k",
+    }  # fmt: skip
+    assert body("kie", f"{V12}/image-to-video", image_url=IMG, end_image_url=END, duration=8) == {
+        "prompt": "a fox", "duration": 8, "aspect_ratio": "16:9", "resolution": "720p",
+        "first_frame_url": IMG, "last_frame_url": END,
+    }  # fmt: skip
+    assert body("kie", f"{V12}/reference-to-video", image_urls=[IMG] * 6)["image_urls"] == [IMG] * 6
+    assert body("kie", f"{V12}/video-edit", video_url=VID) == {
+        "prompt": "a fox", "aspect_ratio": "16:9", "resolution": "720p", "video_list": [VID],
+    }  # fmt: skip
+    # KIE: como mucho 6 referencias y 10 s con último fotograma
+    refused("kie", f"{V12}/reference-to-video", image_urls=[IMG] * 7)
+    refused("kie", f"{V12}/image-to-video", image_url=IMG, end_image_url=END, duration=12)
+
+
+def test_v12_kie_prices():
+    assert price("kie", f"{V12}/text-to-video") == 0.45  # 10 s × 0,045 a 720p
+    assert price("kie", f"{V12}/text-to-video", duration=15, resolution="4k") == 1.65
+    assert price("kie", f"{V12}/image-to-video", image_url=IMG, duration=3, resolution="360p") == 0.06
+    edit = ROUTES["kie"][f"{V12}/video-edit"]
+    entry = logical(f"{V12}/video-edit", video_url=VID, resolution="1080p")
+    assert edit.price(entry, {}, PRICES["kie"]) is None  # sin la duración del video de entrada
+    assert edit.price(entry, {"input_video_seconds": 6}, PRICES["kie"]) == 0.3
+    edit.check({}, {"input_video_seconds": 15})
+    with pytest.raises(ProviderError):  # KIE edita videos de hasta 15 s
+        edit.check({}, {"input_video_seconds": 16})

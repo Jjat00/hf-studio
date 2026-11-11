@@ -42,7 +42,9 @@ def test_models_and_routes():
     assert not any(i.startswith(("bytedance/seedance-2.0/", "bytedance/seedance-2.5/")) for i in ids)
     only_kie = {"bytedance/seedance-1.0-lite/text-to-video", "bytedance/seedance-1.0-lite/image-to-video"}
     assert set(ROUTES["apimart"]) == ids - only_kie
-    assert set(ROUTES["kie"]) == ids - {"bytedance/seedance-1.0-pro-fast/text-to-video"}
+    # KIE cerró Seedance 1.5 Pro el 2026-11-11: queda solo en APIMart
+    v15 = {"bytedance/seedance-1.5-pro/text-to-video", "bytedance/seedance-1.5-pro/image-to-video"}
+    assert set(ROUTES["kie"]) == ids - {"bytedance/seedance-1.0-pro-fast/text-to-video"} - v15
 
 
 def test_seedance_1_0():
@@ -77,14 +79,10 @@ def test_seedance_1_5_pro():
         "prompt": "a fox", "duration": 5, "aspect_ratio": "16:9", "resolution": "720p", "audio": True,
         "camerafixed": True, "image_with_roles": [{"url": IMG, "role": "first_frame"}],
     }  # fmt: skip
-    assert body("kie", mid, image_url=IMG, end_image_url=END) == {
-        "prompt": "a fox", "duration": 5, "aspect_ratio": "16:9", "resolution": "720p", "generate_audio": True,
-        "fixed_lens": False, "input_urls": [IMG, END],
-    }  # fmt: skip
-    assert price("kie", mid, image_url=IMG) == pytest.approx(0.175)
-    assert price("kie", mid, image_url=IMG, generate_audio=False) == pytest.approx(0.0875)
+    assert body("apimart", "bytedance/seedance-1.5-pro/text-to-video", seed=9)["seed"] == 9
     assert price("apimart", mid, image_url=IMG, resolution="1080p") == pytest.approx(0.54)
-    refused("kie", "bytedance/seedance-1.5-pro/text-to-video", seed=9)
+    notes = get_catalog().get(mid)["notes"]
+    assert not any("2026-11-11" in n for n in notes) and "Runs on APIMart only." in notes
 
 
 def test_seedance_2_0_fast_and_mini():

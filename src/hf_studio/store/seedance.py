@@ -16,8 +16,8 @@ Fuentes (revisadas el 2026-10-17):
   `-image-to-video`, `bytedance/v1-pro-fast-image-to-video`: https://docs.kie.ai/market/bytedance/v1-pro-text-to-video.md
   y hermanas (duración "5"|"10"). Precio `bytedance/seedance-v1-<tier>, <modo>, <res>` por segundo; pro-fast
   por video, `..., <res>-<d>s`.
-- KIE `bytedance/seedance-1.5-pro`: https://docs.kie.ai/market/bytedance/seedance-1-5-pro.md (`input_urls`
-  0–2, `fixed_lens`, `generate_audio`). Precio por segundo `bytedance/seedance-1.5-pro, with|without audio-<res>`.
+- Seedance 1.5 Pro solo en APIMart: KIE cerró su `bytedance/seedance-1.5-pro` el 2026-11-11 y sus filas ya no
+  están en la tabla de precios.
 - KIE `bytedance/seedance-2-fast` / `bytedance/seedance-2-mini`: https://docs.kie.ai/market/bytedance/seedance-2-fast.md
   y seedance-2-mini.md (480p y 720p). Precio por segundo `bytedance/seedance-2 fast, <res> no|with video input`
   y `bytedance/seedance-2-mini, <res> no|with video`.
@@ -34,7 +34,9 @@ from ..providers.kie_routes import SEEDANCE_FRAMES, SEEDANCE_REFS
 from ..providers.routes import Route, Spec, only_default, per_second, per_unit, video_seconds
 from ._common import choice, model, prompt, url, urls
 
-DOCS = "https://docs.kie.ai/market/bytedance/seedance-1-5-pro"
+DOCS = "https://docs.kie.ai/market/bytedance/v1-pro-text-to-video"
+V15_DOCS = "https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation"
+V2_DOCS = "https://docs.kie.ai/market/bytedance/seedance-2-fast"
 RATIOS = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
 NOT_HIGGSFIELD = "Higgsfield does not offer this Seedance variant: it runs on APIMart or KIE."
 
@@ -54,7 +56,16 @@ CAMERA = _bool(False, "Keep the camera still.")
 FIRST = url("First frame of the video.")
 
 
-def _entry(model_id: str, name: str, family: str, mode: str, properties: dict, required: list, notes: list):
+def _entry(
+    model_id: str,
+    name: str,
+    family: str,
+    mode: str,
+    properties: dict,
+    required: list,
+    notes: list,
+    docs_url: str = DOCS,
+):
     workflow, capabilities = {
         "text-to-video": ("Text to video", ["text-to-video"]),
         "image-to-video": ("Image to video", ["image-to-video", *(["first-last-frame"] if "end_image_url" in properties else [])]),
@@ -62,7 +73,7 @@ def _entry(model_id: str, name: str, family: str, mode: str, properties: dict, r
     }[mode]  # fmt: skip
     return model(
         model_id, name=name, workflow=workflow, family=family, output="video", capabilities=capabilities,
-        properties=properties, required=required, docs_url=DOCS, notes=[NOT_HIGGSFIELD, *notes],
+        properties=properties, required=required, docs_url=docs_url, notes=[NOT_HIGGSFIELD, *notes],
     )  # fmt: skip
 
 
@@ -174,7 +185,7 @@ def _v15_models() -> list[dict[str, Any]]:
             "resolution": choice(["480p", "720p", "1080p"], "720p", "Output resolution."),
             "generate_audio": AUDIO,
             "camera_fixed": CAMERA,
-            "seed": {**SEED, "description": "Seed; -1 is random (APIMart only)."},
+            "seed": SEED,
         }
         required = ["prompt"]
         if mode == "image-to-video":
@@ -183,7 +194,7 @@ def _v15_models() -> list[dict[str, Any]]:
             required.append("image_url")
         found.append(
             _entry(f"bytedance/seedance-1.5-pro/{mode}", "Seedance 1.5 Pro", "seedance-1.5-pro", mode, props,
-                   required, ["KIE's Seedance 1.5 Pro service ends on 2026-11-11."])
+                   required, ["Runs on APIMart only."], docs_url=V15_DOCS)
         )  # fmt: skip
     return found
 
@@ -208,38 +219,6 @@ def _v15_apimart() -> dict[str, Route]:
     }  # fmt: skip
 
 
-def _input_urls(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
-    out["input_urls"] = [
-        source["image_url"],
-        *([source["end_image_url"]] if source.get("end_image_url") else []),
-    ]
-    out.pop("image_url", None)
-    out.pop("end_image_url", None)
-    return out
-
-
-def _v15_kie() -> dict[str, Route]:
-    name = "bytedance/seedance-1.5-pro"
-
-    def price(i: dict, h: dict, p: dict) -> float | None:
-        audio = "with" if i.get("generate_audio", True) else "without"
-        key = f"{name}, {audio} audio-{i.get('resolution', '720p')}"
-        # KIE anuncia el cierre en la propia fila (a 2026-10-17): «… (service ends 2026-11-11)».
-        key = next((k for k in (key, f"{key} (service ends 2026-11-11)") if k in p), key)
-        return per_second(p, key, i.get("duration"))
-
-    keep = ("prompt", "duration", "resolution", "aspect_ratio", "generate_audio")
-    rename = {"camera_fixed": "fixed_lens"}
-    return {
-        "bytedance/seedance-1.5-pro/text-to-video": Route("kie", name, Spec("kie", name, keep=keep, rename=rename),
-                                                          price),
-        "bytedance/seedance-1.5-pro/image-to-video": Route(
-            "kie", name, Spec("kie", name, keep=(*keep, "image_url", "end_image_url"), rename=rename,
-                              build=_input_urls), price,
-        ),
-    }  # fmt: skip
-
-
 # --- Seedance 2.0 Fast y Mini (mismo esquema que bytedance/seedance-2.0/*, solo 480p y 720p) ---------
 
 V2 = {"fast": ("Seedance 2.0 Fast", "seedance-2.0-fast", "bytedance/seedance-2-fast", "bytedance/seedance-2 fast"),
@@ -258,17 +237,17 @@ def _v2_models() -> list[dict[str, Any]]:
         ratio = {"aspect_ratio": choice(RATIOS, "16:9", "Output aspect ratio.")}
         family, base = f"seedance-2.0-{variant}", f"bytedance/seedance-2.0-{variant}"
         found.append(_entry(f"{base}/text-to-video", name, family, "text-to-video", {**common, **ratio},
-                            ["prompt"], ["Output framing follows aspect_ratio."]))  # fmt: skip
+                            ["prompt"], ["Output framing follows aspect_ratio."], V2_DOCS))  # fmt: skip
         frames = {"image_url": FIRST, "end_image_url": url("Optional last frame.")}
         found.append(_entry(f"{base}/image-to-video", name, family, "image-to-video", {**common, **frames},
-                            ["image_url"], ["Output framing follows image_url."]))  # fmt: skip
+                            ["image_url"], ["Output framing follows image_url."], V2_DOCS))  # fmt: skip
         refs = {
             "image_urls": urls(1, 9, "Reference images (up to 9)."),
             "video_urls": urls(1, 3, "Reference videos (up to 3, 15 s in total)."),
             "audio_urls": urls(1, 3, "Reference audio (up to 3, 15 s in total); needs images or videos too."),
         }
         entry = _entry(f"{base}/reference-to-video", name, family, "reference-to-video", {**common, **ratio, **refs},
-                       [], ["Provide image_urls or video_urls; audio alone is not enough."])  # fmt: skip
+                       [], ["Provide image_urls or video_urls; audio alone is not enough."], V2_DOCS)  # fmt: skip
         entry["input_schema"]["if"] = {"required": ["image_urls"]}
         entry["input_schema"]["else"] = {"required": ["video_urls"]}
         found.append(entry)
@@ -337,4 +316,4 @@ def apimart() -> dict[str, Route]:
 
 
 def kie() -> dict[str, Route]:
-    return {**_v1_kie(), **_v15_kie(), **_v2_kie()}
+    return {**_v1_kie(), **_v2_kie()}

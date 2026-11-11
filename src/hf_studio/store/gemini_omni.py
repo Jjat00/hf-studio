@@ -14,12 +14,19 @@ No se usan `gemini-omni-1.1-flash` ni `gemini-omni-flash-preview` de APIMart: no
 la elige, 3–10 s) y cobran por segundo, así que no reproducen la duración pedida ni se pueden cotizar. Tampoco
 se ofrece la entrada de video (KIE pide recortarla con `start`/`ends`, que la entrada lógica no dice).
 
-Gemini Omni 1.2 Flash (revisado el 2026-11-06), solo en APIMart `gemini-omni-1.2-flash`:
-https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.2-flash/generation.md (3–15 s, 3–10 s con
-último fotograma, 16:9|9:16, 360p–4k, `first_frame_image` + `last_frame_image`, hasta 10 `image_urls`,
-edición con `video_urls`). Se liquida por tokens: el precio por segundo de la tabla
-(`gemini-omni-1.2-flash|<RES>`) es aproximado, y al enviar retiene `max(10, duración)` segundos (la edición,
-15). No se ofrece la extensión: no está claro si cobra solo el tramo añadido.
+Gemini Omni 1.2 Flash:
+- APIMart `gemini-omni-1.2-flash` (revisado el 2026-11-06):
+  https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.2-flash/generation.md (3–15 s, 3–10 s con
+  último fotograma, 16:9|9:16, 360p–4k, `first_frame_image` + `last_frame_image`, hasta 10 `image_urls`,
+  edición con `video_urls`). Se liquida por tokens: el precio por segundo de la tabla
+  (`gemini-omni-1.2-flash|<RES>`) es aproximado, y al enviar retiene `max(10, duración)` segundos (la edición,
+  15). No se ofrece la extensión: no está claro si cobra solo el tramo añadido.
+- KIE `google/gemini-omni-flash-1-2` (revisado el 2026-11-11):
+  https://docs.kie.ai/market/google/gemini-omni-flash-1-2.md (un modo por pedido: texto o hasta 6 `image_urls`,
+  `first_frame_url` con `last_frame_url` opcional (3–10 s con los dos) o edición con `video_list` de un video
+  de hasta 15 s y sin `duration`; 3–15 s, 360p–4k, `seeds` 10000–99999). Precio fijo por segundo de salida
+  `google/gemini-omni-flash-1-2, video, <res>` (`creditUnit` «per second»); según https://kie.ai/gemini-omni-1-2-flash
+  la edición se cobra por la duración del video de entrada a la misma tarifa.
 """
 
 from __future__ import annotations
@@ -111,10 +118,11 @@ V12_MODES = {**WORKFLOWS, "video-edit": ("Edit video", ["video-edit", "video-inp
 
 def _v12_models() -> list[dict[str, Any]]:
     found = []
-    note = (
-        "Google's Gemini Omni 1.2 Flash with generated audio (24 fps), through APIMart only (not Higgsfield)."
+    note = "Google's Gemini Omni 1.2 Flash with generated audio (24 fps), through APIMart or KIE (not Higgsfield)."
+    billing = (
+        "KIE bills a fixed rate per second. APIMart bills by tokens afterwards (approximate quote) and first "
+        "holds at least 10 s."
     )
-    billing = "Billed by tokens afterwards: the quote is approximate and APIMart first holds at least 10 s."
     for mode, (workflow, capabilities) in V12_MODES.items():
         properties: dict[str, Any] = {
             "prompt": prompt(20000, "What happens in the video; with images, how to use each one."),
@@ -131,7 +139,7 @@ def _v12_models() -> list[dict[str, Any]]:
         elif mode == "reference-to-video":
             properties["image_urls"] = urls(1, 10, "One to ten images of characters, products or places.")
             required.append("image_urls")
-            notes.append("For characters, use at most 2 with up to 3 images each.")
+            notes.append("For characters, use at most 2 with up to 3 images each. KIE takes up to 6 images.")
         elif mode == "video-edit":
             del properties["duration"]
             properties["prompt"] = prompt(
@@ -140,7 +148,8 @@ def _v12_models() -> list[dict[str, Any]]:
             properties["video_url"] = url("Video to edit (up to 15 s); the result keeps its length.")
             required.append("video_url")
             notes[1] = (
-                "Billed by tokens afterwards from the source length: the quote is approximate (APIMart holds 15 s)."
+                "Billed by the source length: a fixed rate per second on KIE; by tokens afterwards on APIMart "
+                "(approximate quote, holds 15 s)."
             )
         found.append(
             model(
@@ -251,8 +260,60 @@ def _kie_price(row: str):
     return price
 
 
-def kie() -> dict[str, Route]:
+V12_KIE = "google/gemini-omni-flash-1-2"
+V12_KIE_MAX_REFS = 6
+V12_MAX_EDIT_SECONDS = 15
+
+
+def _v12_kie_build(mode: str):
+    def build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+        if mode == "image-to-video" and source.get("end_image_url") and int(source.get("duration", 10)) > 10:
+            raise unsupported("kie", "Gemini Omni 1.2 takes at most 10 s with a last frame")
+        if mode == "reference-to-video" and len(source["image_urls"]) > V12_KIE_MAX_REFS:
+            raise unsupported(
+                "kie", f"KIE's Gemini Omni 1.2 takes at most {V12_KIE_MAX_REFS} reference images"
+            )
+        if mode == "video-edit":
+            out["video_list"] = [out.pop("video_url")]
+        return out
+
+    return build
+
+
+def _v12_kie_price(mode: str):
+    def price(i: dict, hints: dict, prices: dict) -> float | None:
+        seconds = video_seconds(hints) if mode == "video-edit" else i.get("duration")
+        return per_second(prices, f"{V12_KIE}, video, {i.get('resolution', '720p')}", seconds)
+
+    return price
+
+
+def _edit_length(source: dict[str, Any], hints: dict[str, Any]) -> None:
+    seconds = video_seconds(hints)
+    if seconds is not None and seconds > V12_MAX_EDIT_SECONDS:
+        raise unsupported("kie", f"KIE's Gemini Omni 1.2 edits videos up to {V12_MAX_EDIT_SECONDS} s")
+
+
+def _v12_kie_routes() -> dict[str, Route]:
     routes = {}
+    for mode in V12_MODES:
+        keep: tuple[str, ...] = ("prompt", "duration", "aspect_ratio", "resolution")
+        rename = {}
+        if mode == "image-to-video":
+            rename = {"image_url": "first_frame_url", "end_image_url": "last_frame_url"}
+        elif mode == "reference-to-video":
+            keep = (*keep, "image_urls")
+        elif mode == "video-edit":
+            keep = ("prompt", "aspect_ratio", "resolution", "video_url")
+        routes[_id(V12, mode)] = Route(
+            "kie", V12_KIE, Spec("kie", V12_KIE, keep=keep, rename=rename, build=_v12_kie_build(mode)),
+            _v12_kie_price(mode), check=_edit_length if mode == "video-edit" else None,
+        )  # fmt: skip
+    return routes
+
+
+def kie() -> dict[str, Route]:
+    routes = _v12_kie_routes()
     for variant, (_, name, _, modes) in VARIANTS.items():
         for mode in modes:
             keep = ("prompt", "aspect_ratio", "resolution", "seed")

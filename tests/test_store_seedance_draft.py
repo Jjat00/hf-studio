@@ -51,7 +51,7 @@ async def test_the_final_goes_to_the_store_that_made_the_draft(env):  # noqa: F8
         await http.post("/v1/estimate", json={"model": FINAL, "input": {"draft_generation_id": done["id"]}})
     ).json()
     assert [o["provider"] for o in quote["options"]] == ["apimart"]
-    assert quote["kind"] == "approx" and quote["usd"] == round(8 * 0.38488, 4)
+    assert quote["kind"] == "approx" and quote["usd"] == round(8 * 0.5346, 4)
     job = (await http.post("/v1/generations", json={
         "model": FINAL, "input": {"draft_generation_id": done["id"], "output_format": "mov"}, "max_usd": quote["usd"],
     })).json()  # fmt: skip

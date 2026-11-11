@@ -78,10 +78,10 @@ def test_wan22_speech_to_video_prices_frames_over_fps():
 
 
 def test_wan22_animate_is_priced_by_the_driving_video():
-    for mode in ("move", "replace"):
+    for mode, default in (("move", "720p"), ("replace", "480p")):
         mid = f"wan/v2.2-animate/{mode}"
         assert body("kie", mid, video_url=VID, image_url=IMG) == {
-            "video_url": VID, "image_url": IMG, "resolution": "480p"}  # fmt: skip
+            "video_url": VID, "image_url": IMG, "resolution": default}  # fmt: skip
         assert ROUTES["kie"][mid].model == f"wan/2-2-animate-{mode}"
         assert price("kie", mid, video_url=VID, image_url=IMG) is None  # sin la duración del video
         assert price("kie", mid, {"input_video_seconds": 8}, video_url=VID, image_url=IMG,
@@ -174,3 +174,13 @@ def test_wan27_video_edit_on_both_stores():
         with pytest.raises(ProviderError):
             check(logical(mid, video_url=VID, duration=8), {"input_video_seconds": 5})
         check(logical(mid, video_url=VID, duration=5), {"input_video_seconds": 5})
+
+
+def test_wan22_animate_move_is_720p_only():
+    """Desde el 2026-11-11 KIE solo hace move a 720p (doc y tabla); replace sigue con 480p, 580p y 720p."""
+    move, replace = "wan/v2.2-animate/move", "wan/v2.2-animate/replace"
+    assert get_catalog().get(move)["input_schema"]["properties"]["resolution"]["enum"] == ["720p"]
+    refused("kie", move, video_url=VID, image_url=IMG, resolution="480p")
+    for res, rate in (("480p", 0.03), ("580p", 0.0475), ("720p", 0.0625)):
+        assert price("kie", replace, {"input_video_seconds": 4}, video_url=VID, image_url=IMG,
+                     resolution=res) == round(rate * 4, 4)  # fmt: skip
