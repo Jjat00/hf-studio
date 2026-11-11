@@ -35,6 +35,7 @@ import { CinemaAnchorContext } from "@/components/studio/cinema/previews";
 import { probeDuration } from "@/lib/media";
 import { activeProject } from "@/lib/project";
 import { cleanInput, defaultsFor, fieldsFor, type Field } from "@/lib/schema";
+import { Lightbox } from "@/components/lightbox";
 import { apiSrc, costShort, fieldErrors, formatUsd, modelLabel, outputSrc, studio, StudioError, type Estimate } from "@/lib/studio";
 import type { ElementCategory, Generation, ModelDetail, ModelStyle, ModelSummary, StudioElement } from "@/lib/types";
 
@@ -74,7 +75,12 @@ const listOf = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : t
 /** Seedance 2.5 primero (como en Higgsfield), luego su borrador barato y después el resto. */
 const featuredRank = (id: string) => (id.startsWith("bytedance/seedance-2.5/") ? 0 : id.startsWith("bytedance/seedance-2.5-draft/") ? 1 : 2);
 
-/** Modelos del menú del compositor: los de Cinema Studio y algunos destacados que también toman referencias. */
+/** Casillas de primer y último fotograma (image-to-video de Seedance, Kling, Wan…). */
+const FIRST_FRAME = "image_url";
+const LAST_FRAME = "end_image_url";
+
+/** Modelos del menú del compositor: los de Cinema Studio, algunos destacados que también toman referencias y los de
+ * primer y último fotograma. */
 function menuModels(models: ModelSummary[], mode: Mode) {
   if (mode === "video") {
     const cinematic = models.filter((m) => m.id.startsWith(CINEMA_PREFIX) && m.output === "video");
@@ -82,12 +88,16 @@ function menuModels(models: ModelSummary[], mode: Mode) {
       .filter((m) => m.output === "video" && !m.id.startsWith(CINEMA_PREFIX) && m.capabilities.includes("reference-to-video"))
       .sort((a, b) => featuredRank(a.id) - featuredRank(b.id) || a.id.localeCompare(b.id))
       .slice(0, 6);
+    const frames = models
+      .filter((m) => m.output === "video" && m.capabilities.includes("first-last-frame"))
+      .sort((a, b) => featuredRank(a.id) - featuredRank(b.id) || a.id.localeCompare(b.id))
+      .slice(0, 6);
     const genjutsu = models.filter((m) => m.output === "video" && GENJUTSU.test(m.id)).sort((a, b) => genjutsuRank(a.id) - genjutsuRank(b.id));
-    return { cinematic, featured, genjutsu };
+    return { cinematic, featured, frames, genjutsu };
   }
   const cinematic = models.filter((m) => m.id === DEFAULTS.image);
   const featured = models.filter((m) => m.output === "image" && m.id.startsWith("higgsfield-ai/soul/") && m.id !== DEFAULTS.image).slice(0, 4);
-  return { cinematic, featured, genjutsu: [] as ModelSummary[] };
+  return { cinematic, featured, frames: [] as ModelSummary[], genjutsu: [] as ModelSummary[] };
 }
 
 export type ComposerHandle = {
@@ -128,6 +138,10 @@ export function Composer({
   const [extra, setExtraState] = useState<CinemaExtra>(EMPTY_CINEMA);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [refsTab, setRefsTab] = useState<RefsTab>("uploads");
+  // Casilla a la que van las imágenes que se añadan (primer o último fotograma); null: la primera libre.
+  const [frameTarget, setFrameTarget] = useState<string | null>(null);
+  // Referencia abierta en grande (índice entre las que se pueden ver: imágenes y videos).
+  const [viewing, setViewing] = useState<number | null>(null);
   const [cameraTab, setCameraTab] = useState<"setup" | "movement" | undefined>(undefined);
   const [batch, setBatch] = useState(1);
   const [submitting, setSubmitting] = useState(false);
@@ -199,6 +213,9 @@ export function Composer({
   const refMax = media.reduce((n, f) => n + (f.multiple ? f.max : 1), 0);
   const refs = media.flatMap((f) => listOf(values[f.key]).map((url) => ({ url, kind: f.media, key: f.key })));
   const imageSlot = media.find((f) => f.media === "image" && f.multiple);
+  // Primer y último fotograma: dos casillas de una imagen cada una.
+  const isFrames = media.some((f) => f.key === FIRST_FRAME && !f.multiple) && media.some((f) => f.key === LAST_FRAME && !f.multiple);
+  const frameSlots = isFrames ? media.filter((f) => f.key === FIRST_FRAME || f.key === LAST_FRAME) : [];
   // Genjutsu: casillas propias (video de origen, imágenes) y, en Restyle, el estilo de su catálogo (`preset_id`).
   const isGenjutsu = !!ready && GENJUTSU.test(ready.id);
   const styleField = fields.find((f) => f.kind === "style");
@@ -213,7 +230,8 @@ export function Composer({
   }, [styleField, ready]);
   const style = styleField && styles?.model === ready?.id ? styles?.list.find((x) => x.id === values[styleField.key]) : undefined;
   const [missing, setMissing] = useState<string[]>([]);
-  const slotLabel = (f: MediaField) => (f.media === "video" ? c.sourceVideo : f.media === "image" ? c.refImages : f.label);
+  const slotLabel = (f: MediaField) =>
+    f.key === FIRST_FRAME && isFrames ? c.firstFrame : f.key === LAST_FRAME ? c.lastFrame : f.media === "video" ? c.sourceVideo : f.media === "image" ? c.refImages : f.label;
 
   /** Añade una URL a la casilla de su tipo; false si este modelo no la acepta o ya no cabe. */
   // Lo último que se puso en `values`, para añadir varias referencias seguidas (subidas) sin pisarse.
@@ -222,12 +240,16 @@ export function Composer({
     latest.current = values;
   }, [values]);
   function addRef(url: string, kind: MediaKind) {
-    const slot = media.find((f) => f.media === kind);
+    const prev = latest.current;
+    // La casilla elegida (primer o último fotograma), si no la primera libre de su tipo, si no la primera de su tipo.
+    const slot =
+      media.find((f) => f.key === frameTarget && f.media === kind) ??
+      media.find((f) => f.media === kind && (f.multiple || listOf(prev[f.key]).length === 0)) ??
+      media.find((f) => f.media === kind);
     if (!slot) {
       setError(c.notAccepted);
       return false;
     }
-    const prev = latest.current;
     const list = listOf(prev[slot.key]);
     if (list.includes(url)) return true;
     if (slot.multiple && list.length >= slot.max) {
@@ -235,6 +257,7 @@ export function Composer({
       return false;
     }
     const next = { ...prev, [slot.key]: slot.multiple ? [...list, url] : url };
+    if (slot.key === frameTarget) setFrameTarget(null); // la siguiente imagen va a la casilla libre
     latest.current = next;
     keys.current = null;
     setValues(next);
@@ -432,19 +455,12 @@ export function Composer({
   const [at, setAt] = useState<{ query: string; start: number; end: number } | null>(null);
   const [atIndex, setAtIndex] = useState(0);
   // Menú de @: primero las referencias adjuntas en su orden (@imagen1, @video1…), después los elementos.
-  const refKey = refs.map((r) => `${r.kind}|${r.key}|${r.url}`).join("\n");
-  const refOptions = useMemo(() => {
-    const seen: Record<string, number> = {};
-    return refKey
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [kind, key, url] = line.split("|") as [MediaKind, string, string];
-        seen[kind] = (seen[kind] ?? 0) + 1;
-        const word = kind === "image" ? (locale === "es" ? "imagen" : "image") : kind;
-        return { kind, key, url, name: `${word}${seen[kind]}` };
-      });
-  }, [refKey, locale]);
+  const seenKinds: Record<string, number> = {};
+  const refOptions = refs.map(({ kind, key, url }) => {
+    seenKinds[kind] = (seenKinds[kind] ?? 0) + 1;
+    const word = kind === "image" ? (locale === "es" ? "imagen" : "image") : kind;
+    return { kind, key, url, name: `${word}${seenKinds[kind]}` };
+  });
   const q = at?.query.toLowerCase() ?? "";
   const refMatches = at ? refOptions.filter((r) => r.name.includes(q)) : [];
   const atMatches = at ? (elements ?? []).filter((el) => el.name.includes(q)).slice(0, 6) : [];
@@ -480,7 +496,7 @@ export function Composer({
     setPanel((cur) => (cur === p && !opts ? null : p));
   };
 
-  const { cinematic, featured, genjutsu } = menuModels(models, mode);
+  const { cinematic, featured, frames, genjutsu } = menuModels(models, mode);
   const label = ready ? modelLabel(ready.title) : null;
   // Genjutsu: el nombre solo no distingue sus tres funciones («Genjutsu · Restyle»).
   const modelTitle = label ? (isGenjutsu ? `${label.name} · ${label.workflow}` : label.name) : (models.find((m) => m.id === modelId)?.title.split(" — ")[0] ?? "…");
@@ -488,6 +504,12 @@ export function Composer({
   const ratios = props.aspect_ratio?.enum as string[] | undefined;
   const duration = props.duration;
   const hasAudio = props.generate_audio?.type === "boolean";
+
+  // Referencias que se abren en grande (sin repetir: la misma imagen puede ser primer y último fotograma).
+  const viewable = refs
+    .filter((r) => r.kind !== "audio")
+    .map((r) => ({ src: r.url, kind: r.kind as "image" | "video" }))
+    .filter((v, i, all) => all.findIndex((x) => x.src === v.src) === i);
 
   const refsCard = refMax > 0 && (
     <button
@@ -512,6 +534,7 @@ export function Composer({
 
   return (
     <div className={clsx("flex w-full flex-col gap-2 sm:flex-row sm:items-end", className)}>
+      {viewing !== null && viewable[viewing] && <Lightbox items={viewable} start={viewing} onClose={() => setViewing(null)} />}
       {/* Imagen / Video */}
       <div className="flex shrink-0 gap-1 rounded-2xl border border-line bg-surface-2 p-1 sm:flex-col">
         {(["image", "video"] as const).map((m) => {
@@ -587,6 +610,35 @@ export function Composer({
                 />
               )}
             </div>
+          ) : isFrames ? (
+            <div className="hide-scrollbar flex items-center gap-1.5 overflow-x-auto">
+              {frameSlots.map((f) => {
+                const url = listOf(values[f.key])[0];
+                return (
+                  <SlotCard
+                    key={f.key}
+                    active={panel === "refs" && frameTarget === f.key}
+                    warn={lackingNow.includes(f.key)}
+                    onClick={() => {
+                      setFrameTarget(f.key);
+                      openPanel("refs", { tab: "uploads" });
+                    }}
+                    thumb={url ? <RefThumb url={url} kind="image" className="size-full" /> : <Plus className="size-4" />}
+                    caption={slotLabel(f)}
+                    value={url ? "1/1" : f.key === FIRST_FRAME ? c.frameRequired : c.frameOptional}
+                  />
+                );
+              })}
+              {typeof values[FIRST_FRAME] === "string" && values[FIRST_FRAME] !== values[LAST_FRAME] && (
+                <button
+                  type="button"
+                  onClick={() => setValue(LAST_FRAME, values[FIRST_FRAME])}
+                  className="shrink-0 rounded-xl bg-surface-3 px-3 py-2 text-[12px] font-medium text-fg-2 hover:bg-surface-4 hover:text-fg"
+                >
+                  {c.sameAsFirst}
+                </button>
+              )}
+            </div>
           ) : (
             refsCard && <div className="flex">{refsCard}</div>
           )}
@@ -634,7 +686,19 @@ export function Composer({
               <div className="hide-scrollbar mb-1.5 flex gap-1.5 overflow-x-auto">
                 {refs.map((r) => (
                   <span key={`${r.key}|${r.url}`} className="relative shrink-0">
-                    <RefThumb url={r.url} kind={r.kind} className="size-11" />
+                    {r.kind === "audio" ? (
+                      <RefThumb url={r.url} kind={r.kind} className="size-11" />
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={c.viewRef}
+                        title={c.viewRef}
+                        onClick={() => setViewing(viewable.findIndex((v) => v.src === r.url))}
+                        className="block cursor-zoom-in rounded-lg transition-opacity hover:opacity-80"
+                      >
+                        <RefThumb url={r.url} kind={r.kind} className="size-11" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       aria-label={c.removeRef}
@@ -728,7 +792,13 @@ export function Composer({
 
             <div className="mt-1 flex flex-wrap items-center gap-0.5">
               {refMax > 0 && (
-                <IconChip title={c.addReferences} onClick={() => openPanel("refs", { tab: "uploads" })}>
+                <IconChip
+                  title={c.addReferences}
+                  onClick={() => {
+                    setFrameTarget(null);
+                    openPanel("refs", { tab: "uploads" });
+                  }}
+                >
                   <Plus className="size-4" />
                 </IconChip>
               )}
@@ -759,6 +829,7 @@ export function Composer({
                         ? [
                             [c.cinematicModels, cinematic],
                             [c.featuredModels, featured],
+                            [c.frameModels, frames],
                             [c.genjutsuModels, genjutsu],
                           ]
                         : [
