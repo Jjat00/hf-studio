@@ -188,21 +188,31 @@ type Item = { type: "video" | "image"; src: string; tag: string; model: string; 
 const TALL = "aspect-[9/16]";
 const WIDE = "aspect-video";
 const EXAMPLES: Item[] = [
+  { type: "video", src: "anime-batalla", model: "Gemini Omni Flash", tag: "text-to-video", aspect: WIDE, alt: { es: "Batalla espacial de anime con un acorazado y un mecha junto a un planeta con anillos", en: "Anime space battle with a battleship and a mecha next to a ringed planet" } },
   { type: "video", src: "soda-producto", model: "Kling O3", tag: "video-reference", aspect: TALL, alt: { es: "Soda roja con humo en un bar con luces moradas", en: "Red soda with smoke in a bar with purple lights" } },
+  { type: "image", src: "capuchino", model: "Seedream 5.0 Pro", tag: "text-to-image", aspect: "aspect-[3/4]", alt: { es: "Capuchino con arte latte sobre fondo terracota y sombras de hojas", en: "Cappuccino with latte art on a terracotta backdrop with leaf shadows" } },
+  { type: "video", src: "malteada", model: "Cinema Studio 4.0", tag: "reference-to-video", aspect: TALL, alt: { es: "Mujer que camina con una malteada de fresa por una esquina de Brooklyn al anochecer", en: "Woman walking with a strawberry milkshake past a Brooklyn corner at dusk" } },
   { type: "video", src: "tinta", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE, alt: { es: "Tinta de colores que se expande dentro de una esfera", en: "Colored ink blooming inside a sphere" } },
+  { type: "image", src: "diner", model: "Soul Cinema", tag: "text-to-image", aspect: TALL, alt: { es: "Diner retro de los años cincuenta vacío, con neones y taburetes rojos", en: "Empty 1950s retro diner with neon lights and red stools" } },
   { type: "video", src: "moto-callejon", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Motociclista que acelera por un callejón mojado", en: "Motorcyclist speeding down a wet alley" } },
   { type: "image", src: "mohicano", model: "Z-Image Turbo", tag: "text-to-image", aspect: WIDE, alt: { es: "Hombre con cresta rosa en tres poses de casting", en: "Man with a pink mohawk in three casting poses" } },
+  { type: "video", src: "gato-genjutsu", model: "Genjutsu Light", tag: "motion-transfer", aspect: TALL, alt: { es: "Hombre y gato negro que repiten el mismo gesto de susto en una calle residencial", en: "Man and black cat repeating the same startled gesture on a residential street" } },
   { type: "video", src: "frankenstein", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "El monstruo de Frankenstein se acerca a la cámara", en: "Frankenstein's monster leaning toward the camera" } },
+  { type: "video", src: "bar-orbital", model: "Seedance 2.5 Draft", tag: "reference-to-video", aspect: WIDE, alt: { es: "Bartender en un bar de madera dentro de una nave que mira la Tierra por la ventana", en: "Bartender in a wooden bar aboard a spaceship looking at Earth through the window" } },
   { type: "video", src: "anime", model: "Seedance 2.5", tag: "video-edit", aspect: WIDE, alt: { es: "Video real convertido en anime", en: "Live video turned into anime" } },
+  { type: "image", src: "dumbo-atardecer", model: "Soul Cinema", tag: "text-to-image", aspect: TALL, alt: { es: "Calle adoquinada de DUMBO con el puente de Manhattan al atardecer", en: "Cobblestone street in DUMBO with the Manhattan Bridge at sunset" } },
   { type: "video", src: "frappe-ugc", model: "Kling O3", tag: "first-last-frame", aspect: TALL, alt: { es: "Mujer bebiendo un frappé en una cafetería", en: "Woman drinking a frappé in a café" } },
   { type: "video", src: "cafe", model: "Kling 3.0 Pro", tag: "first-last-frame", aspect: WIDE, alt: { es: "Recorrido por una cafetería cálida con lámparas de mimbre", en: "Walk through a warm café with wicker lamps" } },
   { type: "video", src: "granizado", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Granizado de Halloween con un ojo de gomita", en: "Halloween shaved ice with a gummy eyeball" } },
   { type: "image", src: "tienda-chicle", model: "Nano Banana 2", tag: "image-edit", aspect: TALL, alt: { es: "Mujer haciendo una bomba de chicle en una tienda de dulces", en: "Woman blowing a bubblegum bubble in a candy shop" } },
+  { type: "image", src: "granja", model: "Soul Cinema", tag: "text-to-image", aspect: WIDE, alt: { es: "Casa de granja solitaria bajo un cielo nublado, vista desde un maizal", en: "Lone farmhouse under an overcast sky, seen from a cornfield" } },
   { type: "video", src: "ugc-sofa", model: "Kling 3.0 Turbo", tag: "text-to-video", aspect: TALL, alt: { es: "Joven en el sofá mirando su teléfono, estilo UGC", en: "Young man on a couch looking at his phone, UGC style" } },
+  { type: "image", src: "metro", model: "Soul Cinema", tag: "text-to-image", aspect: TALL, alt: { es: "Andén vacío del metro de Nueva York de noche", en: "Empty New York subway platform at night" } },
   { type: "video", src: "ciudad", model: "Wan 2.7", tag: "text-to-video", aspect: WIDE, alt: { es: "Ciudad de neón de noche", en: "Neon city at night" } },
   { type: "video", src: "boba-impacto", model: "PixVerse V6", tag: "image-to-video", aspect: TALL, alt: { es: "Bolas de boba que estallan en un vaso azul con hielo", en: "Boba pearls bursting into a blue iced cup" } },
   { type: "video", src: "crochet", model: "Genjutsu Restyle", tag: "restyle", aspect: "aspect-[2/3]", alt: { es: "Persona convertida en muñeco de crochet que baila", en: "Person turned into a dancing crochet doll" } },
   { type: "video", src: "auto-cansada", model: "Kling Omni", tag: "image-to-video", aspect: TALL, alt: { es: "Mujer cansada dentro de un auto, con la cabeza apoyada en el tablero y el teléfono en las manos", en: "Tired woman inside a car, resting her head against the dashboard and holding her phone" } },
+  { type: "image", src: "bodega", model: "Soul 2.0", tag: "text-to-image", aspect: TALL, alt: { es: "Esquina de Brooklyn con una bodega iluminada al anochecer", en: "Brooklyn corner with a lit bodega at dusk" } },
   { type: "video", src: "soda-ugc", model: "Wan 3.0", tag: "reference-to-video", aspect: TALL, alt: { es: "Mujer presentando una soda roja", en: "Woman presenting a red soda" } },
   { type: "video", src: "frankenstein-ojo", model: "Kling 3.0", tag: "image-to-video", aspect: TALL, alt: { es: "Primer plano del ojo verde del monstruo que parpadea", en: "Close-up of the monster's green eye blinking" } },
   { type: "video", src: "moto-lluvia", model: "PixVerse V6", tag: "image-to-video", aspect: TALL, alt: { es: "Moto que corre bajo la lluvia salpicando agua", en: "Motorcycle racing through the rain throwing spray" } },
@@ -211,12 +221,13 @@ const EXAMPLES: Item[] = [
 
 /** Capacidades con una generación real de los ejemplos en vez de la ilustración (las demás conservan su arte). */
 const CAP_MEDIA: Record<string, { type: "video" | "image"; src: string; position?: string }> = {
-  "text-to-video": { type: "video", src: "ugc-sofa", position: "object-[50%_40%]" },
+  "text-to-video": { type: "video", src: "anime-batalla" },
   frames: { type: "video", src: "cafe" },
-  references: { type: "video", src: "soda-ugc" },
+  references: { type: "video", src: "bar-orbital" },
+  motion: { type: "video", src: "gato-genjutsu", position: "object-[50%_55%]" },
   "video-edit": { type: "video", src: "anime" },
   "object-swap": { type: "video", src: "crochet", position: "object-[50%_60%]" },
-  "text-to-image": { type: "image", src: "mohicano" },
+  "text-to-image": { type: "image", src: "capuchino", position: "object-[50%_62%]" },
   "image-edit": { type: "image", src: "tienda-chicle", position: "object-[50%_25%]" },
 };
 
