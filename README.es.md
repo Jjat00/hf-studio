@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-46%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
+[![MCP](https://img.shields.io/badge/MCP-62%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
 **Español** · [English](README.md) · [Web y ejemplos](https://hf-studio.jato.run)
 
@@ -23,7 +23,7 @@ biblioteca.
   un respaldo seguro (ver [Más barato con varios proveedores](#más-barato-con-varios-proveedores)).
 - **Un solo lugar para 91 endpoints de Higgsfield** (Seedance, Kling 4.0, Wan, Hailuo, PixVerse, LTX, Grok Imagine,
   Ideogram, Recraft…), que se buscan por lo que hacen (texto a video, fotograma inicial y final, edición de video,
-  transferencia de movimiento…) y no por marca, **más 156 modelos que solo venden APIMart y KIE** (Nano Banana,
+  transferencia de movimiento…) y no por marca, **más 170 modelos que solo venden APIMart y KIE** (Nano Banana,
   GPT Image, Midjourney, Seedream, FLUX, Veo 3.1, Vidu, Runway…).
 - **Agentes que cotizan antes de gastar.** Toda herramienta MCP que inicia una generación de pago exige un `quote_id`
   de un solo uso, sacado de una cotización previa de esa misma petición, y el servidor le pide al agente que te
@@ -80,6 +80,27 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
 
 ## Qué incluye
 
+- **Cinema Studio** (`/cinema`): un espacio de trabajo para películas, organizado como el de Higgsfield. La barra de
+  Cinema Studio 4.0 trae tarjetas de película, cámara y movimiento, paleta de color e iluminación, primer y último
+  fotograma, y menciones `@imagen1` para tus referencias. Los **proyectos** (`/projects`) guardan el brief, carpetas
+  y elementos, y lo que generas va al proyecto activo. El chat **AI Director** (Claude, `ANTHROPIC_API_KEY`
+  opcional) escribe el tratamiento, el desglose del guion y la lista de tomas, mantiene los documentos del proyecto
+  y revisa fotogramas de tus videos, con skills de dirección incluidas.
+- **Supercomputer** (`/supercomputer`): un agente de chat (Claude) que aclara tu idea con preguntas que se
+  responden con un clic, busca y lee modelos, busca en la web y propone generaciones con su precio y proveedor.
+  Nunca genera por su cuenta: lo hace tu clic, o la generación automática con el tope en USD que tú pongas. Sigue
+  **skills** (`/skills`, formato SKILL.md de Claude) que llamas con `/nombre`.
+- **Content Factory** (`/factory`): videos narrados dibujados con código, sin imágenes ni video de IA. Diez formatos
+  («¿qué pasaría si…?», explicador rápido y largo, top, noticias, tutorial, comparativa, historia, anuncio de
+  producto y uno libre), 11 estilos visuales y 9:16, 16:9 o 1:1. Claude escribe el guion (se cotiza y se aprueba
+  antes), la voz es gratis (edge-tts) o de ElevenLabs y los subtítulos van palabra a palabra; las escenas pueden
+  llevar gráficas, ecuaciones, curvas, código y 3D. Necesita Node.js 22+.
+- **Katana** (`/katana`): recrea un edit de referencia con tu propio sujeto. HF Studio analiza la referencia gratis
+  (cortes, destellos, sacudidas, BPM), Claude escribe un plan (se cotiza antes) y el plan se convierte en un Space
+  que corres con un presupuesto aprobado. Conserva el lenguaje de la referencia (ritmo, cámara, color, tipografía)
+  sin copiarla toma por toma.
+- **Primero el borrador, luego 1080p:** Seedance 2.5 Draft hace un borrador barato a 480p y «Pasar a 1080p» renderiza
+  esa misma escena a 1080p (solo APIMart y KIE).
 - **Spaces, un lienzo de nodos para generar por pasos** (`/spaces`, inspirado en Magnific Spaces): conecta textos,
   medios, listas y cualquier modelo del catálogo; la salida de cada paso alimenta al siguiente. Cada nodo muestra su
   costo en USD antes de generar y guarda su historial. Clic derecho o `/` para añadir un nodo; arrastra una salida a un
@@ -106,7 +127,7 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   ajustas y generas.
 - **91 endpoints de Higgsfield** (73 de video, 17 de imagen y 1 de referencias personalizadas), cada uno con su JSON
   Schema sacado de la documentación oficial (`hf-studio sync-catalog`; Kling 4.0, Genjutsu Light y AI Influencer, que
-  solo están en open.higgsfield.ai, se escriben a mano y el sync los conserva), y 156 modelos que solo venden APIMart y
+  solo están en open.higgsfield.ai, se escriben a mano y el sync los conserva), y 170 modelos que solo venden APIMart y
   KIE.
 - **Todas las capacidades de video e imagen:** texto a video, imagen a video, fotograma inicial y final, videos de
   referencia, edición y extensión de video, transferencia de movimiento, cambio de objetos y de estilo (Genjutsu: anime,
@@ -138,6 +159,8 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
 | ![Banner de AI Influencer y Apps de un clic](docs/img/influencer-apps.webp) | ![Menú de Video con Funciones y Modelos](docs/img/menu.webp) |
 | **Estudio de video** | **Casos de uso** |
 | ![Estudio de video con el costo antes de generar](docs/img/estudio-video.webp) | ![Casos de uso](docs/img/casos-de-uso.webp) |
+| **Cinema Studio** | **Content Factory** |
+| ![Inicio de Cinema Studio con la barra de prompt y las generaciones recientes](docs/img/cinema-studio.webp) | ![Content Factory: formatos, estilos y tus videos](docs/img/content-factory.webp) |
 
 ## Requisitos
 
@@ -270,21 +293,25 @@ se tocan las que ya existen. Si el agente ya tiene `hf-studio`, `connect` se det
 mano, el servidor es `uv run --directory /ruta/absoluta/a/hf-studio hf-studio mcp` con
 `HF_STUDIO_URL=http://127.0.0.1:8787` y `HF_STUDIO_TOKEN=hfs_…` en su entorno.
 
-Herramientas (46). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Herramientas (62). Todas declaran las cuatro pistas MCP (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) y las que gastan créditos lo dicen en su título, para que el cliente avise antes de usarlas.
 
 | Grupo | Herramientas |
 | --- | --- |
 | Modelos | `find_models`, `get_model`, `recommend_models`, `list_styles`, `list_model_options` |
-| Generar | `upload_media`, `estimate_cost`, `generate`, `generate_batch` |
-| Seguimiento | `get_generation`, `wait_generations`, `list_generations`, `cancel_generation`, `download_outputs`, `approve_fallback` |
-| Proveedores | `providers_status` |
-| Presets | `list_presets`, `run_preset`, `save_preset` |
+| Generar | `upload_media`, `list_uploads`, `estimate_cost`, `generate`, `generate_batch` |
+| Seguimiento | `get_generation`, `wait_generations`, `show_generations`, `list_generations`, `list_approvals`, `cancel_generation`, `download_outputs`, `approve_fallback` |
+| Biblioteca | `favorite_generations`, `hide_generations`, `delete_generation` |
+| Proveedores y gasto | `providers_status`, `get_usage` |
+| Presets | `list_presets`, `run_preset`, `save_preset`, `delete_preset` |
 | Voz (ElevenLabs) | `list_voices`, `change_voice`, `clone_voice`, `design_voice`, `save_voice`, `delete_voice` |
+| Voces gratis (edge-tts) | `list_free_voices`, `free_text_to_speech` |
 | Audio (ElevenLabs) | `text_to_speech`, `sound_effect`, `compose_music`, `isolate_voice`, `elevenlabs_account` |
 | Sonoteca | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 | Reutilizar y elementos | `use_output`, `list_elements`, `create_element`, `delete_element` |
-| Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
+| Tarjeta en el chat (MCP Apps) | `generation_preview` (solo la usa la tarjeta, oculta para el modelo) |
+| Katana | `katana_presets`, `katana_create`, `katana_plan`, `katana_get` |
+| Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `delete_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
 
 **Ninguna herramienta MCP genera sin cotizar antes esa misma petición.** `estimate_cost`, y `generate_batch` o `run_preset`
 con `dry_run=True`, devuelven el costo y un `quote_id`. `generate`, y los lotes y presets con `dry_run=False`,
@@ -317,17 +344,18 @@ Next.js 16 y Tailwind 4, con un look inspirado en higgsfield.ai. El logo, el nom
 ![Catálogo de modelos, que se busca por capacidad](docs/img/modelos.webp)
 
 - **Navegación** como la de higgsfield.ai: Explorar, Imagen, Video y Audio abren un menú dividido en **Funciones** y
-  **Modelos**; luego vienen MCP, Genjutsu, Spaces, AI Influencer, Apps, Casos de uso y Presets, y el resto está en
-  **Más**.
+  **Modelos**; luego vienen MCP, Cinema Studio, Supercomputer, Content Factory, Katana y Genjutsu, y el resto (Spaces,
+  AI Influencer, Apps, Casos de uso, Presets…) está en **Más**.
 - **Portada** (`/`): modelos destacados, una promo con accesos, el banner de AI Influencer, las Apps de un clic, una
   barra de prompt, lo que pueden hacer tus agentes y tus últimas creaciones.
 - **Páginas:** Imagen (Crear, con anuncios de Ads Studio · Editar), Video (Crear: texto, fotograma inicial y final,
   referencias · Genjutsu: movimiento, cambio de objetos y cambio de estilo con selector · Editar video · Movimiento), Voz,
-  Audio, Sonoteca, AI Influencer (`/influencer`), Elementos (`/elements`), Casos de uso, Presets y
+  Audio, Sonoteca, Cinema Studio (`/cinema`, con proyectos en `/projects`), Supercomputer (`/supercomputer`, con
+  skills en `/skills`), Content Factory (`/factory`), Katana (`/katana`), AI Influencer (`/influencer`), Elementos (`/elements`), Casos de uso, Presets y
   Apps (con los flujos publicados en `/flows/<id>`), Spaces (`/spaces`), Biblioteca (con detalle en
   `/history/<id>`), Uso (`/usage`: gasto por día, proveedor y modelo, y el saldo de cada proveedor), Modelos
   (`/models`) y MCP.
-- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 247 modelos funcionan sin código
+- **Formularios:** se generan desde el `input_schema` de cada modelo, así que los 261 modelos funcionan sin código
   específico. El formato muestra un rectángulo con su proporción.
 - **Voz** (`/voice`): elige un video, marca el tramo sobre la línea de tiempo, busca una voz (tu cuenta o la
   biblioteca pública de ElevenLabs, con escucha previa), añade un efecto y decide cuánto del audio original se oye.

@@ -6,7 +6,7 @@
 [![M8ven Score](https://m8ven.ai/badge/mcp/jjat00/hf-studio)](https://m8ven.ai/mcp/jjat00/hf-studio)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![MCP](https://img.shields.io/badge/MCP-58%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
+[![MCP](https://img.shields.io/badge/MCP-62%20tools-8A2BE2.svg)](#connect-your-agents-mcp)
 
 [Español](README.es.md) · **English** · [Website and examples](https://hf-studio.jato.run)
 
@@ -25,7 +25,7 @@ so it always has a price to show you before it generates.
 - **The cheapest provider for each video and image:** the same model through Higgsfield, APIMart or KIE, quoted on all of
   them, with a safe fallback (see [Cheaper with more providers](#cheaper-with-more-providers)).
 - **One place for 91 Higgsfield endpoints** (Seedance, Kling 4.0, Wan, Hailuo, PixVerse, LTX, Grok Imagine, Ideogram, Recraft…), searchable by what they do
-  (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand, **plus 156 models that only
+  (text-to-video, first/last frame, video edit, motion transfer…) instead of by brand, **plus 170 models that only
   APIMart and KIE sell** (Nano Banana, GPT Image, Midjourney, Seedream, FLUX, Veo 3.1, Vidu, Runway…).
 - **Agents that quote before they spend.** Every MCP tool that starts a paid run requires a single-use `quote_id` from a prior quote of
   the same request, and the server tells the agent to show you that cost and wait for your OK.
@@ -45,7 +45,7 @@ the cheapest provider that offers **the exact same model and settings**:
 | [APIMart](https://apimart.ai) | `APIMART_API_KEY`, optional | Usually the cheapest for Seedance, Wan and Kling Omni/O3; also Grok Image 2.0, and store-only models such as Nano Banana, GPT Image, Midjourney, Veo 3.1, Vidu and SkyReels |
 | [KIE](https://kie.ai) | `KIE_API_KEY`, optional | Usually the cheapest for Hailuo, MiniMax, Kling 2.5/2.6, Kling Motion Control 2.6 and Z-Image, and store-only models such as Nano Banana, GPT Image, Veo 3.1, Seedream, Ideogram 3, Runway and talking avatars |
 
-- **Models Higgsfield does not have.** With an APIMart or KIE key, the catalog also offers 156 models that only those
+- **Models Higgsfield does not have.** With an APIMart or KIE key, the catalog also offers 170 models that only those
   stores sell (75 image, 81 video), marked "APIMart / KIE" in the UI and `store: true` in the API: Nano Banana 1, 2,
   2.1, 2 Lite and Pro, Imagen 4, GPT Image 1.5, 2 and 2.5, GPT-4o Image, Midjourney, Seedream 3 to 5, FLUX.2, FLUX 3
   and Kontext, Qwen Image 2, Wan 2.7 Image, Ideogram 3, older Grok Imagine channels, Veo 3.1, Gemini Omni, Seedance
@@ -89,6 +89,27 @@ the cheapest provider that offers **the exact same model and settings**:
 
 ## Features
 
+- **Cinema Studio** (`/cinema`): a workspace for films, laid out like Higgsfield's. The Cinema Studio 4.0 prompt bar
+  has cards for film setup, camera and movement, color palette and lighting, start and end frame, and `@image1`
+  mentions for your references. **Projects** (`/projects`) keep a brief, folders and elements, and whatever you
+  generate goes to the active project. The **AI Director** chat (Claude, optional `ANTHROPIC_API_KEY`) writes the
+  treatment, the script breakdown and the shot list, keeps the project documents and reviews frames of your videos,
+  with built-in directing skills.
+- **Supercomputer** (`/supercomputer`): a chat agent (Claude) that clears up your idea with clickable questions,
+  finds and reads models, searches the web and proposes generations with their price and provider. It never
+  generates on its own: your click does, or automatic generation under a USD cap you set. It follows **skills**
+  (`/skills`, Claude's SKILL.md format) that you call with `/name`.
+- **Content Factory** (`/factory`): narrated videos drawn by code, with no AI images or video. Ten formats (what-if,
+  quick and long explainers, top list, news, tutorial, versus, story, product ad and a custom one), 11 visual styles
+  and 9:16, 16:9 or 1:1. Claude writes the script (quoted and approved first), the voice is free (edge-tts) or
+  ElevenLabs, and captions follow each word; scenes can carry charts, equations, plots, code and 3D. Needs
+  Node.js 22+.
+- **Katana** (`/katana`): remix a reference edit with your own subject. HF Studio analyzes the reference for free
+  (cuts, flashes, shakes, BPM), Claude writes a plan (quoted first) and the plan becomes a Space that you run under
+  an approved budget. It keeps the language of the reference (pacing, camera, color, type) without copying it shot
+  by shot.
+- **Draft first, then 1080p:** Seedance 2.5 Draft makes a cheap 480p draft, and "Finalize" renders that same scene
+  at 1080p (APIMart and KIE only).
 - **Spaces, a node canvas to generate step by step** (`/spaces`, inspired by Magnific Spaces): connect texts,
   media, lists and any catalog model, and each step's output feeds the next one. Every node shows its cost in USD
   before you generate and keeps its run history. Right-click or press `/` to add a node; drag an output to an empty
@@ -114,7 +135,7 @@ the cheapest provider that offers **the exact same model and settings**:
   grade and ad multiplier, each a built-in preset over a catalog model: upload, adjust and generate.
 - **91 Higgsfield endpoints** (73 video, 17 image, 1 custom references), each with its JSON Schema taken from the
   official docs (`hf-studio sync-catalog`; Kling 4.0, Genjutsu Light and AI Influencer, only on open.higgsfield.ai,
-  are written by hand and kept by the sync), and 156 store-only models from APIMart and KIE.
+  are written by hand and kept by the sync), and 170 store-only models from APIMart and KIE.
 - **Every video and image capability:** text-to-video, image-to-video, first and last frame, reference videos, video
   edit and extend, motion transfer, object swap and restyle (Genjutsu: anime, stop motion, 3D…
   keeping the motion and the audio, with Higgsfield's current styles), text-to-image, image editing and ad images (Ads
@@ -140,6 +161,8 @@ the cheapest provider that offers **the exact same model and settings**:
 | ![AI Influencer banner and one-click Apps](docs/img/influencer-apps.webp) | ![Video menu with Features and Models](docs/img/menu.webp) |
 | **Video studio** | **Use cases** |
 | ![Video studio with its cost before generating](docs/img/estudio-video.webp) | ![Use cases](docs/img/casos-de-uso.webp) |
+| **Cinema Studio** | **Content Factory** |
+| ![Cinema Studio home with the prompt bar and recent generations](docs/img/cinema-studio.webp) | ![Content Factory: formats, styles and your videos](docs/img/content-factory.webp) |
 
 ## Requirements
 
@@ -270,7 +293,7 @@ touched. If the agent already has `hf-studio`, `connect` stops: remove it first 
 server is `uv run --directory /absolute/path/to/hf-studio hf-studio mcp` with `HF_STUDIO_URL=http://127.0.0.1:8787`
 and `HF_STUDIO_TOKEN=hfs_…` in its environment.
 
-Tools (58). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+Tools (62). Every tool declares all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`), and the ones that spend credits say so in their title, so clients can warn you before calling them.
 
 | Group | Tools |
@@ -287,6 +310,7 @@ Tools (58). Every tool declares all four MCP hints (`readOnlyHint`, `destructive
 | Sound library | `list_sounds`, `label_sound`, `import_elevenlabs_history` |
 | Reuse and elements | `use_output`, `list_elements`, `create_element`, `delete_element` |
 | Chat card (MCP Apps) | `generation_preview` (used only by the card, hidden from the model) |
+| Katana | `katana_presets`, `katana_create`, `katana_plan`, `katana_get` |
 | Spaces | `list_spaces`, `get_space`, `create_space`, `update_space`, `delete_space`, `estimate_space_run`, `run_space`, `get_space_run`, `approve_space_run`, `cancel_space_run` |
 
 **Results inside the chat.** In clients that render MCP Apps (Claude Desktop, claude.ai), `generate`,
@@ -325,16 +349,17 @@ Next.js 16 and Tailwind 4, with a look inspired by higgsfield.ai. The logo, name
 ![Model catalog, searchable by capability](docs/img/modelos.webp)
 
 - **Navigation** like higgsfield.ai: Explore, Image, Video and Audio open a menu split into **Features** and
-  **Models**, followed by MCP, Genjutsu, Spaces, AI Influencer, Apps, Use cases and Presets; the rest lives under
-  **More**.
+  **Models**, followed by MCP, Cinema Studio, Supercomputer, Content Factory, Katana and Genjutsu; the rest (Spaces,
+  AI Influencer, Apps, Use cases, Presets…) lives under **More**.
 - **Home** (`/`): featured models, a promo with shortcuts, the AI Influencer banner, one-click Apps, a prompt bar,
   what your agents can do and your latest creations.
 - **Pages:** Image (Create, with Ads Studio ads · Edit), Video (Create: text, first and last frame, references ·
   Genjutsu: motion, object swap and restyle with a style picker · Edit video · Motion), Voice,
-  Audio, Sound library, AI Influencer (`/influencer`), Elements (`/elements`), Use cases, Presets and Apps (with
+  Audio, Sound library, Cinema Studio (`/cinema`, with projects at `/projects`), Supercomputer (`/supercomputer`,
+  with skills at `/skills`), Content Factory (`/factory`), Katana (`/katana`), AI Influencer (`/influencer`), Elements (`/elements`), Use cases, Presets and Apps (with
   published flows at `/flows/<id>`), Spaces (`/spaces`), Library (with detail at `/history/<id>`), Usage (`/usage`:
   spend by day, provider and model, plus each provider's balance), Models (`/models`) and MCP.
-- **Forms** are generated from each model's `input_schema`, so all 247 models work without model-specific code.
+- **Forms** are generated from each model's `input_schema`, so all 261 models work without model-specific code.
 - **Voice** (`/voice`): pick a video, mark the segment on the timeline, search a voice (your account or the ElevenLabs
   public library, with preview), add an effect and choose how much of the original audio stays.
 - **Audio** (`/audio`): text-to-speech (expressive v3, stable v2 or cheap Flash, with language), sound effects, music
