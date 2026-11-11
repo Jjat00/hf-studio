@@ -1,5 +1,5 @@
-"""Qwen Image (Alibaba) 1, 2.0, 2.0 Pro y 2.1 en las tiendas. Qwen Image 3 ya está en el catálogo de Higgsfield
-(`alibaba/qwen-image-3/*`) y no se repite aquí.
+"""Qwen Image (Alibaba) 1, 2.0, 2.0 Pro, 2.1 y 3.0 Pro en las tiendas. Qwen Image 3 ya está en el catálogo de
+Higgsfield (`alibaba/qwen-image-3/*`) y no se repite aquí.
 
 Fuentes (revisadas el 2026-10-17):
 - APIMart `qwen-image-2.0` / `qwen-image-2.0-pro`: https://docs.apimart.ai/en/api-reference/images/qwen-image/generation.md
@@ -10,6 +10,15 @@ Fuentes (revisadas el 2026-10-17):
 - No se rutan (revisión 88): KIE `qwen2/*` (Qwen Image 2.0) no tiene resolución ni publica su tamaño de salida,
   así que no garantiza el `1k` del esquema; `qwen/text-to-image` y `qwen/image-edit` cobran por megapíxel y KIE no
   publica cuántos tiene cada `image_size`.
+- APIMart `qwen-image-3.0-pro` (revisado el 2026-11-11): https://docs.apimart.ai/en/api-reference/images/qwen-image-3.0/generation.md
+  (`POST /v1/images/generations`, `size` 7 relaciones, `resolution` 1K/2K con su tabla de píxeles, `n` 1–6,
+  `image_urls` 1–3 para editar, `prompt_extend` apagado por defecto y `prompt_extend_mode` direct o agent, este
+  solo en texto a imagen). Precio fijo por imagen y nivel: `qwen-image-3.0-pro|1K`, `|2K` (el doble). Higgsfield no
+  tiene la versión Pro.
+- Sin ruta (2026-11-11): APIMart `qwen-image-3.0` es el mismo Qwen Image 3 que `alibaba/qwen-image-3/*` de
+  Higgsfield, pero no lo reproduce: no tiene `enable_thinking` (encendido por defecto en Higgsfield), su 2K
+  cuadrado es 2048×2048 y el de Higgsfield 1536×1536, y Higgsfield no publica los píxeles de su 1k. KIE `qwen3/*`
+  y `qwen3-pro/*` tampoco: sus niveles 1K/2K no dicen cuántos píxeles son.
 - KIE `qwen2-1/text-to-image` y `qwen2-1/image-to-image` (Qwen Image 2.1):
   https://docs.kie.ai/market/qwen2-1/text-to-image.md (y image-to-image). Precio
   `qwen-image-2.1, text to image, <res>` e `image to image, <res>`.
@@ -23,6 +32,7 @@ from ..providers.routes import Route, Spec, per_unit, unsupported
 from ._common import choice, model, prompt, upper, url, urls
 
 APIMART_DOCS = "https://docs.apimart.ai/en/api-reference/images/qwen-image/generation"
+APIMART_3_DOCS = "https://docs.apimart.ai/en/api-reference/images/qwen-image-3.0/generation"
 KIE_DOCS = "https://docs.kie.ai/market/qwen"
 
 # --- Esquemas compartidos -------------------------------------------------------------------------
@@ -171,7 +181,60 @@ def _v21_models() -> list[dict[str, Any]]:
     return found
 
 
-MODELS = [*_v1_models(), *_v2_models(), *_v21_models()]
+def _v3_pro_models() -> list[dict[str, Any]]:
+    """Qwen Image 3.0 Pro: solo APIMart (el 3.0 normal es el `alibaba/qwen-image-3/*` de Higgsfield)."""
+    found = []
+    for mode, workflow in (("text-to-image", "Text to image"), ("edit", "Edit images")):
+        edit = mode == "edit"
+        modes = ["direct"] if edit else ["direct", "agent"]
+        properties: dict[str, Any] = {
+            "prompt": prompt(
+                description="What to generate or, with images, what to change and what to keep."
+            ),
+            "aspect_ratio": choice(V2_RATIOS, "1:1", "Output aspect ratio."),
+            "resolution": choice(
+                ["1k", "2k"], "1k", "Output resolution tier (2k square is 2048 by 2048 pixels)."
+            ),
+            "num_images": choice([1, 2, 3, 4, 5, 6], 1, "Images per request."),
+            "negative_prompt": {"type": "string", "description": "What to keep out of the image."},
+            "prompt_extend": flag(False, "Rewrite the prompt into a fuller description first."),
+            "prompt_extend_mode": {
+                "enum": modes,
+                "type": "string",
+                "description": "How to rewrite the prompt (needs prompt_extend)."
+                + ("" if edit else " agent rewrites more aggressively."),
+            },
+        }
+        required = ["prompt"]
+        if edit:
+            properties["image_urls"] = urls(1, 3, "One to three images to edit or use as references.")
+            required.append("image_urls")
+        entry = model(
+            f"alibaba/qwen-image-3-pro/{mode}",
+            name="Qwen Image 3.0 Pro",
+            workflow=workflow,
+            family="qwen-image-3-pro",
+            output="image",
+            capabilities=["edit", "image-references"] if edit else ["text-to-image"],
+            properties=properties,
+            required=required,
+            docs_url=APIMART_3_DOCS,
+            notes=[
+                "Runs on APIMart only. Stronger than Qwen Image 3 for dense text and layouts (menus, posters).",
+                "The prompt can be up to about 4,500 tokens.",
+            ],
+        )
+        entry["input_schema"]["allOf"] = [
+            {
+                "if": {"required": ["prompt_extend_mode"]},
+                "then": {"required": ["prompt_extend"], "properties": {"prompt_extend": {"const": True}}},
+            }
+        ]
+        found.append(entry)
+    return found
+
+
+MODELS = [*_v1_models(), *_v2_models(), *_v21_models(), *_v3_pro_models()]
 
 
 # --- APIMart --------------------------------------------------------------------------------------
@@ -193,10 +256,23 @@ def apimart() -> dict[str, Route]:
                 provider, tier, spec,
                 lambda i, h, p, t=tier: per_unit(p, f"{t}|default", i.get("num_images", 1)),
             )  # fmt: skip
+    name = "qwen-image-3.0-pro"
+    for mode in ("text-to-image", "edit"):
+        spec = Spec(
+            provider, name,
+            keep=("prompt", "resolution", "negative_prompt", "image_urls", "prompt_extend", "prompt_extend_mode"),
+            rename={"aspect_ratio": "size", "num_images": "n"},
+            convert={"resolution": upper},
+            allowed={"aspect_ratio": APIMART_V2_RATIOS},
+        )  # fmt: skip
+        routes[f"alibaba/qwen-image-3-pro/{mode}"] = Route(
+            provider, name, spec,
+            lambda i, h, p, n=name: per_unit(p, f"{n}|{upper(i.get('resolution', '1k'))}", i.get("num_images", 1)),
+        )  # fmt: skip
     return routes
 
 
-APIMART_IMAGE_MODELS = frozenset({"qwen-image-2.0", "qwen-image-2.0-pro"})
+APIMART_IMAGE_MODELS = frozenset({"qwen-image-2.0", "qwen-image-2.0-pro", "qwen-image-3.0-pro"})
 
 
 # --- KIE ------------------------------------------------------------------------------------------

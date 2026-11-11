@@ -1,4 +1,5 @@
-"""Herramientas de imagen de KIE: quitar el fondo y ampliar (Recraft, Topaz). Sin prompt: una imagen entra y sale otra.
+"""Herramientas de imagen de KIE: quitar el fondo y ampliar (Recraft, Topaz, el propio de KIE). Sin prompt: una imagen
+entra y sale otra.
 
 Fuentes (revisadas el 2026-10-17), API unificada de KIE (`jobs/createTask`):
 - `recraft/remove-background`: https://docs.kie.ai/market/recraft/remove-background.md (`image`; PNG/JPG/WEBP,
@@ -9,6 +10,12 @@ Fuentes (revisadas el 2026-10-17), API unificada de KIE (`jobs/createTask`):
   o "4"). KIE cobra por el tamaño de salida (`topaz image upscaler, image-upscale, 2k` o `4k`; el ejemplo de la
   documentación, ×2, gastó 10 créditos = 0,05 USD) y el tamaño depende de la imagen de entrada, que no se conoce
   al cotizar: se cotiza con la fila de 4K (la más alta) y el precio es aproximado.
+- `kie/image-upscale` (revisado el 2026-11-11): https://docs.kie.ai/market/kie/image-upscale.md (`image_url` JPG, PNG,
+  WEBP o GIF de hasta 20 MB, `upscale_factor` "1", "2", "4" u "8"; la salida no puede pasar de 67 MP ni de 16384 px
+  por lado, si no, KIE la rechaza con 422 sin cobrar). Cobra una vez por los píxeles de salida: `kie image upscale,
+  image-upscale, 2k (≤4.19 mp)`, `4k (≤16.78 mp)` y `8k (≤67.11 mp)`, por imagen (`creditUnit` «per image»); con
+  factor 1 el tramo sale del tamaño de entrada. Ese tamaño no se conoce al cotizar, así que se cotiza con el tramo
+  de 8K (el más alto, nunca por debajo) y el precio es aproximado.
 """
 
 from __future__ import annotations
@@ -20,6 +27,8 @@ from ._common import choice, model, url
 
 DOCS = "https://docs.kie.ai/market"
 NOTE = "Only KIE sells it (not Higgsfield or APIMart)."
+KIE_UPSCALE = "kie/image-upscale"
+KIE_UPSCALE_TOP = "kie image upscale, image-upscale, 8k (≤67.11 mp)"
 
 
 def _models() -> list[dict[str, Any]]:
@@ -71,6 +80,31 @@ def _models() -> list[dict[str, Any]]:
                 "KIE bills by output size ($0.05 up to 2K, $0.10 at 4K); the quote assumes the 4K tier.",
             ],
         ),
+        model(
+            KIE_UPSCALE,
+            name="KIE Image Upscale",
+            workflow="Upscale",
+            family="kie-image-upscale",
+            output="image",
+            capabilities=["edit"],
+            properties={
+                "image_url": url("JPG, PNG, WEBP or GIF (first frame) up to 20 MB."),
+                "upscale_factor": choice(
+                    [1, 2, 4, 8], 2, "How many times to multiply width and height (1 only enhances)."
+                ),
+            },
+            required=["image_url"],
+            docs_url=f"{DOCS}/kie/image-upscale",
+            summary="Upscales an image keeping its aspect ratio and text with KIE's own upscaler (not offered by Higgsfield).",
+            notes=[
+                NOTE,
+                "The output must stay within 67 MP and 16384 px per side; larger requests are rejected without charge.",
+                (
+                    "KIE bills by output pixels ($0.0075 up to 4.19 MP, $0.02 up to 16.78 MP, $0.06 up to 67.11 MP); "
+                    "the quote assumes the top tier."
+                ),
+            ],
+        ),
     ]
 
 
@@ -106,5 +140,12 @@ def kie() -> dict[str, Route]:
         lambda i, h, p: per_unit(p, "topaz image upscaler, image-upscale, 4k"),
         settles_later=True,
         notes=("Quoted at the 4K tier; outputs up to 2K cost half",),
+    )  # fmt: skip
+    routes[KIE_UPSCALE] = Route(
+        provider, KIE_UPSCALE,
+        Spec(provider, KIE_UPSCALE, keep=("image_url",), convert={"upscale_factor": str, "prompt": _no_prompt}),
+        lambda i, h, p: per_unit(p, KIE_UPSCALE_TOP),
+        settles_later=True,
+        notes=("Quoted at the 8K tier; smaller outputs cost less",),
     )  # fmt: skip
     return routes

@@ -1,4 +1,4 @@
-"""Avatares que hablan en KIE (`store/avatars.py`): InfiniteTalk y OmniHuman 1.5. Sin gastar créditos."""
+"""Avatares que hablan en KIE (`store/avatars.py`): InfiniteTalk y OmniHuman 1.5 y 2.0. Sin gastar créditos."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def refused(model_id: str, **extra) -> None:
 
 
 def test_models_are_in_the_catalog_on_kie():
-    assert {m["id"] for m in a.MODELS} == set(ROUTES) == {INFINITE, OMNI}
+    assert {m["id"] for m in a.MODELS} == set(ROUTES) == {INFINITE, OMNI, a.OMNIHUMAN2}
     for model_id in ROUTES:
         model = get_catalog().get(model_id)
         assert model["store"] is True and "audio-input" in model["capabilities"]
@@ -77,3 +77,20 @@ def test_omnihuman():
     with pytest.raises(ProviderError):  # el audio debe durar menos de 60 s
         ROUTES[OMNI].check({}, {"input_audio_seconds": 60})
     ROUTES[OMNI].check({}, {"input_audio_seconds": 59.5})
+
+
+def test_omnihuman_2():
+    route = ROUTES[a.OMNIHUMAN2]
+    assert route.model == "omnihuman-2-0"
+    assert body(a.OMNIHUMAN2, image_url=IMG, audio_url=WAV) == {
+        "image_urls": [IMG], "audio_url": WAV, "enable_watermark": False}  # fmt: skip
+    assert body(a.OMNIHUMAN2, image_url=IMG, audio_url=WAV, prompt="waves")["prompt"] == "waves"
+    assert price(a.OMNIHUMAN2, image_url=IMG, audio_url=WAV) is None  # sin la duración del audio
+    assert price(a.OMNIHUMAN2, {"input_audio_seconds": 30}, image_url=IMG, audio_url=WAV) == 2.1
+    refused(a.OMNIHUMAN2, image_url=IMG, audio_url=WAV, resolution="1080p")  # solo 720p
+    for seconds in (3.5, 301):  # audio de 4 a 300 s
+        with pytest.raises(ProviderError):
+            route.check({}, {"input_audio_seconds": seconds})
+    route.check({}, {"input_audio_seconds": 4})
+    route.check({}, {"input_audio_seconds": 300})
+    route.check({}, {})

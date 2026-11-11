@@ -145,14 +145,14 @@ def test_requests_without_an_exact_equivalent_are_unsupported(provider, model_id
 
 
 def test_prices_follow_resolution_and_count():
-    assert price("apimart", "google/nano-banana/text-to-image") == 0.0125
+    assert price("apimart", "google/nano-banana/text-to-image") == 0.008
     assert price("apimart", "google/nano-banana-2/text-to-image", resolution="0.5k") == 0.015
-    assert price("apimart", "google/nano-banana-2/text-to-image", resolution="4k") == 0.025
-    assert price("apimart", "google/nano-banana-2.1/text-to-image", resolution="2k") == 0.025
-    assert price("apimart", "google/nano-banana-2-lite/text-to-image", num_images=3) == 0.0375
+    assert price("apimart", "google/nano-banana-2/text-to-image", resolution="4k") == 0.018
+    assert price("apimart", "google/nano-banana-2.1/text-to-image", resolution="2k") == 0.014
+    assert price("apimart", "google/nano-banana-2-lite/text-to-image", num_images=3) == 0.024
     # Pro en APIMart: `default` vale para 1K y 2K
-    assert price("apimart", "google/nano-banana-pro/text-to-image", resolution="2k") == 0.03
-    assert price("apimart", "google/nano-banana-pro/text-to-image", resolution="4k") == 0.04
+    assert price("apimart", "google/nano-banana-pro/text-to-image", resolution="2k") == 0.02
+    assert price("apimart", "google/nano-banana-pro/text-to-image", resolution="4k") == 0.03
     assert price("apimart", "google/imagen-4/text-to-image") == 0.04
     assert price("kie", "google/nano-banana/edit", image_urls=[IMG]) == 0.02
     assert price("kie", "google/nano-banana-2/text-to-image", resolution="2k") == 0.06

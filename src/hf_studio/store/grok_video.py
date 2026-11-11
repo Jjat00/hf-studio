@@ -18,7 +18,12 @@ Fuentes (revisadas el 2026-10-17):
   segundo `grok-imagine, <modo>, <res>`.
 - KIE `grok-imagine-video-1-5-preview`: https://docs.kie.ai/market/grok-imagine/1-5-preview.md. Prompt hasta 4096,
   1–15 s, 480p/720p/1080p, `aspect_ratio` auto|1:1|16:9|9:16|3:2|2:3 (no vale con una sola imagen), `image_urls`
-  opcional, hasta 7 (1 a 1080p). Precio por segundo `grok-imagine-video-1-5-preview, [image-to-video, ]<res>`.
+  opcional, hasta 7 (1 a 1080p). Precio por segundo (`creditUnit` «per second»; tabla del 2026-11-11, la misma
+  fila con o sin imágenes): `grok-imagine-video-1-5-preview, <res>`, 480p 2,4, 720p 4,5 y 1080p 8 créditos/s.
+  El 2026-11-11 la especificación OpenAPI de esa página dice `image_urls` obligatorio con `maxItems: 1`, admite
+  4:3|3:4 y añade `first_frame_url`, `last_frame_url`, `loop_url`, `keyframes` y `enable_audio`, mientras su
+  propia descripción y https://kie.ai/grok-imagine-video-1.5 siguen con hasta 7 imágenes, sin 4:3 y audio
+  siempre activo; no se cambia la traducción hasta que KIE lo aclare.
 - Todos los videos llevan audio generado y no se puede apagar.
 - Descartado: KIE `grok-imagine/extend` (solo extiende el `task_id` de una tarea de Grok en la misma cuenta de KIE).
 """

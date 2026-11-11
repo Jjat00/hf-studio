@@ -49,14 +49,14 @@ def test_kling21_bodies_and_prices():
     assert body(t2v, prompt="a fox", negative_prompt="") == {
         "prompt": "a fox", "duration": "5", "aspect_ratio": "16:9", "cfg_scale": 0.5}  # fmt: skip
     assert ROUTES[t2v].model == "kling/v2-1-master-text-to-video"
-    assert price(t2v, prompt="x", duration=10) == 1.6
+    assert price(t2v, prompt="x", duration=10) == 2.52
     pro = "kling-video/v2.1/pro/image-to-video"
     out = body(pro, prompt="runs", image_url=IMG, end_image_url=END, negative_prompt="blur", duration=10)
     assert out == {"prompt": "runs", "image_url": IMG, "tail_image_url": END, "negative_prompt": "blur",
                    "duration": "10", "cfg_scale": 0.5}  # fmt: skip
-    assert price(pro, prompt="x", image_url=IMG) == 0.25
-    assert price("kling-video/v2.1/standard/image-to-video", prompt="x", image_url=IMG, duration=10) == 0.25
-    assert price("kling-video/v2.1/master/image-to-video", prompt="x", image_url=IMG) == 0.8
+    assert price(pro, prompt="x", image_url=IMG) == 0.44
+    assert price("kling-video/v2.1/standard/image-to-video", prompt="x", image_url=IMG, duration=10) == 0.505
+    assert price("kling-video/v2.1/master/image-to-video", prompt="x", image_url=IMG) == 1.26
     # Solo Pro tiene último fotograma; cfg_scale en pasos de 0,1
     refused("kling-video/v2.1/standard/image-to-video", prompt="x", image_url=IMG, end_image_url=END)
     refused(t2v, prompt="x", cfg_scale=0.55)
@@ -64,7 +64,7 @@ def test_kling21_bodies_and_prices():
 
 
 def test_ai_avatar_is_priced_by_the_audio():
-    for tier, rate in (("standard", 0.04), ("pro", 0.08)):
+    for tier, rate in (("standard", 0.0505), ("pro", 0.101)):
         mid = f"kling/ai-avatar/{tier}"
         assert ROUTES[mid].model == f"kling/ai-avatar-{tier}"
         assert body(mid, image_url=IMG, audio_url=WAV, prompt="talks") == {

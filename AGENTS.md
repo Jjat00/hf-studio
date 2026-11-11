@@ -75,7 +75,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   provider by writing a `Provider` subclass and listing it in `registry.py`), `voice.py` and `elevenlabs_audio.py` (ElevenLabs audio), `voice_creation.py` (clone a voice from samples or design one from a description, all through the ElevenLabs API), `free_voices.py`
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `mcp_ui/generation.html` (MCP Apps chat card, plain HTML and JS that talks to the host over postMessage), `setup.py` (first run and `connect`), `launcher.py` (`start`), `store/` (models that only APIMart and KIE sell, `store: true`: one module per family with `MODELS`, its
-  routes and price; the router never offers them to Higgsfield), `catalog.json` (91 model schemas,
+  routes and price; the router never offers them to Higgsfield), `catalog.json` (95 model schemas,
   regenerated with `hf-studio sync-catalog`; entries whose `docs_url` is on open.higgsfield.ai are hand-written and kept), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
   internal worker-only provider), `factory.py` (Content Factory: the `hf-studio/content-factory` catalog model and its worker-only provider; narrates each scene with edge-tts or ElevenLabs, renders 9:16, 16:9 or 1:1 with a pinned `npx hyperframes` and mixes the voice at -14 LUFS; reports unavailable without Node.js 22+), `factory_formats.py` (video formats: what-if, quick and long explainers, top list, news, tutorial, versus, story, product ad and a custom one; structure, tone, pacing, durations, aspects and whether they search the web), `factory_script.py` (episode script format and `POST /v1/factory/scripts`: Claude with structured output, or with web search and a strict `submit_script` tool when the format researches; technical fields travel in one `data` JSON string and are validated here), `factory_compose.py` (deterministic HyperFrames HTML: data layouts, word-synced captions, WAAPI animations, safe zones per aspect), `factory_rich.py` (technical layouts: KaTeX equations revealed on cue words, function plots, signals with a real FFT spectrum, three.js 3D driven by `hf-seek` with a 2D fallback, diagrams, code; KaTeX and three.js vendored in `factory_assets/vendor`), `factory_math.py` (whitelist expression parser evaluated with numpy, never `eval`; LaTeX checks, FFT, code highlighting, JSON safe inside `<script>`), `factory_styles.py` (the visual styles; bundled OFL fonts in `factory_assets/fonts`, previews in `web/public/factory`), `factory_world.py` (hand-drawn continent outlines for the dot map), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models), `space_assistant.py` (Spaces
@@ -87,6 +87,14 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in
   `landing/public/media`, all from approved generations). It is separate from `web/`.
 - The UI is Next.js 16, which differs from older versions: read `web/AGENTS.md` before touching `web/`.
+- **Every model update also updates the home.** When you add models (from any provider), list the notable new ones
+  in the UI's home and menus: the tiles in `web/src/lib/features.ts` and the "models" columns in
+  `web/src/lib/menu.ts`, with `badge: "NEW"`. In the same change, remove `"NEW"` from every model that came in an
+  earlier update: only the latest update's models are new. Features (pages such as Spaces or Content Factory) keep
+  `"NEW"` for 30 days after they ship. Models with an unknown price (no route quotes them) do not go on the home.
+- Store routes with no price on purpose (billed by tokens, per output layer, or with an ambiguous rate) return
+  `None`, explain why in `Route.notes` and are listed in `UNPRICED` in `tests/test_routes.py`. They quote as
+  `unavailable` and only run if the user accepts an unknown cost.
 - Do not make real generation calls in tests or checks. Do not expose the UI beyond `127.0.0.1` without
   `STUDIO_PASSWORD`: without it the proxy does not authenticate visitors. To put it online use the `Dockerfile`
   (`hf-studio cloud`, which refuses to start without that password); see "Deploy it to your own cloud" in README.md.

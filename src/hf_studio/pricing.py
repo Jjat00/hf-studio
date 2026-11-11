@@ -150,6 +150,49 @@ def approximate(
             return {"usd": billable * float(rates[res]), "basis": f"{basis} × ${rates[res]}/s at {res}",
                     "missing": missing}  # fmt: skip
 
+    # A3b) Kling 4.0 desde 2026-11: «- Without video input: 720p: $0.1257; 1080p: $0.1879. - With video input: 720p:
+    # $0.1544; …. Total price = selected rate × output duration in seconds. Input video duration is not added». La
+    # tarifa depende de si hay video de entrada, pero solo se cobra la salida.
+    if m := re.search(r"Without video input: (.*?)\.\s*- With video input: (.*?)\.\s", text):
+        rates = dict(re.findall(r"(\d+p): " + MONEY, m.group(2 if has_video_input else 1)))
+        if res in rates:
+            return {"usd": seconds * float(rates[res]), "basis": f"{seconds:g}s × ${rates[res]}/s at {res}",
+                    "missing": []}  # fmt: skip
+
+    # A3c) Kling 4.0 Flash (2026-11): «720p: without input video, $0.094 per output second. With input video, $0.063
+    # per billable second. Billable duration = output duration + max(total input video duration, output duration)».
+    # La edición publica solo la segunda parte («720p: $0.063 per billable second. Billable duration = …»).
+    flash = re.search(
+        r"(\d+p): without input video, "
+        + MONEY
+        + r" per output second\. With input video, "
+        + MONEY
+        + r" per billable second",
+        text,
+    ) or re.search(
+        r"(\d+p): " + MONEY + r" per billable second\. Billable duration = output duration \+ max", text
+    )
+    if flash:
+        groups = flash.groups()
+        tier, plain, with_video = groups[0], (groups[1] if len(groups) == 3 else None), groups[-1]
+        if res != tier:
+            return {"usd": None, "basis": f"no published rate for {res}", "missing": []}
+        if not has_video_input and plain is not None:
+            return {
+                "usd": seconds * float(plain),
+                "basis": f"{seconds:g}s × ${plain}/s at {res}",
+                "missing": [],
+            }
+        if input_secs is None:
+            billable, basis = 2 * seconds, f"({seconds:g}s + {seconds:g}s assumed for the input video)"
+            missing.append("input video duration")
+        else:
+            # El recorte a 20 s es por clip y aquí solo se conoce la suma: se usa entera (por lo alto).
+            billable = seconds + max(float(input_secs), seconds)
+            basis = f"({seconds:g}s + max({float(input_secs):g}s of input video, {seconds:g}s))"
+        return {"usd": billable * float(with_video), "basis": f"{basis} × ${with_video}/s at {res}",
+                "missing": missing}  # fmt: skip
+
     # A4) Genjutsu Light (a 2026-10): «Priced per total second by resolution: 480p $0.05, …. Billable seconds = output
     # duration + the sum of input reference video durations … trims the source to 15 seconds; output duration is
     # rounded up». La salida dura lo que el video de origen recortado a 15 s; la entrada se cuenta entera (por lo alto:

@@ -46,3 +46,18 @@ async def test_kie_wraps_the_tool_input_in_the_unified_task():
     submitted = await kie.submit_job(route.model, route.translate({"image_url": IMAGE}), None)
     assert submitted.request_id == "task_recraft_1"
     assert seen == [{"model": "recraft/remove-background", "input": {"image": IMAGE}}]
+
+
+def test_kie_image_upscale_is_quoted_at_the_top_tier():
+    route = route_of("kie", "kie/image-upscale")
+    assert route.model == "kie/image-upscale"
+    assert route.translate({"image_url": IMAGE, "upscale_factor": 8}) == {
+        "image_url": IMAGE,
+        "upscale_factor": "8",
+    }
+    # El tramo sale de los píxeles de salida, que dependen de la imagen: se cotiza el de 8K, nunca por debajo
+    assert route.price({"image_url": IMAGE, "upscale_factor": 2}, {}, _prices("kie")) == 0.06
+    assert route.settles_later
+    assert get_catalog().get("kie/image-upscale")["input_schema"]["properties"]["upscale_factor"]["enum"] == [
+        1, 2, 4, 8,
+    ]  # fmt: skip

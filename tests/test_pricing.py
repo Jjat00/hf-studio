@@ -263,3 +263,42 @@ def test_ai_influencer_schema_keeps_animal_only_fields_off_humans():
     assert catalog.validate(model, {"tier": "cats", "pinned_species": "beetle"})
     assert catalog.validate(model, {"tier": "cats", "variation_index": 3, "body_color": "#abcdef"}) == []
     assert catalog.validate(model, {"tier": "insects", "pinned_species": "beetle"}) == []
+
+
+# Textos de /estimate a 2026-11-11.
+KLING4_NOV = (
+    "Standard self-serve rates in USD per second of generated video.\n\n- Without video input: 720p: $0.1257; 1080p:"
+    " $0.1879.\n- With video input: 720p: $0.1544; 1080p: $0.2336.\n\nTotal price = selected rate × output duration in"
+    " seconds. Input video duration is not added to the billed duration. Video input includes video-based elements."
+)
+KLING4_FLASH_REFS = (
+    "720p: without input video, $0.094 per output second. With input video, $0.063 per billable second. Billable"
+    " duration = output duration + max(total input video duration, output duration). Explicit clips longer than 20"
+    " seconds are trimmed before measurement."
+)
+KLING4_FLASH_EDIT = (
+    "720p: $0.063 per billable second. Billable duration = output duration + max(total input video duration, output"
+    " duration). Total input duration includes the base video and video references; explicit clips longer than 20"
+    " seconds are trimmed before measurement."
+)
+
+
+def test_kling4_november_rates_bill_only_the_output():
+    assert round(approximate(KLING4_NOV, {"duration": 10, "resolution": "1080p"}, {})["usd"], 4) == 1.879
+    edit = {"duration": 5, "resolution": "720p", "video_url": "https://x/v.mp4"}
+    r = approximate(KLING4_NOV, edit, {"input_video_seconds": 12})
+    assert round(r["usd"], 4) == round(5 * 0.1544, 4) and r["missing"] == []
+
+
+def test_kling4_flash_bills_output_plus_the_longer_of_input_and_output():
+    assert round(approximate(KLING4_FLASH_REFS, {"duration": 10}, {})["usd"], 3) == 0.94
+    refs = {"duration": 10, "video_urls": ["https://x/a.mp4"]}
+    assert round(approximate(KLING4_FLASH_REFS, refs, {"input_video_seconds": 8})["usd"], 3) == round(
+        20 * 0.063, 3
+    )
+    edit = {"duration": 5, "video_url": "https://x/v.mp4"}
+    assert round(approximate(KLING4_FLASH_EDIT, edit, {"input_video_seconds": 12})["usd"], 3) == round(
+        17 * 0.063, 3
+    )
+    assert approximate(KLING4_FLASH_EDIT, edit, {})["missing"] == ["input video duration"]
+    assert approximate(KLING4_FLASH_REFS, {"duration": 10, "resolution": "1080p"}, {})["usd"] is None

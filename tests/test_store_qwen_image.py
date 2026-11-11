@@ -67,3 +67,33 @@ def test_qwen_2_1_checks_masks_and_transparency():
     assert route.price(logical, {}, _prices("kie")) == 0.04
     _unsupported(route, {**logical, "image_urls": ["https://x/a.png", "https://x/b.png"]})
     _unsupported(route, {**logical, "background": "transparent", "output_format": "jpeg"})
+
+
+def test_qwen_3_pro_on_apimart_prices_by_tier_and_needs_prompt_extend_for_a_mode():
+    from jsonschema import Draft202012Validator
+
+    mid = "alibaba/qwen-image-3-pro/text-to-image"
+    route = route_of("apimart", mid)
+    logical = {**sample(mid), "resolution": "2k", "num_images": 2, "prompt_extend": True,
+               "prompt_extend_mode": "agent", "aspect_ratio": "3:4"}  # fmt: skip
+    assert route.translate(logical) == {"prompt": "a red fox running through snow", "size": "3:4",
+                                        "resolution": "2K", "n": 2, "prompt_extend": True,
+                                        "prompt_extend_mode": "agent"}  # fmt: skip
+    assert route.model == "qwen-image-3.0-pro" and "qwen-image-3.0-pro" in store.apimart_image_models()
+    assert route.price(logical, {}, _prices("apimart")) == 0.1143
+    assert route.price(sample(mid), {}, _prices("apimart")) == 0.0286
+    _unsupported(route, {**logical, "aspect_ratio": "21:9"})
+    _unsupported(route, {**logical, "seed": 7})
+    schema = store.models()[mid]["input_schema"]
+    validator = Draft202012Validator(schema)
+    assert not validator.is_valid({"prompt": "x", "prompt_extend_mode": "agent"})
+    assert validator.is_valid({"prompt": "x", "prompt_extend": True, "prompt_extend_mode": "agent"})
+    edit = store.models()["alibaba/qwen-image-3-pro/edit"]["input_schema"]["properties"]
+    assert edit["prompt_extend_mode"]["enum"] == ["direct"] and edit["image_urls"]["maxItems"] == 3
+
+
+def test_qwen_3_standard_is_not_duplicated_or_routed_through_the_stores():
+    # Es el Qwen Image 3 de Higgsfield; APIMart no tiene enable_thinking y su 2K no mide lo mismo.
+    assert not any(mid.startswith("alibaba/qwen-image-3.0/") for mid in store.models())
+    for provider in ("apimart", "kie"):
+        assert "alibaba/qwen-image-3/text-to-image" not in store.routes(provider)

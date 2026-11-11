@@ -1,4 +1,4 @@
-"""Avatares que hablan (imagen + audio → video) en KIE: MeiGen InfiniteTalk y OmniHuman 1.5 (ByteDance).
+"""Avatares que hablan (imagen + audio → video) en KIE: MeiGen InfiniteTalk y OmniHuman 1.5 y 2.0 (ByteDance).
 
 Fuentes (revisadas el 2026-10-17):
 - KIE, API unificada (`jobs/createTask`):
@@ -8,6 +8,11 @@ Fuentes (revisadas el 2026-10-17):
   hasta 5 máscaras de sujeto, prompt opcional de 300 caracteres, `output_resolution` 720/1080, `pe_fast_mode`).
 - Tabla pública `api.kie.ai/client/v1/model-pricing/page`: las dos por segundo de video, que dura lo que el
   audio: `meigen-ai infinitetalk, lip sync, up to 15 seconds-<res>` y `omnihuman-1-5, lip sync`.
+- KIE `omnihuman-2-0` (revisado el 2026-11-11): https://docs.kie.ai/market/omnihuman-2-0.md (una imagen en
+  `image_urls`, < 30 MB, proporción 0,4–2,5; audio WAV o MP3 de 4 a 300 s y < 15 MB; prompt opcional de 300
+  caracteres; `enable_watermark`, que por defecto es true y aquí se envía false). Salida 720p. Precio
+  `omnihuman-2-0, avatar video, 720p`, 14 créditos por segundo (`creditUnit` «per second»); https://kie.ai/omnihuman-2-0
+  dice que se cobra por la duración del video de salida, que es la del audio.
 
 El precio depende de la duración del audio, que la entrada no dice: se lee de `hints["input_audio_seconds"]`
 (sin ella, el precio queda pendiente y el proveedor no se descarta).
@@ -23,6 +28,8 @@ from ._common import choice, model, prompt, url, urls
 K = "kie"
 INFINITETALK_MAX_AUDIO = 15
 OMNIHUMAN_MAX_AUDIO = 60
+OMNIHUMAN2_AUDIO = (4, 300)
+OMNIHUMAN2 = "bytedance/omnihuman-2.0/image-to-video"
 
 
 def audio_seconds(hints: dict[str, Any]) -> float | None:
@@ -40,6 +47,17 @@ def audio_limit(provider: str, limit: float, strict: bool = False):
             raise unsupported(
                 provider, f"{provider} takes audio {'under' if strict else 'up to'} {limit:g} s"
             )
+
+    return check
+
+
+def audio_range(provider: str, low: float, high: float):
+    """`check` de ruta: con la duración del audio conocida, uno fuera de [low, high] s queda fuera."""
+
+    def check(source: dict, hints: dict) -> None:
+        seconds = audio_seconds(hints)
+        if seconds is not None and not low <= seconds <= high:
+            raise unsupported(provider, f"{provider} takes audio from {low:g} to {high:g} s")
 
     return check
 
@@ -78,6 +96,19 @@ MODELS = [
                 "the audio. KIE only."),
                "Billed per second of audio; audio must be under 60 s."],
     ),
+    model(
+        OMNIHUMAN2, name="OmniHuman 2.0", workflow="Talking video",
+        family="omnihuman-2.0", output="video", capabilities=["image-to-video", "audio-input"],
+        properties={
+            "image_url": url("Portrait of a person or character (aspect ratio 0.4 to 2.5, 300 to 6000 px, under 30 MB)."),
+            "audio_url": url("Speech or song that drives the motion: WAV or MP3, 4 to 300 s, under 15 MB."),
+            "prompt": prompt(300, "Optional direction: scene, motion, camera."),
+        },
+        required=["image_url", "audio_url"], docs_url="https://docs.kie.ai/market/omnihuman-2-0",
+        notes=[("ByteDance OmniHuman 2.0: a portrait and an audio become a 720p talking or singing video as long "
+                "as the audio, up to 5 minutes, without watermark. KIE only."),
+               "Billed per second of audio; audio must last 4 to 300 s."],
+    ),
 ]  # fmt: skip
 
 
@@ -110,5 +141,14 @@ def kie() -> dict[str, Route]:
             lambda i, h, p: per_second(p, "omnihuman-1-5, lip sync", audio_seconds(h)),
             notes=("Billed per second of audio",),
             check=audio_limit(K, OMNIHUMAN_MAX_AUDIO, strict=True),
+        ),
+        OMNIHUMAN2: Route(
+            K, "omnihuman-2-0",
+            Spec(K, "omnihuman-2-0", keep=("audio_url",), rename={"image_url": "image_urls"},
+                 convert={"image_url": lambda v: [v], "prompt": lambda v: v or None},
+                 fixed={"enable_watermark": False}),
+            lambda i, h, p: per_second(p, "omnihuman-2-0, avatar video, 720p", audio_seconds(h)),
+            notes=("Billed per second of audio",),
+            check=audio_range(K, *OMNIHUMAN2_AUDIO),
         ),
     }  # fmt: skip

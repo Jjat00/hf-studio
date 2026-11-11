@@ -5114,6 +5114,312 @@
       }
     },
     {
+      "id": "kling-video/v4.0-flash/image-to-video",
+      "title": "Kling 4.0 Flash — Image to video API",
+      "summary": "Kling 4.0 Flash animates one image as the first frame of a 720p clip of 3–20 s.",
+      "workflow": "image-to-video",
+      "family": "kling-4",
+      "output": "video",
+      "capabilities": [
+        "image-to-video"
+      ],
+      "notes": [
+        "image_url (first frame) is required; the prompt is optional. No end frame and no middle frames (use Kling 4.0 for those).",
+        "No aspect_ratio: the output follows the input image.",
+        "Price (2026-11): 720p $0.094/s of output."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0-flash/image-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling 4.0 Flash Image to Video",
+        "required": [
+          "image_url"
+        ],
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2083,
+            "title": "First frame"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "default": ""
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 10,
+            "minimum": 3,
+            "maximum": 20
+          },
+          "resolution": {
+            "enum": [
+              "720p"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "720p"
+          }
+        }
+      }
+    },
+    {
+      "id": "kling-video/v4.0-flash/reference-to-video",
+      "title": "Kling 4.0 Flash — Reference to video API",
+      "summary": "Kling 4.0 Flash new 720p video guided by up to 10 reference images and 5 reference videos.",
+      "workflow": "reference-to-video",
+      "family": "kling-4",
+      "output": "video",
+      "capabilities": [
+        "image-references",
+        "reference-to-video",
+        "video-input"
+      ],
+      "notes": [
+        "Needs a prompt plus at least one non-empty image_urls or video_urls list.",
+        "Cite references in the prompt as @image_1, @image_2… and @video_1, @video_2… in array order.",
+        "Reference videos must add up to 3–20 s; output duration is 3–20 s.",
+        "Price (2026-11): without input video 720p $0.094/s of output; with input video 720p $0.063/s, billed on output + max(input video seconds, output). Clips over 20 s are trimmed before measuring."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0-flash/reference-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling 4.0 Flash Reference to Video",
+        "required": [
+          "prompt"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "image_urls"
+            ],
+            "properties": {
+              "image_urls": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "video_urls"
+            ],
+            "properties": {
+              "video_urls": {
+                "minItems": 1
+              }
+            }
+          }
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri",
+              "minLength": 1,
+              "maxLength": 2083
+            },
+            "maxItems": 10,
+            "title": "Reference images"
+          },
+          "video_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri",
+              "minLength": 1,
+              "maxLength": 2083
+            },
+            "maxItems": 5,
+            "title": "Reference videos"
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 10,
+            "minimum": 3,
+            "maximum": 20
+          },
+          "resolution": {
+            "enum": [
+              "720p"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "720p"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "21:9",
+              "16:9",
+              "9:16",
+              "1:1",
+              "adaptive"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "16:9"
+          }
+        }
+      }
+    },
+    {
+      "id": "kling-video/v4.0-flash/text-to-video",
+      "title": "Kling 4.0 Flash — Text to video API",
+      "summary": "Kling 4.0 Flash text to video: 720p clips of 3–20 s, cheaper than Kling 4.0.",
+      "workflow": "text-to-video",
+      "family": "kling-4",
+      "output": "video",
+      "capabilities": [
+        "text-to-video"
+      ],
+      "notes": [
+        "prompt is required. duration is an integer from 3 to 20 seconds (default 10). 720p only.",
+        "aspect_ratio: 21:9, 16:9, 9:16 or 1:1.",
+        "Price (2026-11): 720p $0.094/s of output."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0-flash/text-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling 4.0 Flash Text to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 10,
+            "minimum": 3,
+            "maximum": 20
+          },
+          "resolution": {
+            "enum": [
+              "720p"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "720p"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "21:9"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "16:9"
+          }
+        }
+      }
+    },
+    {
+      "id": "kling-video/v4.0-flash/video-edit",
+      "title": "Kling 4.0 Flash — Video edit API",
+      "summary": "Kling 4.0 Flash edits a source video from an instruction, with optional image and video references.",
+      "workflow": "video-edit",
+      "family": "kling-4",
+      "output": "video",
+      "capabilities": [
+        "edit",
+        "image-references",
+        "video-edit",
+        "video-input"
+      ],
+      "notes": [
+        "video_url is the source to edit (@video_1 in the prompt); reference videos start at @video_2, images at @image_1.",
+        "The source plus reference videos must add up to 3–20 s. duration is not copied from the source: set it (3–20 s, default 10).",
+        "Price (2026-11): 720p $0.063/s, billed on output + max(input video seconds, output); input counts the source and the reference videos."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0-flash/video-edit/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling 4.0 Flash Video Edit",
+        "required": [
+          "prompt",
+          "video_url"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1
+          },
+          "video_url": {
+            "type": "string",
+            "format": "uri",
+            "minLength": 1,
+            "maxLength": 2083,
+            "title": "Video to edit"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri",
+              "minLength": 1,
+              "maxLength": 2083
+            },
+            "maxItems": 10,
+            "title": "Reference images"
+          },
+          "video_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri",
+              "minLength": 1,
+              "maxLength": 2083
+            },
+            "maxItems": 5,
+            "title": "Reference videos"
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 10,
+            "minimum": 3,
+            "maximum": 20
+          },
+          "resolution": {
+            "enum": [
+              "720p"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "720p"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "21:9",
+              "16:9",
+              "9:16",
+              "1:1",
+              "adaptive"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "16:9"
+          }
+        }
+      }
+    },
+    {
       "id": "kling-video/v4.0/image-to-video",
       "title": "Kling 4.0 — Image to video API",
       "summary": "Kling 4.0 from a first frame, optional middle frames (up to 8) and an end frame.",
@@ -5127,7 +5433,7 @@
       "notes": [
         "image_url (first frame) is required. image_urls are middle keyframes in order (max 8), not style references; end_image_url is the optional last frame.",
         "No aspect_ratio: the output follows the input frames.",
-        "Price (2026-10): without input video 720p $0.157/s and 1080p $0.235/s of output; with input video 720p $0.094/s and 1080p $0.141/s, billed on output + max(input video seconds, output)."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/image-to-video/api-reference",
       "input_schema": {
@@ -5201,7 +5507,7 @@
         "Needs a prompt plus at least one non-empty image_urls or video_urls list.",
         "Cite references in the prompt as @image_1, @image_2… and @video_1, @video_2… in array order.",
         "Input videos are trimmed to their first 30 s; output duration stays 3–30 s.",
-        "Price (2026-10): without input video 720p $0.157/s and 1080p $0.235/s of output; with input video 720p $0.094/s and 1080p $0.141/s, billed on output + max(input video seconds, output)."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/reference-to-video/api-reference",
       "input_schema": {
@@ -5304,7 +5610,7 @@
       "notes": [
         "prompt is required. duration is an integer from 3 to 30 seconds (default 10).",
         "aspect_ratio: 21:9, 16:9, 9:16 or 1:1 (adaptive is not supported here).",
-        "Price (2026-10): without input video 720p $0.157/s and 1080p $0.235/s of output; with input video 720p $0.094/s and 1080p $0.141/s, billed on output + max(input video seconds, output)."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/text-to-video/api-reference",
       "input_schema": {
@@ -5365,7 +5671,7 @@
       "notes": [
         "video_url is the source to edit (@video_1 in the prompt); reference videos start at @video_2, images at @image_1.",
         "duration is not copied from the source: set it (3–30 s, default 10).",
-        "Price (2026-10): without input video 720p $0.157/s and 1080p $0.235/s of output; with input video 720p $0.094/s and 1080p $0.141/s, billed on output + max(input video seconds, output)."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/video-edit/api-reference",
       "input_schema": {
