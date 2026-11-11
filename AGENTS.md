@@ -87,6 +87,14 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
 - `landing/` is the public landing page (static Next.js 16, deployed on Vercel from that folder; media in
   `landing/public/media`, all from approved generations). It is separate from `web/`.
 - The UI is Next.js 16, which differs from older versions: read `web/AGENTS.md` before touching `web/`.
+- **Every model update also updates the home.** When you add models (from any provider), list the notable new ones
+  in the UI's home and menus: the tiles in `web/src/lib/features.ts` and the "models" columns in
+  `web/src/lib/menu.ts`, with `badge: "NEW"`. In the same change, remove `"NEW"` from every model that came in an
+  earlier update: only the latest update's models are new. Features (pages such as Spaces or Content Factory) keep
+  `"NEW"` for 30 days after they ship. Models with an unknown price (no route quotes them) do not go on the home.
+- Store routes with no price on purpose (billed by tokens, per output layer, or with an ambiguous rate) return
+  `None`, explain why in `Route.notes` and are listed in `UNPRICED` in `tests/test_routes.py`. They quote as
+  `unavailable` and only run if the user accepts an unknown cost.
 - Do not make real generation calls in tests or checks. Do not expose the UI beyond `127.0.0.1` without
   `STUDIO_PASSWORD`: without it the proxy does not authenticate visitors. To put it online use the `Dockerfile`
   (`hf-studio cloud`, which refuses to start without that password); see "Deploy it to your own cloud" in README.md.
