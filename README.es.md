@@ -8,7 +8,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![MCP](https://img.shields.io/badge/MCP-62%20herramientas-8A2BE2.svg)](#conectar-agentes-mcp)
 
-**Español** · [English](README.md) · [Web y ejemplos](https://hf-studio.jato.run)
+**Español** · [English](README.md) · [Web y ejemplos](https://hf-studio.jjato.com)
 
 Tu propio estudio de video, imagen y audio con IA sobre la [API de Higgsfield](https://docs.higgsfield.ai) y la de
 [ElevenLabs](https://elevenlabs.io/docs): una **API** y un **servidor MCP** para que tus agentes (Claude Code, Codex,
