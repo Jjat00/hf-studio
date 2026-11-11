@@ -673,6 +673,7 @@ export function Composer({
             onUpload={addFiles}
             onAdd={addRef}
             onRemove={removeRef}
+            target={frameTarget}
             onElement={(el) => void addElement(el)}
             onReset={resetRefs}
             below={panelsBelow}
@@ -1173,6 +1174,7 @@ function ReferencesPanel({
   onUpload,
   onAdd,
   onRemove,
+  target,
   onElement,
   onReset,
   onClose,
@@ -1188,6 +1190,8 @@ function ReferencesPanel({
   onUpload: (files: File[]) => Promise<void>;
   onAdd: (url: string, kind: MediaKind) => boolean;
   onRemove: (key: string, url: string) => void;
+  /** Casilla que se está llenando (primer o último fotograma), o null. */
+  target: string | null;
   onElement: (el: StudioElement) => void;
   onReset: () => void;
   onClose: () => void;
@@ -1259,7 +1263,11 @@ function ReferencesPanel({
   async function toggle(it: Item) {
     const url = it.source ? added[it.source] : it.url;
     const ref = url ? refs.find((r) => r.url === url) : undefined;
-    if (ref) return onRemove(ref.key, ref.url);
+    if (ref) {
+      // La misma imagen puede ser primer y último fotograma: si se está llenando otra casilla, se añade ahí.
+      if (target && !refs.some((r) => r.key === target && r.url === ref.url)) return void onAdd(ref.url, it.kind);
+      return onRemove(ref.key, ref.url);
+    }
     if (!it.source) return void onAdd(it.url, it.kind);
     setBusy(it.id);
     try {
