@@ -1,4 +1,4 @@
-"""Seedance 1.0, 1.5 Pro y 2.0 Fast/Mini en las tiendas (`store/seedance.py`). Sin gastar créditos."""
+"""Seedance 1.0 y 2.0 Fast/Mini en las tiendas (`store/seedance.py`). Sin gastar créditos."""
 
 from __future__ import annotations
 
@@ -38,13 +38,12 @@ def refused(provider: str, model_id: str, **extra) -> None:
 
 def test_models_and_routes():
     ids = {m["id"] for m in s.MODELS}
-    assert len(ids) == 14
+    assert len(ids) == 12
+    assert not any("seedance-1.5" in i for i in ids)  # retirado de KIE y APIMart (2026-11-11 y 2026-11-12)
     assert not any(i.startswith(("bytedance/seedance-2.0/", "bytedance/seedance-2.5/")) for i in ids)
     only_kie = {"bytedance/seedance-1.0-lite/text-to-video", "bytedance/seedance-1.0-lite/image-to-video"}
     assert set(ROUTES["apimart"]) == ids - only_kie
-    # KIE cerró Seedance 1.5 Pro el 2026-11-11: queda solo en APIMart
-    v15 = {"bytedance/seedance-1.5-pro/text-to-video", "bytedance/seedance-1.5-pro/image-to-video"}
-    assert set(ROUTES["kie"]) == ids - {"bytedance/seedance-1.0-pro-fast/text-to-video"} - v15
+    assert set(ROUTES["kie"]) == ids - {"bytedance/seedance-1.0-pro-fast/text-to-video"}
 
 
 def test_seedance_1_0():
@@ -71,18 +70,6 @@ def test_seedance_1_0():
     assert price("kie", fast, image_url=IMG, duration=10, resolution="1080p") == 0.36
     refused("kie", fast, image_url=IMG, resolution="480p")
     refused("apimart", fast, image_url=IMG, end_image_url=END)
-
-
-def test_seedance_1_5_pro():
-    mid = "bytedance/seedance-1.5-pro/image-to-video"
-    assert body("apimart", mid, image_url=IMG, camera_fixed=True) == {
-        "prompt": "a fox", "duration": 5, "aspect_ratio": "16:9", "resolution": "720p", "audio": True,
-        "camerafixed": True, "image_with_roles": [{"url": IMG, "role": "first_frame"}],
-    }  # fmt: skip
-    assert body("apimart", "bytedance/seedance-1.5-pro/text-to-video", seed=9)["seed"] == 9
-    assert price("apimart", mid, image_url=IMG, resolution="1080p") == pytest.approx(0.54)
-    notes = get_catalog().get(mid)["notes"]
-    assert not any("2026-11-11" in n for n in notes) and "Runs on APIMart only." in notes
 
 
 def test_seedance_2_0_fast_and_mini():

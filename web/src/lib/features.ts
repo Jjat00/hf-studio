@@ -21,11 +21,11 @@ export const BANNERS: Feature[] = [
 /** Rejilla junto a la promo: accesos compactos. */
 export const TILES: Feature[] = [
   { title: l("Seedance 2.5", "Seedance 2.5"), description: l("El modelo de video más avanzado", "The most advanced video model"), href: "/video?model=bytedance/seedance-2.5/text-to-video", kind: "Video", badge: "TOP", icon: "bars", art: "" },
-  { title: l("Kling 4.0 Flash", "Kling 4.0 Flash"), description: l("Kling 4.0 más rápido y barato, de 3 a 20 s", "Faster, cheaper Kling 4.0, 3 to 20 s"), href: "/video?model=kling-video/v4.0-flash/text-to-video", kind: "Video", badge: "NEW", icon: "clock", art: "" },
-  { title: l("Seedream 5.5", "Seedream 5.5"), description: l("El nuevo Seedream, con fondo transparente", "The new Seedream, with transparent backgrounds"), href: "/image?model=bytedance/seedream-5.5/text-to-image", kind: "Image", badge: "NEW", icon: "brush", art: "" },
+  { title: l("APIMart Zoe", "APIMart Zoe"), description: l("Video de hasta 4K desde texto, imágenes o referencias", "Up to 4K video from text, images or references"), href: "/video?model=apimart/zoe/text-to-video", kind: "Video", badge: "NEW", icon: "frames", art: "" },
+  { title: l("Kling 4.0 Flash", "Kling 4.0 Flash"), description: l("Kling 4.0 más rápido y barato, de 3 a 20 s", "Faster, cheaper Kling 4.0, 3 to 20 s"), href: "/video?model=kling-video/v4.0-flash/text-to-video", kind: "Video", icon: "clock", art: "" },
+  { title: l("Seedream 5.5", "Seedream 5.5"), description: l("El nuevo Seedream, con fondo transparente", "The new Seedream, with transparent backgrounds"), href: "/image?model=bytedance/seedream-5.5/text-to-image", kind: "Image", icon: "brush", art: "" },
   { title: l("MCP para agentes", "MCP for Agents"), description: l("Claude Code y Codex crean por ti", "Claude Code and Codex create for you"), href: "/mcp", kind: "Agents", icon: "terminal", art: "" },
   { title: l("Cinema Studio 4.0", "Cinema Studio 4.0"), description: l("Escenas cinematográficas sin esfuerzo", "Create cinematic scenes effortlessly"), href: "/video?model=higgsfield/cinema-studio/4.0", kind: "Video", icon: "clapper", art: "" },
-  { title: l("Spaces", "Spaces"), description: l("Un lienzo para cada flujo", "One canvas, every workflow"), href: "/spaces", kind: "Agents", icon: "workflow", art: "" },
 ];
 
 /** Apps de un clic (presets de serie de la categoría Apps). */

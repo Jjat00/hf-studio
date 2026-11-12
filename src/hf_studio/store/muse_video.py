@@ -8,9 +8,9 @@ Fuentes (revisadas el 2026-11-11):
   eso el modo con imágenes es «reference-to-video», no «image-to-video». `aspect_ratio` con 7 relaciones; sin ella,
   texto a video da 16:9 y con referencias sigue su composición (no se manda `"auto"`). No acepta `seed`,
   `negative_prompt`, fotogramas inicial y final, video ni audio de referencia.
-- Precio: la tabla pública de APIMart (`/api/pricing/models/all`) cobra por segundo pero trae dos tarifas,
-  `muse-video-ext|default` a 0,024 USD/s y `muse-video-ext|720P` a 0,002352 USD/s, para la única salida que hay
-  (720p), y no dice cuál se aplica. El precio queda desconocido (`None`): el usuario tiene que aceptarlo.
+- Precio (revisado el 2026-11-12): la tabla pública de APIMart (`/api/pricing/models/all`) cobra por segundo de
+  salida con una sola fila, `muse-video-ext|720P` (0,002352 USD/s). Hasta el 2026-11-11 traía además
+  `muse-video-ext|default` a 0,024 USD/s y el precio quedaba desconocido; esa fila ya no está.
 - APIMart no dice quién hace el modelo; el id lógico usa `muse/` como Muse Image (`store/muse.py`).
 """
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..providers.routes import Route, Spec
+from ..providers.routes import Route, Spec, per_second
 from ._common import choice, model, prompt, urls
 
 DOCS = "https://docs.apimart.ai/en/api-reference/videos/muse-video-ext/generation"
@@ -28,10 +28,7 @@ MODES = {
     "text-to-video": ("Text to video", ["text-to-video"]),
     "reference-to-video": ("Reference to video", ["reference-to-video", "image-references"]),
 }
-UNKNOWN_PRICE = (
-    "The price cannot be known in advance: APIMart's price table lists two per-second rates "
-    "($0.024 and $0.002352) for its only output and does not say which one applies."
-)
+RATE_KEY = f"{APIMART_MODEL}|720P"
 
 
 def _id(mode: str) -> str:
@@ -61,7 +58,7 @@ def _models() -> list[dict[str, Any]]:
             model(
                 _id(mode), name="Muse Video", workflow=workflow, family="muse-video", output="video",
                 capabilities=capabilities, properties=properties, required=required, docs_url=DOCS,
-                notes=["Runs on APIMart only. One 720p video with sound per request.", UNKNOWN_PRICE],
+                notes=["Runs on APIMart only. One 720p video with sound per request, billed per second."],
             )
         )  # fmt: skip
     return found
@@ -76,7 +73,7 @@ def _ratio(value: str) -> str | None:
 
 
 def _price(i: dict, h: dict, p: dict) -> float | None:
-    return None  # dos tarifas por segundo en la tabla y ninguna regla para elegir: precio desconocido
+    return per_second(p, RATE_KEY, i.get("duration"))  # siempre 720p
 
 
 def apimart() -> dict[str, Route]:
@@ -89,5 +86,5 @@ def apimart() -> dict[str, Route]:
             convert={"aspect_ratio": _ratio},
             fixed={"resolution": "720p", "n": 1},
         )  # fmt: skip
-        routes[_id(mode)] = Route(provider, APIMART_MODEL, spec, _price, notes=(UNKNOWN_PRICE,))
+        routes[_id(mode)] = Route(provider, APIMART_MODEL, spec, _price)
     return routes
