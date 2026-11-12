@@ -20,13 +20,22 @@ Gemini Omni 1.2 Flash:
   último fotograma, 16:9|9:16, 360p–4k, `first_frame_image` + `last_frame_image`, hasta 10 `image_urls`,
   edición con `video_urls`). Se liquida por tokens: el precio por segundo de la tabla
   (`gemini-omni-1.2-flash|<RES>`) es aproximado, y al enviar retiene `max(10, duración)` segundos (la edición,
-  15). No se ofrece la extensión: no está claro si cobra solo el tramo añadido.
+  15).
+  Extensión (revisada el 2026-11-12, misma página, «Extending a previous task»): `video_urls` con un video de
+  hasta 15 s y `omni_reference_task_type: "extend"`; `duration` (3–10) es solo el tramo añadido y la salida trae
+  el original más ese tramo. Se cobra solo lo añadido, por tokens (cotización aproximada con la misma tarifa por
+  segundo), y con video de entrada retiene 15 s.
 - KIE `google/gemini-omni-flash-1-2` (revisado el 2026-11-11):
   https://docs.kie.ai/market/google/gemini-omni-flash-1-2.md (un modo por pedido: texto o hasta 6 `image_urls`,
   `first_frame_url` con `last_frame_url` opcional (3–10 s con los dos) o edición con `video_list` de un video
   de hasta 15 s y sin `duration`; 3–15 s, 360p–4k, `seeds` 10000–99999). Precio fijo por segundo de salida
   `google/gemini-omni-flash-1-2, video, <res>` (`creditUnit` «per second»); según https://kie.ai/gemini-omni-1-2-flash
   la edición se cobra por la duración del video de entrada a la misma tarifa.
+- KIE `google/gemini-omni-flash-1-2-extend` (revisado el 2026-11-12):
+  https://docs.kie.ai/market/google/gemini-omni-flash-1-2-extend.md. No se ofrece: no recibe un video sino el
+  `task_id` de una tarea de Gemini Omni 1.2 hecha en la misma cuenta de KIE (360p o 720p, hasta 15 s), y el
+  router solo sabe resolver ids de tarea de los borradores de Seedance 2.5. Su tabla
+  (`google/gemini-omni-flash-1-2-extend, video, 360p|720p`, por segundo) no dice si cobra el tramo o la salida.
 """
 
 from __future__ import annotations
@@ -161,7 +170,31 @@ def _v12_models() -> list[dict[str, Any]]:
     return found
 
 
-MODELS = [*MODELS, *_v12_models()]
+V12_EXTEND = _id(V12, "video-extend")
+V12_MAX_SOURCE_SECONDS = 15
+
+
+def _v12_extend_model() -> dict[str, Any]:
+    """Extender un video por el final (solo APIMart): la salida es el original más el tramo nuevo."""
+    properties: dict[str, Any] = {
+        "prompt": prompt(20000, "What happens next: action, camera, setting and sound."),
+        "video_url": url("Video to continue (up to 15 s); the result is this video plus the new segment."),
+        "duration": choice(list(range(3, 11)), 5, "Seconds to add at the end (not the total length)."),
+        "resolution": choice(["360p", "720p", "1080p", "4k"], "720p", "Output resolution (1080p and 4k are upsampled)."),
+    }  # fmt: skip
+    notes = [
+        "Google's Gemini Omni 1.2 Flash extension, through APIMart only (not Higgsfield or KIE).",
+        "Only the added seconds are billed, by tokens afterwards (approximate quote); APIMart first holds 15 s.",
+        "The model mostly looks at the end of the video: describe again anyone who only appeared earlier.",
+    ]
+    return model(
+        V12_EXTEND, name="Gemini Omni 1.2 Flash", workflow="Extend video", family=V12, output="video",
+        capabilities=["video-extend", "video-input"], properties=properties, required=["prompt", "video_url"],
+        docs_url=V12_DOCS, notes=notes,
+    )  # fmt: skip
+
+
+MODELS = [*MODELS, *_v12_models(), _v12_extend_model()]
 
 
 def _v12_build(mode: str):
@@ -213,7 +246,31 @@ def _v12_routes() -> dict[str, Route]:
             "apimart", V12, Spec("apimart", V12, keep=keep, rename=rename, build=_v12_build(mode)),
             _v12_price(mode), reserve=_v12_reserve(mode), settles_later=True,
         )  # fmt: skip
+    routes[V12_EXTEND] = Route(
+        "apimart", V12,
+        Spec("apimart", V12, keep=("prompt", "duration", "resolution", "video_url"), build=_v12_extend_build),
+        # Con video de entrada APIMart retiene 15 s, como en la edición
+        _v12_price("video-extend"), reserve=_v12_reserve("video-edit"), settles_later=True,
+        check=_source_length("apimart"),
+    )  # fmt: skip
     return routes
+
+
+def _v12_extend_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    out["video_urls"] = [out.pop("video_url")]
+    out["omni_reference_task_type"] = "extend"
+    return out
+
+
+def _source_length(provider: str):
+    """Gemini Omni 1.2 solo edita o extiende videos de hasta 15 s."""
+
+    def check(source: dict[str, Any], hints: dict[str, Any]) -> None:
+        seconds = video_seconds(hints)
+        if seconds is not None and seconds > V12_MAX_SOURCE_SECONDS:
+            raise unsupported(provider, f"Gemini Omni 1.2 takes videos up to {V12_MAX_SOURCE_SECONDS} s")
+
+    return check
 
 
 def _ext_build(mode: str):
@@ -262,7 +319,6 @@ def _kie_price(row: str):
 
 V12_KIE = "google/gemini-omni-flash-1-2"
 V12_KIE_MAX_REFS = 6
-V12_MAX_EDIT_SECONDS = 15
 
 
 def _v12_kie_build(mode: str):
@@ -288,12 +344,6 @@ def _v12_kie_price(mode: str):
     return price
 
 
-def _edit_length(source: dict[str, Any], hints: dict[str, Any]) -> None:
-    seconds = video_seconds(hints)
-    if seconds is not None and seconds > V12_MAX_EDIT_SECONDS:
-        raise unsupported("kie", f"KIE's Gemini Omni 1.2 edits videos up to {V12_MAX_EDIT_SECONDS} s")
-
-
 def _v12_kie_routes() -> dict[str, Route]:
     routes = {}
     for mode in V12_MODES:
@@ -307,7 +357,7 @@ def _v12_kie_routes() -> dict[str, Route]:
             keep = ("prompt", "aspect_ratio", "resolution", "video_url")
         routes[_id(V12, mode)] = Route(
             "kie", V12_KIE, Spec("kie", V12_KIE, keep=keep, rename=rename, build=_v12_kie_build(mode)),
-            _v12_kie_price(mode), check=_edit_length if mode == "video-edit" else None,
+            _v12_kie_price(mode), check=_source_length("kie") if mode == "video-edit" else None,
         )  # fmt: skip
     return routes
 

@@ -95,7 +95,7 @@ VID = "https://cdn.test/clip.mp4"
 
 
 def test_v12_models_and_routes():
-    ids = {m["id"] for m in g.MODELS if m["id"].startswith(V12)}
+    ids = {m["id"] for m in g.MODELS if m["id"].startswith(V12) and m["id"] != g.V12_EXTEND}
     modes = ("text-to-video", "image-to-video", "reference-to-video", "video-edit")
     assert ids == {f"{V12}/{m}" for m in modes}
     assert ids <= set(ROUTES["apimart"]) and ids <= set(ROUTES["kie"])
@@ -165,3 +165,23 @@ def test_v12_kie_prices():
     edit.check({}, {"input_video_seconds": 15})
     with pytest.raises(ProviderError):  # KIE edita videos de hasta 15 s
         edit.check({}, {"input_video_seconds": 16})
+
+
+def test_v12_extend_only_on_apimart():
+    """Extender: APIMart con `video_urls`; KIE pide un id de tarea suyo y no se ofrece."""
+    ext = g.V12_EXTEND
+    assert ext == f"{V12}/video-extend" and "video-extend" in get_catalog().get(ext)["capabilities"]
+    assert ext not in ROUTES["kie"]
+    route = ROUTES["apimart"][ext]
+    assert route.model == "gemini-omni-1.2-flash" and route.settles_later
+    assert body("apimart", ext, video_url=VID, duration=8) == {
+        "prompt": "a fox", "duration": 8, "resolution": "720p",
+        "video_urls": [VID], "omni_reference_task_type": "extend",
+    }  # fmt: skip
+    # Solo se cobran los segundos añadidos; con video de entrada retiene 15 s
+    entry = logical(ext, video_url=VID, duration=4)
+    assert route.price(entry, {"input_video_seconds": 6}, PRICES["apimart"]) == pytest.approx(0.24)
+    assert route.reserve(entry, {}, PRICES["apimart"]) == pytest.approx(0.9)
+    route.check(entry, {"input_video_seconds": 15})
+    with pytest.raises(ProviderError):  # el video de origen, como mucho 15 s
+        route.check(entry, {"input_video_seconds": 16})

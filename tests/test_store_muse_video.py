@@ -1,4 +1,4 @@
-"""Muse Video en APIMart (`store/muse_video.py`): precio desconocido a propósito. Sin gastar créditos."""
+"""Muse Video en APIMart (`store/muse_video.py`): cobra por segundo de salida. Sin gastar créditos."""
 
 from __future__ import annotations
 
@@ -55,10 +55,11 @@ def test_bodies():
     refused(T2V, image_url=IMG)
 
 
-def test_price_is_unknown_and_said_so():
-    """La tabla trae dos tarifas por segundo (default y 720P) para la misma salida: nunca se adivina."""
-    assert PRICES["muse-video-ext|default"] != PRICES["muse-video-ext|720P"]
+def test_price_per_second_of_output():
+    """Una sola tarifa por segundo (720P) desde el 2026-11-12: la fila `default` ya no está."""
+    assert "muse-video-ext|default" not in PRICES
+    assert ROUTES[T2V].price(logical(T2V), {}, PRICES) == 0.0118  # 5 s × 0,002352, redondeado
+    assert ROUTES[REF].price(logical(REF, image_urls=[IMG], duration=10), {}, PRICES) == 0.0235
     for model_id, route in ROUTES.items():
-        assert route.price(logical(model_id, image_urls=[IMG]), {}, PRICES) is None
-        assert "cannot be known in advance" in route.notes[0]
-        assert any("cannot be known in advance" in n for n in get_catalog().get(model_id)["notes"])
+        assert not route.notes
+        assert not any("cannot be known" in n for n in get_catalog().get(model_id)["notes"])

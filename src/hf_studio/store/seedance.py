@@ -1,4 +1,4 @@
-"""Seedance (ByteDance) en las tiendas: las variantes que Higgsfield no tiene (1.0, 1.5 Pro, 2.0 Fast y Mini).
+"""Seedance (ByteDance) en las tiendas: las variantes que Higgsfield no tiene (1.0, 2.0 Fast y Mini).
 
 Seedance 2.0 y 2.5 ya están en el catálogo con rutas de tienda (`providers/*_routes.py`); aquí no se repiten.
 
@@ -6,8 +6,6 @@ Fuentes (revisadas el 2026-10-17):
 - APIMart `seedance-1-0-pro-quality` / `seedance-1-0-pro-fast`:
   https://docs.apimart.ai/en/api-reference/videos/doubao/generation.md (2–12 s, 480p–1080p, primer fotograma
   en `image_with_roles`; último fotograma solo en quality). Precio por segundo `<modelo>|<RES>`.
-- APIMart `seedance-1-5-pro`: https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation.md
-  (4–12 s, `audio`, `camerafixed`, primer y último fotograma). Precio por segundo `seedance-1-5-pro|<RES>`.
 - APIMart `seedance-2.0-fast` / `seedance-2.0-mini`:
   https://docs.apimart.ai/en/api-reference/videos/seedance-2-0/generation.md (como `seedance-2.0`, pero solo
   480p y 720p). Precio por segundo `<modelo>|<RES>` y, con video de referencia, `|<RES>-input` por segundo de
@@ -16,8 +14,10 @@ Fuentes (revisadas el 2026-10-17):
   `-image-to-video`, `bytedance/v1-pro-fast-image-to-video`: https://docs.kie.ai/market/bytedance/v1-pro-text-to-video.md
   y hermanas (duración "5"|"10"). Precio `bytedance/seedance-v1-<tier>, <modo>, <res>` por segundo; pro-fast
   por video, `..., <res>-<d>s`.
-- Seedance 1.5 Pro solo en APIMart: KIE cerró su `bytedance/seedance-1.5-pro` el 2026-11-11 y sus filas ya no
-  están en la tabla de precios.
+- Seedance 1.5 Pro ya no se ofrece: KIE cerró su `bytedance/seedance-1.5-pro` el 2026-11-11 y APIMart quitó
+  sus filas `seedance-1-5-pro|*` de la tabla de precios el 2026-11-12. Su página
+  (https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation.md) sigue sin aviso de retiro,
+  pero sin precio ninguna tienda lo vende.
 - KIE `bytedance/seedance-2-fast` / `bytedance/seedance-2-mini`: https://docs.kie.ai/market/bytedance/seedance-2-fast.md
   y seedance-2-mini.md (480p y 720p). Precio por segundo `bytedance/seedance-2 fast, <res> no|with video input`
   y `bytedance/seedance-2-mini, <res> no|with video`.
@@ -35,7 +35,6 @@ from ..providers.routes import Route, Spec, only_default, per_second, per_unit, 
 from ._common import choice, model, prompt, url, urls
 
 DOCS = "https://docs.kie.ai/market/bytedance/v1-pro-text-to-video"
-V15_DOCS = "https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation"
 V2_DOCS = "https://docs.kie.ai/market/bytedance/seedance-2-fast"
 RATIOS = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
 NOT_HIGGSFIELD = "Higgsfield does not offer this Seedance variant: it runs on APIMart or KIE."
@@ -172,53 +171,6 @@ def _v1_kie() -> dict[str, Route]:
     return routes
 
 
-# --- Seedance 1.5 Pro --------------------------------------------------------------------------
-
-
-def _v15_models() -> list[dict[str, Any]]:
-    found = []
-    for mode in ("text-to-video", "image-to-video"):
-        props: dict[str, Any] = {
-            "prompt": prompt(4000),
-            "duration": _seconds(4, 12),
-            "aspect_ratio": choice(RATIOS, "16:9", "Output aspect ratio."),
-            "resolution": choice(["480p", "720p", "1080p"], "720p", "Output resolution."),
-            "generate_audio": AUDIO,
-            "camera_fixed": CAMERA,
-            "seed": SEED,
-        }
-        required = ["prompt"]
-        if mode == "image-to-video":
-            props["image_url"] = FIRST
-            props["end_image_url"] = url("Optional last frame.")
-            required.append("image_url")
-        found.append(
-            _entry(f"bytedance/seedance-1.5-pro/{mode}", "Seedance 1.5 Pro", "seedance-1.5-pro", mode, props,
-                   required, ["Runs on APIMart only."], docs_url=V15_DOCS)
-        )  # fmt: skip
-    return found
-
-
-def _v15_apimart() -> dict[str, Route]:
-    name = "seedance-1-5-pro"
-
-    def price(i: dict, h: dict, p: dict) -> float | None:
-        return per_second(p, f"{name}|{str(i.get('resolution', '720p')).upper()}", i.get("duration"))
-
-    keep = ("prompt", "duration", "resolution", "aspect_ratio", "seed")
-    rename = {"generate_audio": "audio", "camera_fixed": "camerafixed"}
-    return {
-        "bytedance/seedance-1.5-pro/text-to-video": Route(
-            "apimart", name, Spec("apimart", name, keep=keep, rename=rename), price
-        ),
-        "bytedance/seedance-1.5-pro/image-to-video": Route(
-            "apimart", name,
-            Spec("apimart", name, keep=(*keep, "image_url", "end_image_url"), rename=rename, build=_frames),
-            price,
-        ),
-    }  # fmt: skip
-
-
 # --- Seedance 2.0 Fast y Mini (mismo esquema que bytedance/seedance-2.0/*, solo 480p y 720p) ---------
 
 V2 = {"fast": ("Seedance 2.0 Fast", "seedance-2.0-fast", "bytedance/seedance-2-fast", "bytedance/seedance-2 fast"),
@@ -308,11 +260,11 @@ def _v2_kie() -> dict[str, Route]:
     return routes
 
 
-MODELS = [*_v1_models(), *_v15_models(), *_v2_models()]
+MODELS = [*_v1_models(), *_v2_models()]
 
 
 def apimart() -> dict[str, Route]:
-    return {**_v1_apimart(), **_v15_apimart(), **_v2_apimart()}
+    return {**_v1_apimart(), **_v2_apimart()}
 
 
 def kie() -> dict[str, Route]:

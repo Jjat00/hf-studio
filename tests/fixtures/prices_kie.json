@@ -185,6 +185,8 @@
 "google/gemini-omni-flash-1-2, video, 360p": 0.02,
 "google/gemini-omni-flash-1-2, video, 4k": 0.11,
 "google/gemini-omni-flash-1-2, video, 720p": 0.045,
+"google/gemini-omni-flash-1-2-extend, video, 360p": 0.02,
+"google/gemini-omni-flash-1-2-extend, video, 720p": 0.045,
 "gpt image 1.5, image-to-image, high": 0.11,
 "gpt image 1.5, image-to-image, medium": 0.02,
 "gpt image 1.5, text-to-image, high": 0.11,

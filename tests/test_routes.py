@@ -70,9 +70,10 @@ def chosen(model_id: str, *extra: str) -> frozenset:
 UNPRICED = {
     ("apimart", "microsoft/mai-image-2.6/text-to-image"), ("apimart", "microsoft/mai-image-2.6/edit"),
     ("apimart", "microsoft/mai-image-2.6-flash/text-to-image"), ("apimart", "microsoft/mai-image-2.6-flash/edit"),
-    ("apimart", "muse/muse-video/text-to-video"), ("apimart", "muse/muse-video/reference-to-video"),
     ("apimart", "bytedance/seedream-5.5/edit"), ("apimart", "bytedance/seedream-5.5/layer-decomposition"),
     ("kie", "bytedance/seedream-5.5/layer-decomposition"),
+    ("apimart", "minimax/h3-image/text-to-image"), ("apimart", "minimax/h3-image/edit"),
+    ("apimart", "minimax/h3-image-highspeed/text-to-image"), ("apimart", "minimax/h3-image-highspeed/edit"),
 }  # fmt: skip
 
 
