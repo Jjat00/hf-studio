@@ -232,8 +232,9 @@ export function GenerationCard({
   );
 
   const detailHref = `/history/${g.id}`;
+  // Con flex-wrap los iconos bajan de línea en columnas angostas en vez de salirse de la tarjeta.
   const actions = (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-wrap items-center justify-end gap-1">
       {onFavorite && (
         <IconButton label={g.favorite ? t.generation.removeFavorite : t.generation.addFavorite} onClick={() => onFavorite(g)}>
           <Star className={clsx("size-4", g.favorite && "fill-lime text-lime")} />
@@ -337,11 +338,11 @@ export function GenerationCard({
   return (
     <article className="group flex flex-col gap-2">
       {media}
-      <div className="flex items-start justify-between gap-2 px-1">
-        <Link href={detailHref} className="line-clamp-2 min-w-0 text-sm text-fg-2 hover:text-fg">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1 px-1">
+        <Link href={detailHref} className="line-clamp-2 min-w-[8rem] flex-1 text-sm text-fg-2 hover:text-fg">
           {prompt || modelName(g.model, locale, models)}
         </Link>
-        <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
+        <div className="ml-auto max-w-full opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">{actions}</div>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 px-1 text-xs text-fg-3">
         <span className="max-w-full truncate rounded-md bg-glass px-1.5 py-0.5 font-medium text-fg-2">{modelName(g.model, locale, models)}</span>
