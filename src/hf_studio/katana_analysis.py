@@ -144,7 +144,7 @@ async def decode_gray(path: str, p: Probe, ffmpeg: str = "ffmpeg") -> np.ndarray
     w, h = _sig_size(p)
     code, out, err = await _exec(
         ffmpeg, "-v", "error", *guarded(path), "-map", "0:v:0", "-vf", f"scale={w}:{h}:flags=area,format=gray",
-        "-vsync", "passthrough", "-f", "rawvideo", "-",
+        "-fps_mode", "passthrough", "-f", "rawvideo", "-",  # -vsync ya no existe en ffmpeg 9
         timeout=600,
     )  # fmt: skip
     if code != 0:
