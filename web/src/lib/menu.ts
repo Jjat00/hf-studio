@@ -92,6 +92,7 @@ export const MEGA_MENUS: MegaMenu[] = [
     ],
     models: [
       { title: l("Seedance 2.5", "Seedance 2.5"), description: l("Videos cinematográficos de hasta 30 segundos", "Cinematic videos up to 30 seconds"), href: vid("bytedance/seedance-2.5/text-to-video"), icon: AudioLines, badge: "TOP" },
+      { title: l("Seedance 2.5 Flash", "Seedance 2.5 Flash"), description: l("Seedance 2.5 rápido y barato, hasta 30 s a 720p", "Fast, cheaper Seedance 2.5, up to 30 s at 720p"), href: vid("bytedance/seedance-2.5-flash/text-to-video"), icon: AudioLines, badge: "NEW" },
       { title: l("Higgsfield Genjutsu", "Higgsfield Genjutsu"), description: l("Transfiere movimiento, cambia objetos o el estilo de un video (también en Light, más barato)", "Transfer motion, swap objects or restyle a video (also Light, cheaper)"), href: "/video?tab=genjutsu", icon: Sparkles },
       { title: l("Kling 4.0", "Kling 4.0"), description: l("Escenas de hasta 30 s con referencias y edición", "Up to 30s scenes with references and editing"), href: vid("kling-video/v4.0/text-to-video"), icon: Film },
       { title: l("Kling 4.0 Flash", "Kling 4.0 Flash"), description: l("Kling 4.0 más rápido y barato, de 3 a 20 s", "Faster, cheaper Kling 4.0, 3 to 20 s"), href: vid("kling-video/v4.0-flash/text-to-video"), icon: Film },
@@ -107,8 +108,8 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("LTX-2.5", "LTX-2.5"), description: l("Rápido y barato para iterar", "Fast and cheap to iterate"), href: vid("lightricks/ltx-2.5/text-to-video/fast"), icon: Film },
       { title: l("PixVerse V6", "PixVerse V6"), description: l("Efectos y estilos para redes", "Effects and styles for social"), href: vid("pixverse/v6/text-to-video"), icon: Film },
       { title: l("PixVerse V6 Max", "PixVerse V6 Max"), description: l("La versión de más calidad de PixVerse V6, hasta 1080p", "The higher-quality PixVerse V6, up to 1080p"), href: vid("pixverse/v6-max/text-to-video"), icon: Film },
-      { title: l("APIMart Zoe", "APIMart Zoe"), description: l("Video de hasta 4K desde texto, imágenes o referencias", "Up to 4K video from text, images or references"), href: vid("apimart/zoe/text-to-video"), icon: Film, badge: "NEW" },
-      { title: l("Muse Video", "Muse Video"), description: l("Video a 720p muy barato, con sonido", "Very cheap 720p video with sound"), href: vid("muse/muse-video/text-to-video"), icon: Film, badge: "NEW" },
+      { title: l("APIMart Zoe", "APIMart Zoe"), description: l("Video de hasta 4K desde texto, imágenes o referencias", "Up to 4K video from text, images or references"), href: vid("apimart/zoe/text-to-video"), icon: Film },
+      { title: l("Muse Video", "Muse Video"), description: l("Video a 720p muy barato, con sonido", "Very cheap 720p video with sound"), href: vid("muse/muse-video/text-to-video"), icon: Film },
     ],
   },
   {

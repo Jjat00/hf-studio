@@ -15,7 +15,10 @@ from hf_studio.store import gemini_omni as g
 FIXTURES = Path(__file__).parent / "fixtures"
 PRICES = {name: json.loads((FIXTURES / f"prices_{name}.json").read_text()) for name in ("apimart", "kie")}
 IMG, END = "https://cdn.test/a.png", "https://cdn.test/b.png"
-ROUTES = {"apimart": g.apimart(), "kie": g.kie()}
+_APIMART = g.apimart()
+# Con dos canales en APIMart, la primera ruta es la oficial y la segunda el canal ext.
+ROUTES = {"apimart": {k: v[0] if isinstance(v, tuple) else v for k, v in _APIMART.items()}, "kie": g.kie()}
+EXT = {k: v[1] for k, v in _APIMART.items() if isinstance(v, tuple)}
 T2V, I2V, REF = (
     f"google/gemini-omni-1.1-flash/{m}" for m in ("text-to-video", "image-to-video", "reference-to-video")
 )
@@ -185,3 +188,56 @@ def test_v12_extend_only_on_apimart():
     route.check(entry, {"input_video_seconds": 15})
     with pytest.raises(ProviderError):  # el video de origen, como mucho 15 s
         route.check(entry, {"input_video_seconds": 16})
+
+
+def test_v12_ext_channel_on_every_mode():
+    """El canal ext de APIMart: los mismos cuerpos que el oficial, precio fijo por segundo y sin retención."""
+    modes = ("text-to-video", "image-to-video", "reference-to-video", "video-edit", "video-extend")
+    assert set(EXT) == {f"{V12}/{m}" for m in modes}
+    for mid, route in EXT.items():
+        assert route.model == "gemini-omni-1.2-flash-ext" and not route.official
+        assert not route.settles_later and route.reserve is None
+    cases = {
+        "text-to-video": {"duration": 15, "resolution": "4k", "aspect_ratio": "9:16"},
+        "image-to-video": {"image_url": IMG, "end_image_url": END, "duration": 8},
+        "reference-to-video": {"image_urls": [IMG, END]},
+        "video-edit": {"video_url": VID},
+        "video-extend": {"video_url": VID, "duration": 8},
+    }
+    for mode, extra in cases.items():
+        mid = f"{V12}/{mode}"
+        official = ROUTES["apimart"][mid].translate(logical(mid, **extra))
+        assert EXT[mid].translate(logical(mid, **extra)) == official
+    with pytest.raises(ProviderError):
+        EXT[f"{V12}/image-to-video"].translate(
+            logical(f"{V12}/image-to-video", image_url=IMG, end_image_url=END, duration=12)
+        )
+
+
+def test_v12_ext_prices():
+    def ext_price(mode: str, hints: dict | None = None, **extra) -> float | None:
+        mid = f"{V12}/{mode}"
+        return EXT[mid].price(logical(mid, **extra), hints or {}, PRICES["apimart"])
+
+    assert ext_price("text-to-video") == pytest.approx(0.24)  # 10 s × 0,024 a 720p
+    assert ext_price("text-to-video", duration=5, resolution="4k") == pytest.approx(0.28)
+    assert ext_price("image-to-video", image_url=IMG, duration=3, resolution="360p") == pytest.approx(0.048)
+    # Edición: la duración del video menos 0,15 s, hacia arriba (8,019 → 8; 8,3 → 9)
+    assert ext_price("video-edit", video_url=VID) is None
+    assert ext_price("video-edit", {"input_video_seconds": 8.019}, video_url=VID) == pytest.approx(0.192)
+    assert ext_price("video-edit", {"input_video_seconds": 8.3}, video_url=VID) == pytest.approx(0.216)
+    # Extensión: solo el tramo añadido
+    assert ext_price("video-extend", {"input_video_seconds": 12}, video_url=VID, duration=4) == pytest.approx(
+        0.096
+    )
+    with pytest.raises(ProviderError):
+        EXT[f"{V12}/video-edit"].check({}, {"input_video_seconds": 16})
+
+
+def test_v12_ext_is_the_cheapest_apimart_option():
+    """El router ve las dos rutas de APIMart y elige el canal ext por precio."""
+    from hf_studio.providers.registry import PROVIDERS
+    from hf_studio.providers.routes import routes_for
+
+    found = routes_for(PROVIDERS["apimart"].routes(), f"{V12}/text-to-video")
+    assert [r.model for r in found] == ["gemini-omni-1.2-flash", "gemini-omni-1.2-flash-ext"]

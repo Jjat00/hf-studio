@@ -57,6 +57,7 @@ const MOTION_MODELS = [
   { id: "alibaba/happy-horse/v1.1/image-to-video", name: "HappyHorse 1.1" },
   // Modelos de tienda (solo APIMart o KIE).
   { id: "google/veo-3.1/fast/reference-to-video", name: "Veo 3.1 Fast · Ref" },
+  { id: "bytedance/seedance-2.5-flash/reference-to-video", name: "Seedance 2.5 Flash · Ref" },
   { id: "bytedance/seedance-2.0-fast/reference-to-video", name: "Seedance 2.0 Fast · Ref" },
   { id: "vidu/q4/reference-to-video", name: "Vidu Q4 · Ref" },
   { id: "google/gemini-omni-1.1-flash/reference-to-video", name: "Gemini Omni · Ref" },
