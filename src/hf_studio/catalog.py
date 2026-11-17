@@ -95,4 +95,4 @@ class Catalog:
 
 @lru_cache
 def get_catalog() -> Catalog:
-    return Catalog(json.loads(CATALOG_PATH.read_text()))
+    return Catalog(json.loads(CATALOG_PATH.read_text(encoding="utf-8")))

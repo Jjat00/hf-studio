@@ -590,7 +590,7 @@ async def analyze(
         "shot_frames": [{"shot": i, "t": mids[i], "file": k} for i, k in enumerate(keys)],
         "music": "music.wav" if has_track else None,
     }
-    (out_dir / "analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
+    (out_dir / "analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), "utf-8")
     return result
 
 

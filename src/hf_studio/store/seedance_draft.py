@@ -44,7 +44,7 @@ def is_draft(model_id: str) -> bool:
 
 def _seedance_25(mode: str) -> dict[str, Any]:
     """El modelo de Seedance 2.5 de Higgsfield (del catálogo sincronizado), base del borrador."""
-    data = json.loads(Path(__file__).parent.with_name("catalog.json").read_text())["models"]
+    data = json.loads(Path(__file__).parent.with_name("catalog.json").read_text(encoding="utf-8"))["models"]
     return next(m for m in data if m["id"] == f"bytedance/seedance-2.5/{mode}")
 
 

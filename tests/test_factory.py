@@ -432,7 +432,9 @@ async def test_render_smoke(tmp_path):
         shutil.copyfile(font, project / "fonts" / font.name)
     script = episode(2)
     times = [SceneTime(0, 1.0), SceneTime(1.0, 1.0)]
-    (project / "index.html").write_text(build_composition(script, STYLES["swiss"], times, [], "es", 2.0))
+    (project / "index.html").write_text(
+        build_composition(script, STYLES["swiss"], times, [], "es", 2.0), "utf-8"
+    )
     out = tmp_path / "out.mp4"
     try:
         await jobs._render(project, out, 2.0)
@@ -463,10 +465,12 @@ async def test_a_timeout_kills_the_whole_process_tree(tmp_path):
     assert (rc, msg) == (124, "timeout")
     await asyncio.sleep(0.3)
     grandchild = int(pidfile.read_text())
+    # En Windows, os.kill sobre un pid que ya no existe da OSError (WinError 87), no ProcessLookupError.
+    gone = OSError if os.name == "nt" else ProcessLookupError
     try:
         os.kill(grandchild, 0)
         alive = True
-    except ProcessLookupError:
+    except gone:
         alive = False
     assert not alive
 

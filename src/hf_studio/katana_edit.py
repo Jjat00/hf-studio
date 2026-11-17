@@ -206,7 +206,7 @@ class KatanaEditJobs(BackgroundProvider):
             raise KatanaError(problem)
         env = {**os.environ, "HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1", "CI": "1"}
         code, msg = await run_proc(
-            "npx", "--yes", f"hyperframes@{HYPERFRAMES_VERSION}", "render", str(project), "-o", str(out),
+            shutil.which("npx") or "npx", "--yes", f"hyperframes@{HYPERFRAMES_VERSION}", "render", str(project), "-o", str(out),
             "--fps", str(FPS), "--quality", "looks", "--quiet",
             timeout=max(RENDER_TIMEOUT_MIN, total * 40), cwd=project, env=env,
         )  # fmt: skip

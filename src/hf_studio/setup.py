@@ -32,27 +32,27 @@ AGENT_CLI = {"claude-code": "claude", "codex": "codex"}
 def read_env(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
-    pairs = (line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+    pairs = (line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines() if "=" in line)
     return {k.strip(): v.strip() for k, v in pairs if not k.lstrip().startswith("#")}
 
 
 def set_env(path: Path, key: str, value: str) -> None:
     """Pone `KEY=value` en el archivo: sustituye la línea (activa o comentada) o la añade al final."""
-    text = path.read_text() if path.is_file() else ""
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
     line = f"{key}={value}"
     pattern = re.compile(rf"^#?\s*{re.escape(key)}=.*$", re.MULTILINE)
     if pattern.search(text):
         text = pattern.sub(lambda _: line, text, count=1)
     else:
         text = text.rstrip("\n") + f"\n{line}\n"
-    path.write_text(text.lstrip("\n"))
+    path.write_text(text.lstrip("\n"), "utf-8")
 
 
 def copy_private(source: Path, target: Path) -> None:
     """Copia la plantilla en un archivo nuevo que solo puede leer su dueño (guarda secretos)."""
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(source.read_text())
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(source.read_text(encoding="utf-8"))
 
 
 HF_KEY_HELP = "https://console.higgsfield.ai -> API keys. Paste it whole (format KEY_ID:KEY_SECRET)."

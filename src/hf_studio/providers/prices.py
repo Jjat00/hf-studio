@@ -38,7 +38,7 @@ class PriceBook:
             if not file.is_file():
                 return None
             try:
-                self._tables[provider] = json.loads(file.read_text())
+                self._tables[provider] = json.loads(file.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 return None
         return self._tables[provider]
@@ -64,7 +64,7 @@ class PriceBook:
         self.directory.mkdir(parents=True, exist_ok=True)
         table = {"synced_at": time.time(), "prices": prices, "format": price_format}
         tmp = self.path(provider).with_suffix(".tmp")
-        tmp.write_text(json.dumps(table, indent=0, sort_keys=True))
+        tmp.write_text(json.dumps(table, indent=0, sort_keys=True), "utf-8")
         tmp.replace(self.path(provider))
         self._tables[provider] = table
 

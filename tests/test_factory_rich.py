@@ -450,7 +450,7 @@ async def test_rich_render_smoke(tmp_path):
                              "16:9")  # fmt: skip
     for name in assets_needed(html):
         shutil.copytree(fac.ASSETS / "vendor" / name, project / "vendor" / name)
-    (project / "index.html").write_text(html)
+    (project / "index.html").write_text(html, "utf-8")
     out = tmp_path / "out.mp4"
     try:
         await jobs._render(project, out, 2.0)

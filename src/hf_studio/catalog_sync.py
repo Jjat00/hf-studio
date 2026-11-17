@@ -137,7 +137,7 @@ def main() -> int:
     workflows = sorted({p for f, md in family_pages.items() for p in links(md) if p.startswith(f + "/")})
     with ThreadPoolExecutor(8) as pool:
         parsed = [m for m in pool.map(parse_workflow, workflows) if m]
-    previous = json.loads(OUT.read_text())["models"] if OUT.exists() else []
+    previous = json.loads(OUT.read_text(encoding="utf-8"))["models"] if OUT.exists() else []
     found = {m["id"]: m for m in parsed}
     # Si la doc cambia de formato y el sync no encuentra casi nada, no se pisa el catálogo bueno.
     if len(found) < len(previous) // 2:
@@ -153,7 +153,8 @@ def main() -> int:
             indent=2,
             ensure_ascii=False,
         )
-        + "\n"
+        + "\n",
+        "utf-8",
     )
     skipped = len(workflows) - len(parsed)
     print(f"{len(models)} endpoints en {OUT} ({skipped} páginas sin endpoint/esquema)")

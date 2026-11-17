@@ -526,7 +526,7 @@ class ContentFactoryJobs(BackgroundProvider):
         env = {**os.environ, "HYPERFRAMES_NO_TELEMETRY": "1", "DO_NOT_TRACK": "1", "CI": "1"}
         timeout = max(RENDER_TIMEOUT_MIN, total * 20)
         code, msg = await run_proc(
-            "npx",
+            shutil.which("npx") or "npx",  # en Windows es npx.cmd y exec no lo encuentra por nombre
             "--yes",
             f"hyperframes@{HYPERFRAMES_VERSION}",
             "render",

@@ -119,9 +119,9 @@ def builtin() -> dict[str, tuple[str, str, dict[str, str]]]:
     """Skills que trae HF Studio: `{slug: (descripción, cuerpo, archivos)}` desde builtin_skills/<carpeta>/."""
     found: dict[str, tuple[str, str, dict[str, str]]] = {}
     for main in sorted(BUILTIN_DIR.glob("*/SKILL.md")):
-        slug, description, body = parse_skill_md(main.read_text())
+        slug, description, body = parse_skill_md(main.read_text(encoding="utf-8"))
         files = {
-            str(f.relative_to(main.parent)): f.read_text()
+            str(f.relative_to(main.parent)): f.read_text(encoding="utf-8")
             for f in sorted(main.parent.rglob("*"))
             if f.is_file() and f != main and f.suffix in FILE_TYPES
         }
@@ -134,7 +134,7 @@ def unseeded(storage_dir: Path) -> tuple[list[str], Path]:
     vuelve al reiniciar (la lista de las ya instaladas vive en `storage_dir/skills_seeded.json`)."""
     marker = Path(storage_dir) / "skills_seeded.json"
     try:
-        done = set(json.loads(marker.read_text()))
+        done = set(json.loads(marker.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         done = set()
     return [slug for slug in builtin() if slug not in done], marker
@@ -142,8 +142,8 @@ def unseeded(storage_dir: Path) -> tuple[list[str], Path]:
 
 def mark_seeded(marker: Path, slugs: list[str]) -> None:
     try:
-        done = set(json.loads(marker.read_text()))
+        done = set(json.loads(marker.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         done = set()
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(json.dumps(sorted(done | set(slugs))))
+    marker.write_text(json.dumps(sorted(done | set(slugs))), "utf-8")
