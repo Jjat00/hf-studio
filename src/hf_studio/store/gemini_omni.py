@@ -25,6 +25,13 @@ Gemini Omni 1.2 Flash:
   hasta 15 s y `omni_reference_task_type: "extend"`; `duration` (3–10) es solo el tramo añadido y la salida trae
   el original más ese tramo. Se cobra solo lo añadido, por tokens (cotización aproximada con la misma tarifa por
   segundo), y con video de entrada retiene 15 s.
+- APIMart `gemini-omni-1.2-flash-ext` (canal no oficial, revisado el 2026-11-16):
+  https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.2-flash-ext/generation.md. Los mismos campos
+  y modos que el oficial (texto, primer y último fotograma, hasta 10 `image_urls`, edición y extensión con
+  `video_urls` de hasta 15 s), pero con precio fijo por segundo `gemini-omni-1.2-flash-ext|<RES>` y sin
+  retención: se cobra la duración (sin ella, 10 s), en la extensión solo el tramo añadido y en la edición la
+  duración del video de entrada menos 0,15 s, redondeada hacia arriba (mínimo 1 s). Es otra ruta de los mismos
+  modelos lógicos (`official=False`), mucho más barata que la oficial.
 - KIE `google/gemini-omni-flash-1-2` (revisado el 2026-11-11):
   https://docs.kie.ai/market/google/gemini-omni-flash-1-2.md (un modo por pedido: texto o hasta 6 `image_urls`,
   `first_frame_url` con `last_frame_url` opcional (3–10 s con los dos) o edición con `video_list` de un video
@@ -40,6 +47,7 @@ Gemini Omni 1.2 Flash:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from ..providers.routes import Route, Spec, per_second, per_unit, unsupported, video_seconds
@@ -129,8 +137,8 @@ def _v12_models() -> list[dict[str, Any]]:
     found = []
     note = "Google's Gemini Omni 1.2 Flash with generated audio (24 fps), through APIMart or KIE (not Higgsfield)."
     billing = (
-        "KIE bills a fixed rate per second. APIMart bills by tokens afterwards (approximate quote) and first "
-        "holds at least 10 s."
+        "KIE and APIMart's unofficial ext channel bill a fixed rate per second. APIMart's official channel "
+        "bills by tokens afterwards (approximate quote) and first holds at least 10 s."
     )
     for mode, (workflow, capabilities) in V12_MODES.items():
         properties: dict[str, Any] = {
@@ -157,8 +165,8 @@ def _v12_models() -> list[dict[str, Any]]:
             properties["video_url"] = url("Video to edit (up to 15 s); the result keeps its length.")
             required.append("video_url")
             notes[1] = (
-                "Billed by the source length: a fixed rate per second on KIE; by tokens afterwards on APIMart "
-                "(approximate quote, holds 15 s)."
+                "Billed by the source length: a fixed rate per second on KIE and APIMart's ext channel; by tokens "
+                "afterwards on APIMart's official channel (approximate quote, holds 15 s)."
             )
         found.append(
             model(
@@ -184,7 +192,10 @@ def _v12_extend_model() -> dict[str, Any]:
     }  # fmt: skip
     notes = [
         "Google's Gemini Omni 1.2 Flash extension, through APIMart only (not Higgsfield or KIE).",
-        "Only the added seconds are billed, by tokens afterwards (approximate quote); APIMart first holds 15 s.",
+        (
+            "Only the added seconds are billed: a fixed rate per second on APIMart's ext channel; by tokens "
+            "afterwards on the official channel (approximate quote, holds 15 s)."
+        ),
         "The model mostly looks at the end of the video: describe again anyone who only appeared earlier.",
     ]
     return model(
@@ -231,8 +242,8 @@ def _v12_reserve(mode: str):
     return reserve
 
 
-def _v12_routes() -> dict[str, Route]:
-    routes = {}
+def _v12_routes() -> dict[str, Route | tuple[Route, ...]]:
+    routes: dict[str, Route | tuple[Route, ...]] = {}
     for mode in V12_MODES:
         keep: tuple[str, ...] = ("prompt", "duration", "aspect_ratio", "resolution")
         rename = {}
@@ -253,7 +264,48 @@ def _v12_routes() -> dict[str, Route]:
         _v12_price("video-extend"), reserve=_v12_reserve("video-edit"), settles_later=True,
         check=_source_length("apimart"),
     )  # fmt: skip
+    for model_id, official in list(routes.items()):
+        routes[model_id] = (official, _v12_ext_route(model_id.rsplit("/", 1)[1]))
     return routes
+
+
+V12_EXT = "gemini-omni-1.2-flash-ext"
+EXT_NOTE = "Unofficial APIMart channel (ext): cheaper, may be less stable"
+EDIT_TOLERANCE = 0.15  # segundos de contenedor que APIMart descuenta antes de redondear la edición
+
+
+def _v12_ext_price(mode: str):
+    def price(i: dict, hints: dict, prices: dict) -> float | None:
+        if mode == "video-edit":
+            source = video_seconds(hints)
+            if source is None:
+                return None
+            seconds: float | None = max(1, math.ceil(round(source - EDIT_TOLERANCE, 6)))
+        else:
+            seconds = i.get("duration")
+        return per_second(prices, f"{V12_EXT}|{str(i.get('resolution', '720p')).upper()}", seconds)
+
+    return price
+
+
+def _v12_ext_route(mode: str) -> Route:
+    """El canal ext de APIMart: mismos campos que el oficial, precio fijo por segundo y sin retención."""
+    keep: tuple[str, ...] = ("prompt", "duration", "aspect_ratio", "resolution")
+    rename = {}
+    build = _v12_extend_build if mode == "video-extend" else _v12_build(mode)
+    if mode == "image-to-video":
+        rename = {"image_url": "first_frame_image", "end_image_url": "last_frame_image"}
+    elif mode == "reference-to-video":
+        keep = (*keep, "image_urls")
+    elif mode == "video-edit":
+        keep = ("prompt", "aspect_ratio", "resolution", "video_url")
+    elif mode == "video-extend":
+        keep = ("prompt", "duration", "resolution", "video_url")
+    return Route(
+        "apimart", V12_EXT, Spec("apimart", V12_EXT, keep=keep, rename=rename, build=build),
+        _v12_ext_price(mode), official=False, notes=(EXT_NOTE,),
+        check=_source_length("apimart") if mode in ("video-edit", "video-extend") else None,
+    )  # fmt: skip
 
 
 def _v12_extend_build(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
@@ -291,8 +343,8 @@ def _ext_price(i: dict, hints: dict, prices: dict) -> float | None:
     return per_unit(prices, f"Omni-Flash-Ext|{str(i.get('resolution', '720p')).upper()}-{i.get('duration')}S")
 
 
-def apimart() -> dict[str, Route]:
-    routes = {}
+def apimart() -> dict[str, Route | tuple[Route, ...]]:
+    routes: dict[str, Route | tuple[Route, ...]] = {}
     variant = "gemini-omni-1.1-flash"
     for mode in VARIANTS[variant][3]:
         keep = ("prompt", "duration", "aspect_ratio", "resolution")

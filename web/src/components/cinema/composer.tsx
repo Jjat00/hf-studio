@@ -72,8 +72,12 @@ const kindOf = (contentType: string | null | undefined, url = ""): MediaKind =>
 
 const listOf = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : typeof v === "string" && v ? [v] : []);
 
-/** Seedance 2.5 primero (como en Higgsfield), luego su borrador barato y después el resto. */
-const featuredRank = (id: string) => (id.startsWith("bytedance/seedance-2.5/") ? 0 : id.startsWith("bytedance/seedance-2.5-draft/") ? 1 : 2);
+/** Seedance 2.5 primero (como en Higgsfield), luego su borrador barato, Seedance 2.5 Flash y después el resto. */
+const FEATURED = ["bytedance/seedance-2.5/", "bytedance/seedance-2.5-draft/", "bytedance/seedance-2.5-flash/"];
+const featuredRank = (id: string) => {
+  const rank = FEATURED.findIndex((prefix) => id.startsWith(prefix));
+  return rank === -1 ? FEATURED.length : rank;
+};
 
 /** Casillas de primer y último fotograma (image-to-video de Seedance, Kling, Wan…). */
 const FIRST_FRAME = "image_url";
