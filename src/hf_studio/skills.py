@@ -121,7 +121,7 @@ def builtin() -> dict[str, tuple[str, str, dict[str, str]]]:
     for main in sorted(BUILTIN_DIR.glob("*/SKILL.md")):
         slug, description, body = parse_skill_md(main.read_text(encoding="utf-8"))
         files = {
-            str(f.relative_to(main.parent)): f.read_text(encoding="utf-8")
+            f.relative_to(main.parent).as_posix(): f.read_text(encoding="utf-8")  # con / también en Windows
             for f in sorted(main.parent.rglob("*"))
             if f.is_file() and f != main and f.suffix in FILE_TYPES
         }
