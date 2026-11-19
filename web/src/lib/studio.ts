@@ -20,11 +20,14 @@ export function isAudioModel(model: string) {
   return AUDIO_MODEL_SET.has(model);
 }
 
-/** Ids que Higgsfield renombró (2026-10, errata «higgsfiled»): el historial, los presets y los Spaces viejos los
+/** Ids que cambiaron (los mismos que `catalog.ALIASES` en la API): los que Higgsfield renombró (2026-10, errata
+ *  «higgsfiled») y los de tienda que Higgsfield empezó a vender. El historial, los presets y los Spaces viejos los
  *  guardan así. La API los resuelve al nuevo; aquí los mapas de modelos los aceptan también. */
 const LEGACY_MODELS: Record<string, string> = {
   "higgsfiled/genjutsu/motion-transfer/v1.0": "higgsfield/genjutsu/motion-transfer/v1.0",
   "higgsfiled/genjutsu/object-swap/v1.0": "higgsfield/genjutsu/object-swap/v1.0",
+  "bytedance/seedream-5.0-pro/text-to-image": "bytedance/seedream/v5.0/pro/text-to-image",
+  "bytedance/seedream-5.0-pro/edit": "bytedance/seedream/v5.0/pro/edit",
 };
 
 /** Modelos por id, incluidos los ids viejos de `LEGACY_MODELS`. */

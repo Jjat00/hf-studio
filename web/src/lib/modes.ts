@@ -79,6 +79,7 @@ export const VIDEO_TABS: Tab[] = [
         filter: (m) =>
           isVideo(m) &&
           (has(m, "reference-to-video") || /(video|image)-reference/.test(m.id) || m.id.includes("cinema-studio") ||
+            m.id.includes("audio-to-video") || // LTX 2.5: un video a partir de tu audio
             takesStudioElements(m.id)), // Kling 3.0: referencias con tus elementos (@nombre)
         hero: { title: l("Referencias de video", "Video references"), subtitle: l("Copia la cámara, el estilo y los personajes de tus clips", "Copy camera, style and characters from your clips"), tone: "violet", art: "/art/references.webp" },
         labels: {

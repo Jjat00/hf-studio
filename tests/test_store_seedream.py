@@ -13,6 +13,7 @@ from hf_studio.providers.registry import PROVIDERS
 from hf_studio.providers.routes import routes_for, with_defaults
 from hf_studio.store import seedream
 from tests.test_routes import FIXTURES
+from tests.test_routing import env  # noqa: F401  (fixture)
 
 PRICES = {p: json.loads((FIXTURES / f"prices_{p}.json").read_text()) for p in ("apimart", "kie")}
 SCHEMAS = {m["id"]: m["input_schema"] for m in seedream.MODELS}
@@ -251,3 +252,29 @@ async def test_layer_outputs_keep_the_base_and_every_layer():
     assert [
         o["url"] for o in apimart_outputs({"images": [{"url": urls, "layer_decomposition": True}]})
     ] == urls
+
+
+def test_old_seedream_5_pro_requests_still_run_on_the_stores():
+    """Un pedido guardado con el id de tienda (con `output_format` o 2:1) sigue siendo válido: corre por APIMart o KIE
+    y Higgsfield queda fuera, porque no reproduce esos campos."""
+    old = seedream.store_id("5.0-pro", "text-to-image")
+    saved = {"prompt": "a fox", "resolution": "1k", "aspect_ratio": "2:1", "output_format": "png"}
+    assert get_catalog().validate(old, saved) == []
+    assert get_catalog().validate(old, {**saved, "aspect_ratio": "1:1", "output_format": "jpeg"}) == []
+    route = routes_for(PROVIDERS["apimart"].routes(), f"{PRO}/text-to-image")[0]
+    assert route.translate(saved)["output_format"] == "png"
+    assert get_catalog().get(f"{PRO}/text-to-image")["store_only_fields"] == ["output_format"]
+
+
+async def test_higgsfield_is_left_out_when_a_store_only_field_is_set(env):  # noqa: F811
+    _, http, _ = env
+    body = (await http.post("/v1/estimate", json={
+        "model": seedream.store_id("5.0-pro", "text-to-image"),
+        "input": {"prompt": "a fox", "resolution": "1k", "output_format": "png"},
+    })).json()  # fmt: skip
+    assert "higgsfield" not in {o["provider"] for o in body["options"]}
+    assert any("output_format" in e["reason"] for e in body["excluded"] if e["provider"] == "higgsfield")
+    plain = (await http.post("/v1/estimate", json={
+        "model": f"{PRO}/text-to-image", "input": {"prompt": "a fox"},
+    })).json()  # fmt: skip
+    assert "higgsfield" in {o["provider"] for o in plain["options"]}

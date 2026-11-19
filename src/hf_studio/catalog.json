@@ -1845,6 +1845,7 @@
         "resolution: 1k, 1.5k or 2k (default). aspect_ratio defaults to 1:1.",
         "Also runs on APIMart and KIE, usually cheaper. aspect_ratio auto in text to image only runs on Higgsfield, and 1.5k does not run on KIE.",
         "Each reference after the first adds a small charge on KIE; APIMart does not publish its charge, so with two or more references it has no price.",
+        "Aspect ratios 2:1 and 1:2 and output_format only run on APIMart or KIE.",
         "Price (2026-11): one image, $0.054 at 1k or 1.5k and $0.108 at 2k; reference images are free."
       ],
       "docs_url": "https://open.higgsfield.ai/models/bytedance/seedream/v5.0/pro/edit/api-reference",
@@ -1881,7 +1882,9 @@
               "21:9",
               "3:4",
               "9:16",
-              "2:3"
+              "2:3",
+              "2:1",
+              "1:2"
             ],
             "type": "string",
             "title": "Aspect ratio",
@@ -1896,10 +1899,22 @@
             "title": "Images",
             "minItems": 1,
             "maxItems": 10
+          },
+          "output_format": {
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "type": "string",
+            "title": "Output format",
+            "description": "Output image format (APIMart and KIE only; Higgsfield picks its own)."
           }
         },
         "additionalProperties": false
-      }
+      },
+      "store_only_fields": [
+        "output_format"
+      ]
     },
     {
       "id": "bytedance/seedream/v5.0/pro/text-to-image",
@@ -1915,6 +1930,7 @@
         "prompt is required. One image per request.",
         "resolution: 1k, 1.5k or 2k (default). aspect_ratio defaults to 1:1.",
         "Also runs on APIMart and KIE, usually cheaper. aspect_ratio auto in text to image only runs on Higgsfield, and 1.5k does not run on KIE.",
+        "Aspect ratios 2:1 and 1:2 and output_format only run on APIMart or KIE.",
         "Price (2026-11): one image, $0.054 at 1k or 1.5k and $0.108 at 2k; reference images are free."
       ],
       "docs_url": "https://open.higgsfield.ai/models/bytedance/seedream/v5.0/pro/text-to-image/api-reference",
@@ -1950,15 +1966,29 @@
               "21:9",
               "3:4",
               "9:16",
-              "2:3"
+              "2:3",
+              "2:1",
+              "1:2"
             ],
             "type": "string",
             "title": "Aspect ratio",
             "default": "1:1"
+          },
+          "output_format": {
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "type": "string",
+            "title": "Output format",
+            "description": "Output image format (APIMart and KIE only; Higgsfield picks its own)."
           }
         },
         "additionalProperties": false
-      }
+      },
+      "store_only_fields": [
+        "output_format"
+      ]
     },
     {
       "id": "higgsfield-ai/soul/cinema",
@@ -6843,11 +6873,6 @@
             "title": "Resolution",
             "default": "768P"
           },
-          "aigc_watermark": {
-            "type": "boolean",
-            "title": "AIGC watermark",
-            "default": false
-          },
           "image_url": {
             "type": "string",
             "title": "First frame URL",
@@ -6936,11 +6961,6 @@
             "title": "Resolution",
             "default": "768P"
           },
-          "aigc_watermark": {
-            "type": "boolean",
-            "title": "AIGC watermark",
-            "default": false
-          },
           "image_urls": {
             "type": "array",
             "items": {
@@ -6948,7 +6968,6 @@
               "format": "uri"
             },
             "title": "Reference image URLs",
-            "minItems": 1,
             "maxItems": 9
           },
           "video_urls": {
@@ -6958,7 +6977,6 @@
               "format": "uri"
             },
             "title": "Reference video URLs",
-            "minItems": 1,
             "maxItems": 3
           },
           "audio_urls": {
@@ -6968,7 +6986,6 @@
               "format": "uri"
             },
             "title": "Reference audio URLs",
-            "minItems": 1,
             "maxItems": 3
           },
           "aspect_ratio": {
@@ -6990,18 +7007,33 @@
         "if": {
           "required": [
             "image_urls"
-          ]
+          ],
+          "properties": {
+            "image_urls": {
+              "minItems": 1
+            }
+          }
         },
         "else": {
           "if": {
             "required": [
               "video_urls"
-            ]
+            ],
+            "properties": {
+              "video_urls": {
+                "minItems": 1
+              }
+            }
           },
           "else": {
             "required": [
               "audio_urls"
-            ]
+            ],
+            "properties": {
+              "audio_urls": {
+                "minItems": 1
+              }
+            }
           }
         },
         "additionalProperties": false
@@ -7050,11 +7082,6 @@
             "type": "string",
             "title": "Resolution",
             "default": "768P"
-          },
-          "aigc_watermark": {
-            "type": "boolean",
-            "title": "AIGC watermark",
-            "default": false
           },
           "aspect_ratio": {
             "enum": [
@@ -7120,11 +7147,6 @@
             "type": "string",
             "title": "Resolution",
             "default": "768P"
-          },
-          "aigc_watermark": {
-            "type": "boolean",
-            "title": "AIGC watermark",
-            "default": false
           },
           "image_url": {
             "type": "string",
@@ -7214,11 +7236,6 @@
             "title": "Resolution",
             "default": "768P"
           },
-          "aigc_watermark": {
-            "type": "boolean",
-            "title": "AIGC watermark",
-            "default": false
-          },
           "image_urls": {
             "type": "array",
             "items": {
@@ -7226,7 +7243,6 @@
               "format": "uri"
             },
             "title": "Reference image URLs",
-            "minItems": 1,
             "maxItems": 9
           },
           "video_urls": {
@@ -7236,7 +7252,6 @@
               "format": "uri"
             },
             "title": "Reference video URLs",
-            "minItems": 1,
             "maxItems": 3
           },
           "audio_urls": {
@@ -7246,7 +7261,6 @@
               "format": "uri"
             },
             "title": "Reference audio URLs",
-            "minItems": 1,
             "maxItems": 3
           },
           "aspect_ratio": {
@@ -7266,18 +7280,33 @@
         "if": {
           "required": [
             "image_urls"
-          ]
+          ],
+          "properties": {
+            "image_urls": {
+              "minItems": 1
+            }
+          }
         },
         "else": {
           "if": {
             "required": [
               "video_urls"
-            ]
+            ],
+            "properties": {
+              "video_urls": {
+                "minItems": 1
+              }
+            }
           },
           "else": {
             "required": [
               "audio_urls"
-            ]
+            ],
+            "properties": {
+              "audio_urls": {
+                "minItems": 1
+              }
+            }
           }
         },
         "additionalProperties": false
@@ -7326,11 +7355,6 @@
             "type": "string",
             "title": "Resolution",
             "default": "768P"
-          },
-          "aigc_watermark": {
-            "type": "boolean",
-            "title": "AIGC watermark",
-            "default": false
           },
           "aspect_ratio": {
             "enum": [

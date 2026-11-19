@@ -71,3 +71,24 @@ def test_long_image_webpage_on_both_stores():
     assert route_of("kie", k.WEBPAGE).price(styled, {}, _prices("kie")) == 0.54
     with pytest.raises(ProviderError):  # con imágenes, APIMart no publica el precio
         apimart.translate(styled)
+
+
+@pytest.mark.parametrize("variant", ["h3-lite", "h3-highspeed"])
+def test_minimax_h3_lite_and_highspeed_schemas_follow_higgsfield(variant):
+    """Listas de referencias vacías valen (como en Higgsfield) si alguna trae algo; la marca de agua no se ofrece."""
+    mid = f"minimax/{variant}/reference-to-video"
+    ok = {"prompt": "a fox", "image_urls": IMG[:1], "video_urls": [], "audio_urls": []}
+    assert get_catalog().validate(mid, ok) == []
+    assert get_catalog().validate(mid, {"prompt": "a fox", "audio_urls": ["https://cdn.test/a.mp3"]}) == []
+    assert get_catalog().validate(
+        mid, {"prompt": "a fox", "image_urls": [], "video_urls": [], "audio_urls": []}
+    )
+    assert get_catalog().validate(mid, {"prompt": "a fox"})
+    for mode in ("text-to-video", "image-to-video", "reference-to-video"):
+        assert (
+            "aigc_watermark"
+            not in get_catalog().get(f"minimax/{variant}/{mode}")["input_schema"]["properties"]
+        )
+    i2v = f"minimax/{variant}/image-to-video"
+    assert get_catalog().validate(i2v, {"prompt": "a fox", "end_image_url": IMG[0]}) == []
+    assert get_catalog().validate(i2v, {"prompt": "a fox"})
