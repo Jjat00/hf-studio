@@ -421,20 +421,12 @@ def others() -> Routes:
         return None if base is None else round(base + extra, 4)
 
     def grok_ext(source: dict, out: dict) -> dict:
-        """Canal no oficial (docs «Grok Imagine 1.5 Video Generation»): con imágenes el formato sale de la
-        imagen, sin ellas `size` es explícito y su valor por defecto (16:9) no equivale a `auto`."""
-        out = grok(source, out)
-        ratio = out.pop("aspect_ratio", "auto")
-        if len(out.get("image_urls") or []) > 7:
-            raise unsupported(P, "APIMart's ext channel accepts at most 7 images")
-        if out.get("image_urls"):
-            if ratio != "auto":
-                raise unsupported(P, "APIMart's ext channel takes the aspect ratio from the image")
-        elif ratio == "auto":
-            raise unsupported(P, "APIMart's ext channel needs an explicit aspect ratio without images")
-        else:
-            out["size"] = ratio
-        return out
+        """Canal no oficial (docs «Grok Imagine 1.5 Video Generation»): `image_url` es el primer fotograma e
+        `image_urls` las referencias (ver `store.grok_video.ext_images`)."""
+        from ..store.grok_video import ext_images
+
+        out.pop("image_url", None)
+        return ext_images(P, out, source.get("image_url"), list(source.get("image_urls") or []))
 
     ext = "grok-imagine-1.5-video-ext"
     routes["xai/grok-imagine-video/v1.5/reference-to-video"] = (
@@ -450,8 +442,7 @@ def others() -> Routes:
             P, ext,
             Spec(P, ext, keep=("prompt", "duration", "resolution", "aspect_ratio", "image_url", "image_urls"),
                  convert={"audio_url": _no_list("audio_url")},
-                 allowed={"duration": range(6, 16), "resolution": {"480p", "720p"},
-                          "aspect_ratio": {"auto", "16:9", "9:16", "1:1", "3:2", "2:3"}},
+                 allowed={"duration": range(1, 16)},
                  build=grok_ext),
             _res_price("grok-imagine-1.5-video-apimart"),
             official=False,

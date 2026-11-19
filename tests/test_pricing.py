@@ -302,3 +302,34 @@ def test_kling4_flash_bills_output_plus_the_longer_of_input_and_output():
     )
     assert approximate(KLING4_FLASH_EDIT, edit, {})["missing"] == ["input video duration"]
     assert approximate(KLING4_FLASH_REFS, {"duration": 10, "resolution": "1080p"}, {})["usd"] is None
+
+
+H3_LITE = (
+    "480P: $0.025 per second of output video and prepared input video. 768P: $0.04 per second of output video and "
+    "prepared input video. The first 5 reference images are included; each additional image costs $0.02. Audio "
+    "references have no separate charge. Total = (output seconds + prepared input-video seconds) × the selected "
+    "per-second rate + additional-image charges. Input-video duration is measured after preprocessing, which may "
+    "trim or extend the clips."
+)
+
+
+def test_minimax_h3_lite_references_add_input_seconds_and_extra_images():
+    """MiniMax H3 Lite/Highspeed reference-to-video (2026-11): salida + video preparado (tope 14,8 s) + imágenes extra."""
+    images = {"image_urls": ["https://x/a.png"] * 7, "duration": 5, "resolution": "768P"}
+    assert approximate(H3_LITE, images, {})["usd"] == 5 * 0.04 + 2 * 0.02
+    video = {"video_urls": ["https://x/a.mp4"], "duration": 10, "resolution": "480P"}
+    assert approximate(H3_LITE, video, {})["missing"] == ["input video duration"]
+    assert approximate(H3_LITE, video, {"input_video_seconds": 4})["usd"] == (10 + 4) * 0.025
+    assert approximate(H3_LITE, video, {"input_video_seconds": 30})["usd"] == (10 + 14.8) * 0.025
+
+
+def test_placeholders_fill_an_empty_required_list_of_an_if_branch():
+    """MiniMax H3 Lite: el `if` exige una lista no vacía; una lista vacía cuenta como ausente al cotizar."""
+    from hf_studio.catalog import get_catalog
+
+    schema = get_catalog().get("minimax/h3-lite/reference-to-video")["input_schema"]
+    for args in ({"prompt": "x", "image_urls": []}, {"prompt": "x", "video_urls": []}, {"prompt": "x"}):
+        filled, added = fill_placeholders(schema, args)
+        assert added and get_catalog().validate("minimax/h3-lite/reference-to-video", filled) == []
+    real = {"prompt": "x", "image_urls": ["https://x/a.png"], "video_urls": []}
+    assert fill_placeholders(schema, real) == (real, [])

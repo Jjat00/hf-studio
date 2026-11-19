@@ -13,11 +13,15 @@ CATALOG_PATH = Path(__file__).with_name("catalog.json")
 
 _formats = FormatChecker()
 
-# Ids que Higgsfield renombró (2026-10: corrigió la errata «higgsfiled»). Presets propios, Spaces e historial
-# guardados con el id viejo siguen funcionando; se resuelven al nuevo y se envían con él.
+# Ids que cambiaron: los que Higgsfield renombró (2026-10: corrigió la errata «higgsfiled») y los de tienda que
+# Higgsfield empezó a vender. Presets propios, Spaces e historial guardados con el id viejo siguen funcionando; se
+# resuelven al nuevo y se envían con él.
 ALIASES = {
     "higgsfiled/genjutsu/motion-transfer/v1.0": "higgsfield/genjutsu/motion-transfer/v1.0",
     "higgsfiled/genjutsu/object-swap/v1.0": "higgsfield/genjutsu/object-swap/v1.0",
+    # Seedream 5.0 Pro era modelo de tienda hasta que Higgsfield lo publicó (2026-11-19).
+    "bytedance/seedream-5.0-pro/text-to-image": "bytedance/seedream/v5.0/pro/text-to-image",
+    "bytedance/seedream-5.0-pro/edit": "bytedance/seedream/v5.0/pro/edit",
 }
 
 

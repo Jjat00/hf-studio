@@ -1829,6 +1829,176 @@
       }
     },
     {
+      "id": "bytedance/seedream/v5.0/pro/edit",
+      "title": "Seedream 5.0 Pro — Edit API",
+      "summary": "Seedream 5.0 Pro edit with 1 to 10 reference images, up to 2K.",
+      "workflow": "edit",
+      "family": "seedream-5-pro",
+      "output": "image",
+      "capabilities": [
+        "edit",
+        "image-references"
+      ],
+      "notes": [
+        "prompt is required. One image per request.",
+        "image_urls: 1 to 10 images; describe the edit and how to use each one.",
+        "resolution: 1k, 1.5k or 2k (default). aspect_ratio defaults to 1:1.",
+        "Also runs on APIMart and KIE, usually cheaper. aspect_ratio auto in text to image only runs on Higgsfield, and 1.5k does not run on KIE.",
+        "Each reference after the first adds a small charge on KIE; APIMart does not publish its charge, so with two or more references it has no price.",
+        "Aspect ratios 2:1 and 1:2 and output_format only run on APIMart or KIE.",
+        "Price (2026-11): one image, $0.054 at 1k or 1.5k and $0.108 at 2k; reference images are free."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/bytedance/seedream/v5.0/pro/edit/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Seedream 5.0 Pro Edit",
+        "required": [
+          "prompt",
+          "image_urls"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1
+          },
+          "resolution": {
+            "enum": [
+              "1k",
+              "1.5k",
+              "2k"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "2k"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "1:1",
+              "4:3",
+              "16:9",
+              "3:2",
+              "21:9",
+              "3:4",
+              "9:16",
+              "2:3",
+              "2:1",
+              "1:2"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "1:1"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Images",
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "output_format": {
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "type": "string",
+            "title": "Output format",
+            "description": "Output image format (APIMart and KIE only; Higgsfield picks its own)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "store_only": {
+        "output_format": null,
+        "aspect_ratio": [
+          "2:1",
+          "1:2"
+        ]
+      }
+    },
+    {
+      "id": "bytedance/seedream/v5.0/pro/text-to-image",
+      "title": "Seedream 5.0 Pro — Text to image API",
+      "summary": "Seedream 5.0 Pro text to image, up to 2K.",
+      "workflow": "text-to-image",
+      "family": "seedream-5-pro",
+      "output": "image",
+      "capabilities": [
+        "text-to-image"
+      ],
+      "notes": [
+        "prompt is required. One image per request.",
+        "resolution: 1k, 1.5k or 2k (default). aspect_ratio defaults to 1:1.",
+        "Also runs on APIMart and KIE, usually cheaper. aspect_ratio auto in text to image only runs on Higgsfield, and 1.5k does not run on KIE.",
+        "Aspect ratios 2:1 and 1:2 and output_format only run on APIMart or KIE.",
+        "Price (2026-11): one image, $0.054 at 1k or 1.5k and $0.108 at 2k; reference images are free."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/bytedance/seedream/v5.0/pro/text-to-image/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Seedream 5.0 Pro Text to Image",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1
+          },
+          "resolution": {
+            "enum": [
+              "1k",
+              "1.5k",
+              "2k"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "2k"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "1:1",
+              "4:3",
+              "16:9",
+              "3:2",
+              "21:9",
+              "3:4",
+              "9:16",
+              "2:3",
+              "2:1",
+              "1:2"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "1:1"
+          },
+          "output_format": {
+            "enum": [
+              "jpeg",
+              "png"
+            ],
+            "type": "string",
+            "title": "Output format",
+            "description": "Output image format (APIMart and KIE only; Higgsfield picks its own)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "store_only": {
+        "output_format": null,
+        "aspect_ratio": [
+          "2:1",
+          "1:2"
+        ]
+      }
+    },
+    {
       "id": "higgsfield-ai/soul/cinema",
       "title": "SOUL Cinema — Text to image API",
       "summary": "Text to image with SOUL Cinema: request parameters, examples and response handling.",
@@ -3121,6 +3291,137 @@
             "type": "string",
             "title": "Rendering speed",
             "default": "DEFAULT"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "kling-image/v4.0/edit",
+      "title": "Kling Image 4.0 — Edit API",
+      "summary": "Kling Image 4.0 edit: change or combine 1 to 10 images with a prompt, at 2K, 4K or 8K.",
+      "workflow": "edit",
+      "family": "kling-image-4",
+      "output": "image",
+      "capabilities": [
+        "edit",
+        "image-references"
+      ],
+      "notes": [
+        "prompt is required (up to 50,000 characters); cite the images as @image_1, @image_2…",
+        "image_urls: 1 to 10 JPG or PNG, up to 30 MB, at least 300 px per side, aspect ratio 2:5 to 5:2.",
+        "resolution: 2k (default), 4k or 8k. aspect_ratio defaults to auto. One image per request.",
+        "Price (2026-11): one image, $0.063 at 2k, $0.094 at 4k, $0.157 at 8k; reference images are free."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-image/v4.0/edit/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling Image 4.0 Edit",
+        "required": [
+          "prompt",
+          "image_urls"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 50000
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Images",
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "resolution": {
+            "enum": [
+              "2k",
+              "4k",
+              "8k"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "2k"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "21:9",
+              "auto"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "kling-image/v4.0/text-to-image",
+      "title": "Kling Image 4.0 — Text to image API",
+      "summary": "Kling Image 4.0 text to image: realistic scenes, products and text-rich designs at 2K, 4K or native 8K.",
+      "workflow": "text-to-image",
+      "family": "kling-image-4",
+      "output": "image",
+      "capabilities": [
+        "text-to-image"
+      ],
+      "notes": [
+        "prompt is required (up to 50,000 characters). One image per request.",
+        "resolution: 2k (default), 4k or 8k. aspect_ratio defaults to auto.",
+        "Price (2026-11): one image, $0.063 at 2k, $0.094 at 4k, $0.157 at 8k; reference images are free."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-image/v4.0/text-to-image/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling Image 4.0 Text to Image",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 50000
+          },
+          "resolution": {
+            "enum": [
+              "2k",
+              "4k",
+              "8k"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "2k"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "21:9",
+              "auto"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
           }
         },
         "additionalProperties": false
@@ -6529,6 +6830,554 @@
             "type": "boolean",
             "title": "Enhance prompt",
             "default": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "minimax/h3-highspeed/image-to-video",
+      "title": "MiniMax H3 Highspeed — Image to video API",
+      "summary": "MiniMax H3 Highspeed image to video from a first frame, a last frame or both, at 480P or 768P.",
+      "workflow": "image-to-video",
+      "family": "minimax-h3-highspeed",
+      "output": "video",
+      "capabilities": [
+        "first-last-frame",
+        "image-to-video"
+      ],
+      "notes": [
+        "prompt is required (up to 7,000 characters). duration is 4 to 15 s (default 5). resolution: 480P or 768P (default).",
+        "Provide image_url (first frame), end_image_url (last frame) or both. Output framing follows the keyframe.",
+        "Price (2026-11): $0.04/s at 480P and $0.06/s at 768P of output."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/minimax/h3-highspeed/image-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "MiniMax H3 Highspeed Image to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 7000
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5,
+            "minimum": 4,
+            "maximum": 15
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "768P"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "First frame URL",
+            "format": "uri"
+          },
+          "end_image_url": {
+            "type": "string",
+            "title": "Last frame URL",
+            "format": "uri"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
+          }
+        },
+        "if": {
+          "required": [
+            "image_url"
+          ]
+        },
+        "else": {
+          "required": [
+            "end_image_url"
+          ]
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "minimax/h3-highspeed/reference-to-video",
+      "title": "MiniMax H3 Highspeed — Reference to video API",
+      "summary": "MiniMax H3 Highspeed reference to video: up to 9 images, 3 videos and 3 audio clips guide a new 480P or 768P video.",
+      "workflow": "reference-to-video",
+      "family": "minimax-h3-highspeed",
+      "output": "video",
+      "capabilities": [
+        "audio-input",
+        "image-references",
+        "reference-to-video",
+        "video-input"
+      ],
+      "notes": [
+        "prompt is required (up to 7,000 characters). duration is 4 to 15 s (default 5). resolution: 480P or 768P (default).",
+        "Provide at least one of image_urls (up to 9), video_urls (up to 3) or audio_urls (up to 3); they guide the video, they are not keyframes.",
+        "Reference videos are prepared to at most 14.8 s in total and billed as input seconds at the output rate.",
+        "Price (2026-11): (output seconds + prepared input-video seconds) × $0.04/s at 480P or $0.06/s at 768P, plus $0.03 per reference image beyond the first 5."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/minimax/h3-highspeed/reference-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "MiniMax H3 Highspeed Reference to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 7000
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5,
+            "minimum": 4,
+            "maximum": 15
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "768P"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Reference image URLs",
+            "maxItems": 9
+          },
+          "video_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Reference video URLs",
+            "maxItems": 3
+          },
+          "audio_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Reference audio URLs",
+            "maxItems": 3
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
+          }
+        },
+        "if": {
+          "required": [
+            "image_urls"
+          ],
+          "properties": {
+            "image_urls": {
+              "minItems": 1
+            }
+          }
+        },
+        "else": {
+          "if": {
+            "required": [
+              "video_urls"
+            ],
+            "properties": {
+              "video_urls": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "required": [
+              "audio_urls"
+            ],
+            "properties": {
+              "audio_urls": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "minimax/h3-highspeed/text-to-video",
+      "title": "MiniMax H3 Highspeed — Text to video API",
+      "summary": "MiniMax H3 Highspeed text to video: 480P or 768P clips of 4 to 15 s, cheaper and faster than MiniMax H3.",
+      "workflow": "text-to-video",
+      "family": "minimax-h3-highspeed",
+      "output": "video",
+      "capabilities": [
+        "text-to-video"
+      ],
+      "notes": [
+        "prompt is required (up to 7,000 characters). duration is 4 to 15 s (default 5). resolution: 480P or 768P (default).",
+        "Price (2026-11): $0.04/s at 480P and $0.06/s at 768P of output."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/minimax/h3-highspeed/text-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "MiniMax H3 Highspeed Text to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 7000
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5,
+            "minimum": 4,
+            "maximum": 15
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "768P"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "minimax/h3-lite/image-to-video",
+      "title": "MiniMax H3 Lite — Image to video API",
+      "summary": "MiniMax H3 Lite image to video from a first frame, a last frame or both, at 480P or 768P.",
+      "workflow": "image-to-video",
+      "family": "minimax-h3-lite",
+      "output": "video",
+      "capabilities": [
+        "first-last-frame",
+        "image-to-video"
+      ],
+      "notes": [
+        "prompt is required (up to 7,000 characters). duration is 4 to 15 s (default 5). resolution: 480P or 768P (default).",
+        "Provide image_url (first frame), end_image_url (last frame) or both. Output framing follows the keyframe.",
+        "Price (2026-11): $0.025/s at 480P and $0.04/s at 768P of output."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/minimax/h3-lite/image-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "MiniMax H3 Lite Image to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 7000
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5,
+            "minimum": 4,
+            "maximum": 15
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "768P"
+          },
+          "image_url": {
+            "type": "string",
+            "title": "First frame URL",
+            "format": "uri"
+          },
+          "end_image_url": {
+            "type": "string",
+            "title": "Last frame URL",
+            "format": "uri"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "16:9"
+          }
+        },
+        "if": {
+          "required": [
+            "image_url"
+          ]
+        },
+        "else": {
+          "required": [
+            "end_image_url"
+          ]
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "minimax/h3-lite/reference-to-video",
+      "title": "MiniMax H3 Lite — Reference to video API",
+      "summary": "MiniMax H3 Lite reference to video: up to 9 images, 3 videos and 3 audio clips guide a new 480P or 768P video.",
+      "workflow": "reference-to-video",
+      "family": "minimax-h3-lite",
+      "output": "video",
+      "capabilities": [
+        "audio-input",
+        "image-references",
+        "reference-to-video",
+        "video-input"
+      ],
+      "notes": [
+        "prompt is required (up to 7,000 characters). duration is 4 to 15 s (default 5). resolution: 480P or 768P (default).",
+        "Provide at least one of image_urls (up to 9), video_urls (up to 3) or audio_urls (up to 3); they guide the video, they are not keyframes.",
+        "Reference videos are prepared to at most 14.8 s in total and billed as input seconds at the output rate.",
+        "Price (2026-11): (output seconds + prepared input-video seconds) × $0.025/s at 480P or $0.04/s at 768P, plus $0.02 per reference image beyond the first 5."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/minimax/h3-lite/reference-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "MiniMax H3 Lite Reference to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 7000
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5,
+            "minimum": 4,
+            "maximum": 15
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "768P"
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Reference image URLs",
+            "maxItems": 9
+          },
+          "video_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Reference video URLs",
+            "maxItems": 3
+          },
+          "audio_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Reference audio URLs",
+            "maxItems": 3
+          },
+          "aspect_ratio": {
+            "enum": [
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "16:9"
+          }
+        },
+        "if": {
+          "required": [
+            "image_urls"
+          ],
+          "properties": {
+            "image_urls": {
+              "minItems": 1
+            }
+          }
+        },
+        "else": {
+          "if": {
+            "required": [
+              "video_urls"
+            ],
+            "properties": {
+              "video_urls": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "required": [
+              "audio_urls"
+            ],
+            "properties": {
+              "audio_urls": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "minimax/h3-lite/text-to-video",
+      "title": "MiniMax H3 Lite — Text to video API",
+      "summary": "MiniMax H3 Lite text to video: 480P or 768P clips of 4 to 15 s, cheaper and faster than MiniMax H3.",
+      "workflow": "text-to-video",
+      "family": "minimax-h3-lite",
+      "output": "video",
+      "capabilities": [
+        "text-to-video"
+      ],
+      "notes": [
+        "prompt is required (up to 7,000 characters). duration is 4 to 15 s (default 5). resolution: 480P or 768P (default).",
+        "Price (2026-11): $0.025/s at 480P and $0.04/s at 768P of output."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/minimax/h3-lite/text-to-video/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "MiniMax H3 Lite Text to Video",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 7000
+          },
+          "duration": {
+            "type": "integer",
+            "title": "Duration",
+            "default": 5,
+            "minimum": 4,
+            "maximum": 15
+          },
+          "resolution": {
+            "enum": [
+              "480P",
+              "768P"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "768P"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "auto",
+              "adaptive",
+              "21:9",
+              "16:9",
+              "4:3",
+              "1:1",
+              "3:4",
+              "9:16"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "16:9"
           }
         },
         "additionalProperties": false

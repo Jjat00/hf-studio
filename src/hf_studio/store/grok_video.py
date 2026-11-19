@@ -9,8 +9,10 @@ Fuentes (revisadas el 2026-10-17):
   opcional; el base edita un video con `video: {url}` (la duración sale del video). Precio por segundo
   `<modelo>|<RES>` + `|input:image` por imagen; la edición, `|720P` + `|input:video:default` por segundo del video.
 - APIMart `grok-imagine-1.5-video-ext` (canal no oficial; la tabla lo lista como `grok-imagine-1.5-video-apimart`):
-  https://docs.apimart.ai/en/api-reference/videos/grok-imagine/generation.md. 6–15 s, 480p/720p, `size`
-  16:9|9:16|1:1|3:2|2:3 sin imágenes (con imágenes el formato sale de ellas), hasta 7 imágenes.
+  https://docs.apimart.ai/en/api-reference/videos/grok-imagine/generation.md (revisada el 2026-11-19). 1–15 s,
+  480p/720p/1080p, `size` 16:9|9:16|1:1|4:3|3:4|3:2|2:3. `image_urls` son siempre referencias, aunque sea una sola;
+  el primer fotograma va en `image_with_roles` (`first_frame`, `reference_image`). 1080p solo sin imágenes o con un
+  único primer fotograma. Con imágenes se mantiene que el formato sale de ellas (`auto`), como antes.
 - KIE `grok-imagine/text-to-video` y `grok-imagine/image-to-video`:
   https://docs.kie.ai/market/grok-imagine/text-to-video.md e image-to-video.md. 6–30 s (texto en número, imagen en
   texto), 480p/720p/1080p, `mode` fun|normal|spicy (spicy no con imágenes externas), `aspect_ratio`
@@ -39,7 +41,8 @@ DOCS = "https://docs.apimart.ai/en/api-reference/videos/grok-imagine/official"
 RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"]
 KIE_RATIOS = {"1:1", "16:9", "9:16", "3:2", "2:3"}  # grok-imagine base: sin auto
 KIE_15_RATIOS = {"auto", "1:1", "16:9", "9:16", "3:2", "2:3"}
-EXT_RATIOS = {"16:9", "9:16", "1:1", "3:2", "2:3"}
+EXT_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3"}
+EXT_MAX_REFS = 14
 EXT = "grok-imagine-1.5-video-ext"
 AUDIO_NOTE = "Videos come with generated audio (spoken dialogue from the prompt); it cannot be turned off."
 
@@ -124,17 +127,39 @@ def _edit_price(i: dict, h: dict, p: dict) -> float | None:
     return None if seconds is None or None in rate else round((rate[0] + rate[1]) * seconds, 4)
 
 
-def _ext(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
-    """Canal no oficial: con imágenes el formato sale de la imagen; sin ellas `size` es explícito (no hay auto)."""
+def ext_images(provider: str, out: dict[str, Any], first: str | None, refs: list[str]) -> dict[str, Any]:
+    """Canal ext de Grok 1.5: `image_urls` son siempre referencias, así que un primer fotograma va en
+    `image_with_roles` (con las referencias como `reference_image`, porque no se combinan). 1080p solo admite texto o
+    un único primer fotograma; con imágenes el formato sale de ellas (`auto`) y sin ellas `size` es explícito."""
     ratio = out.pop("aspect_ratio", "auto")
-    if out.get("image_urls"):
+    out.pop("image_urls", None)
+    if len(refs) > EXT_MAX_REFS:
+        raise unsupported(provider, f"APIMart's ext channel accepts at most {EXT_MAX_REFS} reference images")
+    if out.get("resolution") == "1080p" and refs:
+        raise unsupported(
+            provider, "APIMart's ext channel makes 1080p only from text or a single first frame"
+        )
+    if first:
+        out["image_with_roles"] = [{"url": first, "role": "first_frame"}] + [
+            {"url": u, "role": "reference_image"} for u in refs
+        ]
+    elif refs:
+        out["image_urls"] = refs
+    if first or refs:
         if ratio != "auto":
-            raise unsupported("apimart", "APIMart's ext channel takes the aspect ratio from the image")
+            raise unsupported(provider, "APIMart's ext channel takes the aspect ratio from the image")
     elif ratio not in EXT_RATIOS:
-        raise unsupported("apimart", f"APIMart's ext channel has no aspect ratio {ratio!r}")
+        raise unsupported(provider, f"APIMart's ext channel has no aspect ratio {ratio!r}")
     else:
         out["size"] = ratio
     return out
+
+
+def _ext(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    """Imagen a video del modelo de tienda: una imagen se anima (primer fotograma); varias son referencias."""
+    images = list(source.get("image_urls") or [])
+    first, refs = (images[0], []) if len(images) == 1 else (None, images)
+    return ext_images("apimart", out, first, refs)
 
 
 def _kie_images(ratios: set[str]):
@@ -178,7 +203,7 @@ def apimart() -> dict[str, Route | tuple[Route, ...]]:
             Route(
                 p, EXT,
                 Spec(p, EXT, keep=("prompt", "duration", "resolution", "aspect_ratio", "image_urls"),
-                     allowed={"duration": range(6, 16), "resolution": {"480p", "720p"}}, build=_ext),
+                     allowed={"duration": range(1, 16)}, build=_ext),
                 lambda i, h, pr: per_second(
                     pr, f"grok-imagine-1.5-video-apimart|{str(i.get('resolution', '480p')).upper()}", i.get("duration")
                 ),
