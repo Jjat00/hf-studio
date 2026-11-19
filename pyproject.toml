@@ -25,6 +25,7 @@ dependencies = [
     "python-multipart>=0.0.32",
     "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.0.54",
+    "tzdata>=2026.6 ; sys_platform == 'win32'",
     "uvicorn[standard]>=0.53.0",
 ]
 
