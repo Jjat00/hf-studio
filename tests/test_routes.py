@@ -70,6 +70,8 @@ def chosen(model_id: str, *extra: str) -> frozenset:
 UNPRICED = {
     ("apimart", "microsoft/mai-image-2.6/text-to-image"), ("apimart", "microsoft/mai-image-2.6/edit"),
     ("apimart", "microsoft/mai-image-2.6-flash/text-to-image"), ("apimart", "microsoft/mai-image-2.6-flash/edit"),
+    ("apimart", "microsoft/mai-image-2.7/text-to-image"), ("apimart", "microsoft/mai-image-2.7/edit"),
+    ("apimart", "microsoft/mai-image-2.7-flash/text-to-image"), ("apimart", "microsoft/mai-image-2.7-flash/edit"),
     ("apimart", "bytedance/seedream-5.5/edit"), ("apimart", "bytedance/seedream-5.5/layer-decomposition"),
     ("kie", "bytedance/seedream-5.5/layer-decomposition"),
     ("apimart", "minimax/h3-image/text-to-image"), ("apimart", "minimax/h3-image/edit"),
@@ -170,18 +172,31 @@ def test_explicit_choices_without_equivalent_exclude_the_provider():
 
 
 def test_grok_ext_channel_keeps_the_request_exact():
-    """Canal -ext de APIMart: 6 a 15 s, 480p o 720p, y formato explícito sin imágenes o el de la imagen."""
+    """Canal -ext de APIMart: `image_url` es el primer fotograma (`image_with_roles`), `image_urls` las referencias,
+    1080p solo sin referencias y formato explícito sin imágenes o el de la imagen."""
     mid = "xai/grok-imagine-video/v1.5/reference-to-video"
     route = route_of("apimart", mid, "grok-imagine-1.5-video-ext")
     assert route.official is False
     base = {**sample(mid), "duration": 6}
     out = route.translate({**base, "aspect_ratio": "9:16"}, chosen(mid, "duration", "aspect_ratio"))
     assert out["size"] == "9:16" and "aspect_ratio" not in out and "image_urls" not in out
-    with_image = {**base, "image_url": "https://cdn.test/a.png"}
-    out = route.translate(with_image, chosen(mid, "duration", "image_url"))
-    assert out["image_urls"] == ["https://cdn.test/a.png"] and "size" not in out
-    for bad in ({**base}, {**with_image, "aspect_ratio": "16:9"}, {**base, "duration": 5, "aspect_ratio": "1:1"},
-                {**base, "resolution": "1080p", "aspect_ratio": "1:1"}, {**base, "aspect_ratio": "4:3"}):  # fmt: skip
+    with_image = {**base, "image_url": "https://cdn.test/a.png", "resolution": "1080p"}
+    out = route.translate(with_image, chosen(mid, "duration", "image_url", "resolution"))
+    assert out["image_with_roles"] == [{"url": "https://cdn.test/a.png", "role": "first_frame"}]
+    assert "image_urls" not in out and "image_url" not in out and "size" not in out
+    refs = {**base, "image_urls": ["https://cdn.test/b.png"]}
+    assert route.translate(refs, chosen(mid, "duration", "image_urls"))["image_urls"] == [
+        "https://cdn.test/b.png"
+    ]
+    both = route.translate(
+        {**refs, "image_url": "https://cdn.test/a.png"}, chosen(mid, "image_url", "image_urls")
+    )
+    assert [r["role"] for r in both["image_with_roles"]] == ["first_frame", "reference_image"]
+    assert (
+        route.translate({**base, "duration": 2, "aspect_ratio": "4:3"}, chosen(mid, "duration"))["size"]
+        == "4:3"
+    )
+    for bad in ({**base}, {**with_image, "aspect_ratio": "16:9"}, {**refs, "resolution": "1080p"}):
         with pytest.raises(ProviderError) as info:
             route.translate(bad, chosen(mid, *bad))
         assert info.value.kind == "unsupported"

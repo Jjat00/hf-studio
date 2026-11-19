@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from hf_studio.catalog import get_catalog
 from hf_studio.providers import ProviderError
 from hf_studio.providers.apimart import APIMartProvider
 from hf_studio.providers.registry import PROVIDERS
@@ -15,6 +16,10 @@ from tests.test_routes import FIXTURES
 
 PRICES = {p: json.loads((FIXTURES / f"prices_{p}.json").read_text()) for p in ("apimart", "kie")}
 SCHEMAS = {m["id"]: m["input_schema"] for m in seedream.MODELS}
+PRO = "bytedance/seedream/v5.0/pro"  # Seedream 5.0 Pro: modelo de Higgsfield con rutas de tienda
+SCHEMAS.update(
+    {f"{PRO}/{m}": get_catalog().get(f"{PRO}/{m}")["input_schema"] for m in ("text-to-image", "edit")}
+)
 IMG = ["https://cdn.test/a.png", "https://cdn.test/b.png"]
 
 
@@ -36,8 +41,8 @@ def unsupported(provider: str, model_id: str, **fields) -> None:
 
 
 def test_every_version_and_mode_is_listed():
-    assert sorted(SCHEMAS) == sorted(
-        [f"bytedance/seedream-{v}/{m}" for v in ("4.0", "4.5", "5.0-lite", "5.0-flash", "5.0-pro", "5.5")
+    assert sorted(m["id"] for m in seedream.MODELS) == sorted(
+        [f"bytedance/seedream-{v}/{m}" for v in ("4.0", "4.5", "5.0-lite", "5.0-flash", "5.5")
          for m in ("text-to-image", "edit")]
         + ["bytedance/seedream-3.0/text-to-image", "bytedance/seedream-5.5/layer-decomposition"]
     )  # fmt: skip
@@ -104,23 +109,32 @@ def test_seedream_4_5_and_lite_map_resolution_to_kie_quality():
     unsupported("apimart", "bytedance/seedream-5.0-lite/text-to-image", aspect_ratio="9:21")
 
 
+def test_seedream_5_pro_is_higgsfields_model_with_store_routes():
+    """Higgsfield lo vende desde 2026-11-19: su id es el lógico, las tiendas son rutas y el id viejo es un alias."""
+    from hf_studio.catalog import ALIASES
+
+    for mode in ("text-to-image", "edit"):
+        mid = f"{PRO}/{mode}"
+        assert not get_catalog().get(mid).get("store")
+        assert ALIASES[seedream.store_id("5.0-pro", mode)] == mid
+        assert get_catalog().get(seedream.store_id("5.0-pro", mode))["id"] == mid
+        for provider in ("apimart", "kie"):
+            assert routes_for(PROVIDERS[provider].routes(), mid)
+    # auto en texto a imagen solo lo hace Higgsfield
+    unsupported("apimart", f"{PRO}/text-to-image", aspect_ratio="auto")
+    unsupported("kie", f"{PRO}/text-to-image", aspect_ratio="auto")
+
+
 def test_seedream_5_pro_prices_by_tier_and_extra_references():
-    mid = "bytedance/seedream-5.0-pro/edit"
+    mid = f"{PRO}/edit"
     _, body, usd = run("kie", mid, image_urls=IMG, resolution="2k")
-    assert body == {"prompt": "a fox", "aspect_ratio": "1:1", "quality": "high", "output_format": "jpeg",
-                    "image_urls": IMG}  # fmt: skip
+    assert body == {"prompt": "a fox", "aspect_ratio": "1:1", "quality": "high", "image_urls": IMG}
     assert usd == round(0.07 + 0.0025, 4)  # la segunda referencia tiene recargo
     assert run("apimart", mid, image_urls=IMG[:1], resolution="1.5k")[1:] == (
-        {
-            "prompt": "a fox",
-            "size": "1:1",
-            "resolution": "1.5K",
-            "output_format": "jpeg",
-            "image_urls": IMG[:1],
-        },
-        0.0293,  # 1.5K cuesta como 1K
+        {"prompt": "a fox", "size": "1:1", "resolution": "1.5K", "image_urls": IMG[:1]},
+        0.036,  # 1.5K cuesta como 1K
     )
-    assert run("apimart", mid, image_urls=IMG[:1], resolution="2k")[2] == 0.0585
+    assert run("apimart", mid, image_urls=IMG[:1], resolution="2k")[2] == 0.072
     assert run("apimart", mid, image_urls=IMG)[2] is None  # recargo por referencia sin importe publicado
     unsupported("kie", mid, image_urls=IMG, resolution="1.5k")
 
@@ -143,7 +157,7 @@ def test_seedream_5_flash_sends_kie_size():
             "output_format": "jpeg",
             "image_urls": IMG[:1],
         },
-        0.0137,
+        0.0144,
     )
     unsupported("apimart", "bytedance/seedream-5.0-flash/text-to-image", aspect_ratio="auto")
 
@@ -153,7 +167,7 @@ def test_apimart_reference_surcharge_leaves_the_price_unknown():
     from tests.test_routes import _prices
 
     prices = _prices("apimart")
-    for mid in ("bytedance/seedream-5.0-pro/edit", "bytedance/seedream-5.0-flash/edit"):
+    for mid in (f"{PRO}/edit", "bytedance/seedream-5.0-flash/edit"):
         route = apimart()[mid]
         one = {"prompt": "p", "image_urls": ["https://cdn.test/a.png"]}
         two = {**one, "image_urls": ["https://cdn.test/a.png", "https://cdn.test/b.png"]}
@@ -167,9 +181,9 @@ def test_seedream_5_5_text_to_image_on_both_stores():
         "seedream-5-5",
         {"prompt": "a fox", "size": "2:1", "resolution": "1.5K", "output_format": "png",
          "background": "transparent"},
-        0.013,  # 1.5K cuesta como 1K
+        0.016,  # 1.5K cuesta como 1K
     )  # fmt: skip
-    assert run("apimart", mid)[2] == 0.0227  # 2K por defecto (0.02275 redondeado)
+    assert run("apimart", mid)[2] == 0.028  # 2K por defecto
     assert run("kie", mid, aspect_ratio="21:9", resolution="1k") == (
         "seedream/5-5-text-to-image",
         {

@@ -36,6 +36,10 @@ Fuentes (revisadas el 2026-10-17; 5.5 el 2026-11-11):
   Ambas devuelven la base primero y luego las capas como URLs, que el worker guarda como salidas; los
   metadatos de cada capa (posición, nombre, OCR) se pierden, por eso no se ofrece `text_recognition`.
 
+Seedream 5.0 Pro ya no es modelo de tienda: Higgsfield lo vende desde 2026-11-19
+(`bytedance/seedream/v5.0/pro/{text-to-image,edit}`, sin `output_format` ni 2:1/1:2) y las rutas de 5.0 Pro de
+aquí se cuelgan de esos ids. Con su esquema, `auto` en texto a imagen y 1.5k solo van por Higgsfield o APIMart.
+
 Fuera a propósito: la generación en serie (`n`/`max_images`, que da un conjunto y no N variantes), la
 descomposición en capas de 5.0 y el fondo transparente de 5.0 Pro/Flash. En 5.5 el fondo sí está: ambas
 tiendas lo aceptan igual.
@@ -121,7 +125,19 @@ KIE_QUALITY = {
 }
 
 
+# Seedream 5.0 Pro también lo vende Higgsfield (desde 2026-11-19): su id es el modelo lógico y las tiendas son rutas
+# más baratas de él. El id de tienda anterior queda como alias en `catalog.ALIASES`.
+HIGGSFIELD = {"5.0-pro": "bytedance/seedream/v5.0/pro"}
+
+
 def _id(version: str, mode: str) -> str:
+    if version in HIGGSFIELD:
+        return f"{HIGGSFIELD[version]}/{mode}"
+    return f"bytedance/seedream-{version}/{mode}"
+
+
+def store_id(version: str, mode: str) -> str:
+    """El id de tienda de una versión, aunque hoy sea de Higgsfield (para los alias)."""
     return f"bytedance/seedream-{version}/{mode}"
 
 
@@ -132,6 +148,8 @@ def _modes(v: Version) -> tuple[str, ...]:
 def _models() -> list[dict[str, Any]]:
     found = []
     for v in VERSIONS.values():
+        if v.key in HIGGSFIELD:  # el modelo lo describe el catálogo de Higgsfield
+            continue
         for mode in _modes(v):
             ratios = list(v.ratios) + (["auto"] if mode == "edit" else [])
             if mode != "edit":
@@ -189,9 +207,6 @@ def _models() -> list[dict[str, Any]]:
             if v.charges_inputs and mode == "edit":
                 notes.append("Every input image is charged on top of the output, the first one included. APIMart "
                              "does not publish that charge, so its price for edits is unknown.")  # fmt: skip
-            if v.key == "5.0-pro":
-                notes.append("1.5k only runs on APIMart (same price as 1k). Each reference after the first adds a "
-                             "small charge on KIE.")  # fmt: skip
             found.append(
                 model(
                     _id(v.key, mode),

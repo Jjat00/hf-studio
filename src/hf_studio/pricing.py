@@ -26,6 +26,9 @@ MONEY = r"\$(\d+(?:\.\d+)?)"  # sin el punto final de la frase
 RESTYLE = "higgsfield/genjutsu/restyle/v1.0"
 RESTYLE_MAX_SECONDS = 30  # Restyle recorta el video de origen a sus primeros 30 s (y cobra solo esos)
 GENJUTSU_LIGHT_MAX_SECONDS = 15  # Genjutsu Light usa solo los primeros 15 s del video de origen
+MINIMAX_MAX_PREPARED_SECONDS = (
+    14.8  # MiniMax H3 Lite/Highspeed preparan los videos de referencia a 14,8 s en total
+)
 
 
 def _media_kind(key: str) -> str | None:
@@ -311,6 +314,33 @@ def approximate(
             "basis": f"{seconds:g}s × ${m.group(1)}/s + {extra} extra refs × ${m.group(3)}",
             "missing": [],
         }
+
+    # D2) MiniMax H3 Lite y Highspeed reference-to-video (a 2026-11): «480P: $0.025 per second of output video and
+    # prepared input video. 768P: $0.04 per second of output video and prepared input video. The first 5 reference
+    # images are included; each additional image costs $0.02». Los videos se preparan a 14,8 s en total como mucho
+    # (pueden recortarse o alargarse): se cotiza la duración medida con ese tope.
+    if m := re.search(
+        r"The first (\d+) reference images are included; each additional image costs " + MONEY, text
+    ):
+        rates = {
+            r.lower(): float(v)
+            for r, v in re.findall(r"(\d+P): " + MONEY + r" per second of output video", text)
+        }
+        if res in rates:
+            extra = max(0, len(args.get("image_urls") or []) - int(m.group(1)))
+            billable, basis = seconds, f"{seconds:g}s"
+            if has_video_input:
+                if input_secs is None:
+                    missing.append("input video duration")
+                else:
+                    prepared = min(float(input_secs), MINIMAX_MAX_PREPARED_SECONDS)
+                    billable += prepared
+                    basis = f"({seconds:g}s + {prepared:g}s of input video)"
+            return {
+                "usd": billable * rates[res] + extra * float(m.group(2)),
+                "basis": f"{basis} × ${rates[res]:g}/s at {res} + {extra} extra refs × ${m.group(2)}",
+                "missing": missing,
+            }
 
     # E) Imagen por tokens (Marketing Studio 2.5): tarifa publicada por millón de tokens. El uso real se conoce
     # al terminar, pero la imagen de salida domina y depende de la calidad y la resolución: se cotiza por lo alto.

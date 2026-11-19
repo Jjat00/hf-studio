@@ -90,7 +90,10 @@ def test_v15_text_to_video_channels():
                                       "size": "16:9"}  # fmt: skip
     assert ext.price(logical, {}, PRICES["apimart"]) == pytest.approx(0.01912 * 8, abs=1e-3)
     unsupported(ext, {**logical, "aspect_ratio": "auto"})  # sin imágenes, `size` explícito
-    unsupported(ext, {**logical, "duration": 5})  # mínimo 6 s
+    # Doc del 2026-11-19: de 1 a 15 s y también 1080p sin imágenes
+    hd = {**logical, "duration": 5, "resolution": "1080p"}
+    assert ext.translate(hd)["resolution"] == "1080p"
+    assert ext.price(hd, {}, PRICES["apimart"]) == pytest.approx(0.05736 * 5, abs=1e-3)
     kie = KIE[f"{V15}/text-to-video"]
     assert kie.model == "grok-imagine-video-1-5-preview" and not kie.official
     assert kie.price(logical, {}, PRICES["kie"]) == pytest.approx(0.0225 * 8)
@@ -107,7 +110,13 @@ def test_v15_image_to_video_channels():
     assert official.price(logical, {}, PRICES["apimart"]) == pytest.approx(0.064 * 8 + 0.008 * 2)
     ext = channel(f"{V15}/image-to-video", "grok-imagine-1.5-video-ext")
     assert "size" not in ext.translate(logical)  # el formato sale de las imágenes
+    assert ext.translate(logical)["image_urls"] == [IMG, IMG2]  # varias imágenes son referencias
     unsupported(ext, {**logical, "aspect_ratio": "1:1"})
+    unsupported(ext, {**logical, "resolution": "1080p"})  # 1080p no admite referencias
+    # Una sola imagen se anima: en el canal ext va como primer fotograma (sus `image_urls` son referencias)
+    one = {**logical, "image_urls": [IMG], "resolution": "1080p"}
+    out = ext.translate(one)
+    assert out["image_with_roles"] == [{"url": IMG, "role": "first_frame"}] and "image_urls" not in out
     kie = KIE[f"{V15}/image-to-video"]
     assert kie.translate(logical) == {"prompt": "a fox in the snow", "image_urls": [IMG, IMG2], "duration": 8,
                                       "resolution": "480p", "aspect_ratio": "auto"}  # fmt: skip

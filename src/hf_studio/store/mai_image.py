@@ -1,4 +1,4 @@
-"""MAI Image 2.6 y 2.6 Flash (Microsoft) en APIMart. Higgsfield y KIE no los venden.
+"""MAI Image 2.6, 2.7 y sus Flash (Microsoft) en APIMart. Higgsfield y KIE no los venden.
 
 Fuentes (revisadas el 2026-11-11):
 - APIMart `mai-image-2.6` y `mai-image-2.6-flash`, `POST /v1/images/generations` (un mismo id para texto a imagen
@@ -11,6 +11,10 @@ Fuentes (revisadas el 2026-11-11):
   tiene precio (`None`) y la opción sale como «unavailable»: generar exige aceptar un costo desconocido.
   APIMart cobra por adelantado un importe por nivel y luego ajusta al consumo real, devolviendo o cobrando más; no
   es un tope, así que no se usa como `reserve`.
+
+- APIMart `mai-image-2.7` y `mai-image-2.7-flash` (revisados el 2026-11-19):
+  https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation.md. Igual que 2.6, pero sin `auto` ni
+  `web_grounding` (los dos dan 400), prompt hasta 20000 y un 2K mayor (1:1 de 2048 px). También por tokens.
 
 Fuera a propósito: el tamaño exacto en píxeles (`width`/`height` o `size` como `1536x1024`) y las relaciones fuera
 de la tabla de la documentación (admite cualquier relación entera de 1:4 a 4:1, pero solo publica los píxeles de
@@ -25,7 +29,10 @@ from ..providers.routes import Route, Spec
 from ._common import choice, model, prompt, upper, urls
 
 DOCS = "https://docs.apimart.ai/en/api-reference/images/mai-image-2.6/generation"
-TIERS = {"mai-image-2.6": "MAI Image 2.6", "mai-image-2.6-flash": "MAI Image 2.6 Flash"}
+TIERS = {"mai-image-2.6": "MAI Image 2.6", "mai-image-2.6-flash": "MAI Image 2.6 Flash",
+         "mai-image-2.7": "MAI Image 2.7", "mai-image-2.7-flash": "MAI Image 2.7 Flash"}  # fmt: skip
+# 2.7 rechaza `auto` y `web_grounding` (doc del 2026-11-19).
+GROUNDED = {"mai-image-2.6", "mai-image-2.6-flash"}
 RATIOS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21", "4:1", "1:4"]
 TOKENS = "Billed by tokens: the price is only known after generating."
 
@@ -35,14 +42,19 @@ def _models() -> list[dict[str, Any]]:
     for tier, label in TIERS.items():
         for mode, workflow in (("text-to-image", "Text to image"), ("edit", "Edit images")):
             edit = mode == "edit"
+            grounded = tier in GROUNDED
             properties: dict[str, Any] = {
-                "prompt": prompt(description="What to generate or, with images, what to change and combine."),
-                "web_grounding": {
+                "prompt": prompt(
+                    None if grounded else 20000,
+                    "What to generate or, with images, what to change and combine.",
+                ),
+            }
+            if grounded:
+                properties["web_grounding"] = {
                     "type": "boolean",
                     "default": False,
                     "description": "Look up current information first (real people, places or events).",
-                },
-            }
+                }
             required = ["prompt"]
             if edit:
                 properties["image_urls"] = urls(
@@ -51,12 +63,16 @@ def _models() -> list[dict[str, Any]]:
                 required.append("image_urls")
             else:
                 properties["aspect_ratio"] = choice(
-                    [*RATIOS, "auto"],
+                    [*RATIOS, "auto"] if grounded else RATIOS,
                     "1:1",
-                    "Output aspect ratio; auto lets the model choose it from the prompt.",
+                    "Output aspect ratio; auto lets the model choose it from the prompt."
+                    if grounded
+                    else "Output aspect ratio.",
                 )
                 properties["resolution"] = choice(
-                    ["1k", "2k"], "1k", "Output size tier (1k square is 1024 px, 2k square 1536 px)."
+                    ["1k", "2k"],
+                    "1k",
+                    f"Output size tier (1k square is 1024 px, 2k square {1536 if grounded else 2048} px).",
                 )
             notes = [TOKENS, "Runs on APIMart only. One PNG image per request."]
             if tier.endswith("flash"):
@@ -71,7 +87,7 @@ def _models() -> list[dict[str, Any]]:
                     capabilities=["edit", "image-references"] if edit else ["text-to-image"],
                     properties=properties,
                     required=required,
-                    docs_url=DOCS,
+                    docs_url=DOCS if tier in GROUNDED else DOCS.replace("2.6", "2.7"),
                     notes=notes,
                 )
             )
@@ -90,7 +106,7 @@ def apimart() -> dict[str, Route]:
             edit = mode == "edit"
             spec = Spec(
                 provider, tier,
-                keep=("prompt", "web_grounding", "image_urls") if edit else ("prompt", "web_grounding"),
+                keep=("prompt", "web_grounding", "image_urls") if edit else ("prompt", "web_grounding"),  # 2.7 no lo tiene
                 rename={} if edit else {"aspect_ratio": "size"},
                 convert={} if edit else {"resolution": upper},
                 fixed={"n": 1},
