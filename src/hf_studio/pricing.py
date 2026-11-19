@@ -44,8 +44,15 @@ def _media_kind(key: str) -> str | None:
 def _branch_required(schema: dict, args: dict) -> set[str]:
     """Campos que exigen las ramas if/then/else que aplican a `args`, también anidadas (Seedance 2.5:
     si no hay imágenes, videos; si no hay videos, audios)."""
-    cond = set(schema.get("if", {}).get("required", []))
-    branch = schema.get("then" if cond and cond <= args.keys() else "else", {})
+    condition = schema.get("if", {})
+    cond = set(condition.get("required", []))
+    # La condición también puede pedir listas no vacías (MiniMax H3 Lite: `minItems` dentro del `if`).
+    filled = all(
+        len(args[key]) >= condition.get("properties", {}).get(key, {}).get("minItems", 0)
+        for key in cond & args.keys()
+        if isinstance(args[key], list)
+    )
+    branch = schema.get("then" if cond and cond <= args.keys() and filled else "else", {})
     return set(branch.get("required", [])) | (_branch_required(branch, args) if "if" in branch else set())
 
 
@@ -55,7 +62,10 @@ def fill_placeholders(schema: dict, args: dict) -> tuple[dict, list[str]]:
     required = set(schema.get("required", [])) | _branch_required(schema, args)
     filled = dict(args)
     added = []
-    for key in sorted(required - args.keys()):
+    missing = {
+        k for k in required if k not in args or args[k] == []
+    }  # una lista vacía obligatoria también falta
+    for key in sorted(missing):
         kind = _media_kind(key)
         if kind:
             url = PLACEHOLDER[kind]

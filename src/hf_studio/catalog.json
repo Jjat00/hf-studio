@@ -1912,9 +1912,13 @@
         },
         "additionalProperties": false
       },
-      "store_only_fields": [
-        "output_format"
-      ]
+      "store_only": {
+        "output_format": null,
+        "aspect_ratio": [
+          "2:1",
+          "1:2"
+        ]
+      }
     },
     {
       "id": "bytedance/seedream/v5.0/pro/text-to-image",
@@ -1986,9 +1990,13 @@
         },
         "additionalProperties": false
       },
-      "store_only_fields": [
-        "output_format"
-      ]
+      "store_only": {
+        "output_format": null,
+        "aspect_ratio": [
+          "2:1",
+          "1:2"
+        ]
+      }
     },
     {
       "id": "higgsfield-ai/soul/cinema",

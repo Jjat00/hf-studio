@@ -263,7 +263,9 @@ def test_old_seedream_5_pro_requests_still_run_on_the_stores():
     assert get_catalog().validate(old, {**saved, "aspect_ratio": "1:1", "output_format": "jpeg"}) == []
     route = routes_for(PROVIDERS["apimart"].routes(), f"{PRO}/text-to-image")[0]
     assert route.translate(saved)["output_format"] == "png"
-    assert get_catalog().get(f"{PRO}/text-to-image")["store_only_fields"] == ["output_format"]
+    assert get_catalog().get(f"{PRO}/text-to-image")["store_only"] == {
+        "output_format": None, "aspect_ratio": ["2:1", "1:2"],
+    }  # fmt: skip
 
 
 async def test_higgsfield_is_left_out_when_a_store_only_field_is_set(env):  # noqa: F811
@@ -274,6 +276,14 @@ async def test_higgsfield_is_left_out_when_a_store_only_field_is_set(env):  # no
     })).json()  # fmt: skip
     assert "higgsfield" not in {o["provider"] for o in body["options"]}
     assert any("output_format" in e["reason"] for e in body["excluded"] if e["provider"] == "higgsfield")
+    # Una relación que solo hacen las tiendas, sin output_format: tampoco queda Higgsfield como opción sin precio
+    for mode in ("text-to-image", "edit"):
+        extra = {"image_urls": IMG[:1]} if mode == "edit" else {}
+        wide = (await http.post("/v1/estimate", json={
+            "model": f"{PRO}/{mode}", "input": {"prompt": "a fox", "aspect_ratio": "1:2", **extra},
+        })).json()  # fmt: skip
+        assert "higgsfield" not in {o["provider"] for o in wide["options"]}
+        assert any("aspect_ratio" in e["reason"] for e in wide["excluded"] if e["provider"] == "higgsfield")
     plain = (await http.post("/v1/estimate", json={
         "model": f"{PRO}/text-to-image", "input": {"prompt": "a fox"},
     })).json()  # fmt: skip

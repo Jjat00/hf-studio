@@ -271,11 +271,15 @@ class Router:
                     {**info, "model": model["id"], "reason": "Higgsfield does not offer this model"}
                 )
                 return []
-            # Campos que solo hacen las tiendas (p. ej. `output_format` de Seedream 5.0 Pro, que era de tienda): si
-            # vienen, Higgsfield no reproduce el pedido aunque su /estimate los acepte.
-            if store_only := [k for k in model.get("store_only_fields", ()) if arguments.get(k) is not None]:
+            # Campos o valores que solo hacen las tiendas (`store_only`: campo → valores, o None para cualquiera; p. ej.
+            # `output_format` y 2:1 de Seedream 5.0 Pro, que era de tienda): Higgsfield no reproduce el pedido aunque
+            # su /estimate lo acepte, y su rechazo de un valor llega como «sin precio», no como error.
+            if store_only := [
+                k for k, values in (model.get("store_only") or {}).items()
+                if arguments.get(k) is not None and (values is None or arguments[k] in values)
+            ]:  # fmt: skip
                 excluded.append({**info, "model": model["id"],
-                                 "reason": f"{', '.join(store_only)} only runs on APIMart or KIE"})  # fmt: skip
+                                 "reason": f"{', '.join(store_only)} only runs on APIMart or KIE here"})  # fmt: skip
                 return []
             # Un plan guardado puede traer el id viejo de un modelo renombrado: es el mismo canal.
             if route is not None and ALIASES.get(route, route) != model["id"]:

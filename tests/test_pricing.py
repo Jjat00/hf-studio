@@ -321,3 +321,15 @@ def test_minimax_h3_lite_references_add_input_seconds_and_extra_images():
     assert approximate(H3_LITE, video, {})["missing"] == ["input video duration"]
     assert approximate(H3_LITE, video, {"input_video_seconds": 4})["usd"] == (10 + 4) * 0.025
     assert approximate(H3_LITE, video, {"input_video_seconds": 30})["usd"] == (10 + 14.8) * 0.025
+
+
+def test_placeholders_fill_an_empty_required_list_of_an_if_branch():
+    """MiniMax H3 Lite: el `if` exige una lista no vacía; una lista vacía cuenta como ausente al cotizar."""
+    from hf_studio.catalog import get_catalog
+
+    schema = get_catalog().get("minimax/h3-lite/reference-to-video")["input_schema"]
+    for args in ({"prompt": "x", "image_urls": []}, {"prompt": "x", "video_urls": []}, {"prompt": "x"}):
+        filled, added = fill_placeholders(schema, args)
+        assert added and get_catalog().validate("minimax/h3-lite/reference-to-video", filled) == []
+    real = {"prompt": "x", "image_urls": ["https://x/a.png"], "video_urls": []}
+    assert fill_placeholders(schema, real) == (real, [])
