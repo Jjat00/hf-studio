@@ -156,6 +156,23 @@ async def test_skill_card_for_the_gallery(env):  # noqa: F811
     assert shown.json()["card"]["showcase"] == ["gen-1", "gen-2"]
     shown = await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-1"]})
     assert shown.json()["card"] == {"summary": "x", "examples": ["a"], "showcase": ["gen-2"]}
+    # Ficha y muestras viven aparte: editar una no pisa la otra.
+    await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"summary": "z"}},
+    )
+    shown = await http.post("/v1/skills/ads-ugc/showcase", json={"add": ["gen-3"]})
+    assert shown.json()["card"] == {"summary": "z", "showcase": ["gen-2", "gen-3"]}
+    await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-3"]})
+    await http.put(
+        "/v1/skills/ads-ugc",
+        json={
+            "slug": "ads-ugc",
+            "description": "O",
+            "body": "P",
+            "card": {"summary": "x", "examples": ["a"]},
+        },
+    )
     over = await http.post("/v1/skills/ads-ugc/showcase", json={"add": [f"g{i}" for i in range(6)]})
     assert over.json()["error"]["code"] == "too_many_showcase"
     bad = await http.put(

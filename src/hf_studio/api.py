@@ -2400,6 +2400,7 @@ def create_app(
     # --- Skills de Supercomputer -------------------------------------------------------------------
 
     cards_filled = False
+    showcase_lock = asyncio.Lock()
 
     async def fill_cards(session: AsyncSession) -> None:
         """Una vez por arranque: las skills incluidas instaladas antes de las fichas reciben la suya si no tienen."""
@@ -2474,8 +2475,15 @@ def create_app(
             if body.card is not None
             else skill_files.parse_card(body.skill_md or "")
         )
+        showcase = card.pop("showcase", [])
         skill = Skill(
-            slug=slug, description=description, body=text_, files=files, card=card, created_by=owner.id
+            slug=slug,
+            description=description,
+            body=text_,
+            files=files,
+            card=card,
+            showcase=showcase,
+            created_by=owner.id,
         )
         session.add(skill)
         await session.commit()
@@ -2492,8 +2500,9 @@ def create_app(
             skill.files = skill_files.check_files(body.files)
         if body.card is not None:
             card = skill_files.check_card(body.card)
-            if "showcase" not in body.card and (skill.card or {}).get("showcase"):
-                card["showcase"] = skill.card["showcase"]  # el editor no las toca: se conservan las vigentes
+            showcase = card.pop("showcase", [])
+            if "showcase" in body.card:  # sin la clave (el editor), las muestras no se tocan
+                skill.showcase = showcase
             skill.card = card
         await session.commit()
         return skill.out()
@@ -2502,12 +2511,13 @@ def create_app(
     async def change_showcase(slug: str, body: ShowcaseIn, session: Session, _: Owner) -> dict:
         """Añade o quita generaciones de muestra de la ficha sin tocar nada más de la skill (el cambio se aplica
         sobre las muestras guardadas, así dos cambios seguidos no se pisan)."""
-        skill = await get_skill_or_404(session, slug)
-        card = dict(skill.card or {})
-        ids = [x for x in card.get("showcase", []) if x not in body.remove]
-        ids += [x for x in body.add if x not in ids]
-        skill.card = skill_files.check_card({**card, "showcase": ids})
-        await session.commit()
+        async with showcase_lock:  # el servidor es un solo proceso: los cambios de muestras van de uno en uno
+            skill = await get_skill_or_404(session, slug)
+            await session.refresh(skill, ["showcase"])
+            ids = [x for x in (skill.showcase or []) if x not in body.remove]
+            ids += [x for x in body.add if x not in ids]
+            skill.showcase = skill_files.check_card({"showcase": ids}).get("showcase", [])
+            await session.commit()
         return skill.out(False)
 
     @app.get("/v1/skills/{slug}/files/{path:path}", tags=["supercomputer"])
