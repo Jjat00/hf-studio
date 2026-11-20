@@ -258,7 +258,8 @@ export function SkillLibrary() {
     queue.current = queue.current
       .then(async () => {
         const saved = await studio.skillShowcase(slug, change);
-        setSkills((prev) => prev?.map((x) => (x.slug === slug ? { ...x, card: saved.card } : x)) ?? null);
+        // Solo se cambian las muestras: el resto de la ficha local puede ser más nuevo (una edición guardada mientras).
+        setSkills((prev) => prev?.map((x) => (x.slug === slug ? { ...x, card: { ...x.card, showcase: saved.showcase } } : x)) ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSaving((n) => n - 1));

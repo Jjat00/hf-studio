@@ -153,16 +153,25 @@ async def test_skill_card_for_the_gallery(env):  # noqa: F811
         "/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "O", "body": "P", "card": card}
     )
     shown = await http.post("/v1/skills/ads-ugc/showcase", json={"add": ["gen-2", "gen-1"], "remove": []})
-    assert shown.json()["card"]["showcase"] == ["gen-1", "gen-2"]
+    assert shown.json() == {"slug": "ads-ugc", "showcase": ["gen-1", "gen-2"]}
     shown = await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-1"]})
-    assert shown.json()["card"] == {"summary": "x", "examples": ["a"], "showcase": ["gen-2"]}
+    assert shown.json()["showcase"] == ["gen-2"]
+    assert (await http.get("/v1/skills/ads-ugc")).json()["card"] == {
+        "summary": "x",
+        "examples": ["a"],
+        "showcase": ["gen-2"],
+    }
     # Ficha y muestras viven aparte: editar una no pisa la otra.
     await http.put(
         "/v1/skills/ads-ugc",
         json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"summary": "z"}},
     )
     shown = await http.post("/v1/skills/ads-ugc/showcase", json={"add": ["gen-3"]})
-    assert shown.json()["card"] == {"summary": "z", "showcase": ["gen-2", "gen-3"]}
+    assert shown.json()["showcase"] == ["gen-2", "gen-3"]
+    assert (await http.get("/v1/skills/ads-ugc")).json()["card"] == {
+        "summary": "z",
+        "showcase": ["gen-2", "gen-3"],
+    }
     await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-3"]})
     await http.put(
         "/v1/skills/ads-ugc",

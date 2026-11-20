@@ -2518,7 +2518,8 @@ def create_app(
             ids += [x for x in body.add if x not in ids]
             skill.showcase = skill_files.check_card({"showcase": ids}).get("showcase", [])
             await session.commit()
-        return skill.out(False)
+            # Solo las muestras: el resto de la ficha de este objeto puede ser anterior a una edición simultánea.
+            return {"slug": skill.slug, "showcase": list(skill.showcase or [])}
 
     @app.get("/v1/skills/{slug}/files/{path:path}", tags=["supercomputer"])
     async def get_skill_file(slug: str, path: str, session: Session, _: Owner) -> dict:
