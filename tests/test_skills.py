@@ -152,13 +152,19 @@ async def test_skill_card_for_the_gallery(env):  # noqa: F811
     await http.put(
         "/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "O", "body": "P", "card": card}
     )
+    shown = await http.post("/v1/skills/ads-ugc/showcase", json={"add": ["gen-2", "gen-1"], "remove": []})
+    assert shown.json()["card"]["showcase"] == ["gen-1", "gen-2"]
+    shown = await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-1"]})
+    assert shown.json()["card"] == {"summary": "x", "examples": ["a"], "showcase": ["gen-2"]}
+    over = await http.post("/v1/skills/ads-ugc/showcase", json={"add": [f"g{i}" for i in range(6)]})
+    assert over.json()["error"]["code"] == "too_many_showcase"
     bad = await http.put(
         "/v1/skills/ads-ugc",
         json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"category": "nada"}},
     )
     assert bad.json()["error"]["code"] == "invalid_category"
     listed = {s["slug"]: s for s in (await http.get("/v1/skills")).json()["skills"]}
-    assert listed["ads-ugc"]["card"]["showcase"] == ["gen-1"]
+    assert listed["ads-ugc"]["card"]["showcase"] == ["gen-2"]
     # Las incluidas traen su ficha.
     assert listed["tratamiento"]["card"]["summary"] and listed["tratamiento"]["card"]["examples"]
     # La ficha no llega al agente.

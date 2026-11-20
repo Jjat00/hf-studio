@@ -399,6 +399,11 @@ class RunApprove(BaseModel):
     )
 
 
+class ShowcaseIn(BaseModel):
+    add: list[str] = Field(default_factory=list, max_length=skill_files.MAX_SHOWCASE)
+    remove: list[str] = Field(default_factory=list, max_length=50)
+
+
 class SkillIn(BaseModel):
     slug: str | None = Field(None, max_length=64, description="Nombre con el que se llama: /slug")
     description: str | None = Field(None, max_length=skill_files.MAX_DESCRIPTION)
@@ -2492,6 +2497,18 @@ def create_app(
             skill.card = card
         await session.commit()
         return skill.out()
+
+    @app.post("/v1/skills/{slug}/showcase", tags=["supercomputer"])
+    async def change_showcase(slug: str, body: ShowcaseIn, session: Session, _: Owner) -> dict:
+        """Añade o quita generaciones de muestra de la ficha sin tocar nada más de la skill (el cambio se aplica
+        sobre las muestras guardadas, así dos cambios seguidos no se pisan)."""
+        skill = await get_skill_or_404(session, slug)
+        card = dict(skill.card or {})
+        ids = [x for x in card.get("showcase", []) if x not in body.remove]
+        ids += [x for x in body.add if x not in ids]
+        skill.card = skill_files.check_card({**card, "showcase": ids})
+        await session.commit()
+        return skill.out(False)
 
     @app.get("/v1/skills/{slug}/files/{path:path}", tags=["supercomputer"])
     async def get_skill_file(slug: str, path: str, session: Session, _: Owner) -> dict:

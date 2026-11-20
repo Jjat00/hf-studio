@@ -250,16 +250,14 @@ export function SkillLibrary() {
   }
 
   /** Cambia las generaciones de muestra de una skill (sin tocar el resto de su ficha). */
-  /** Cambia las muestras de una skill. Los cambios van en cola, uno detrás de otro, y cada uno se aplica sobre las
-   * muestras que hay en ese momento en el servidor: dos clics seguidos en «Quitar» no se pisan. */
-  function setShowcase(slug: string, change: (ids: string[]) => string[]) {
+  /** Añade o quita muestras de una skill. El servidor aplica cada cambio sobre las muestras guardadas y no toca
+   * nada más de la skill; la cola mantiene el orden de los clics. */
+  function setShowcase(slug: string, change: { add?: string[]; remove?: string[] }) {
     setError(null);
     setSaving((n) => n + 1);
     queue.current = queue.current
       .then(async () => {
-        const full = await studio.skill(slug);
-        const ids = [...new Set(change(full.card?.showcase ?? []))].slice(0, MAX_SHOWCASE);
-        const saved = await studio.updateSkill(slug, { slug: full.slug, description: full.description, body: full.body, card: { ...full.card, showcase: ids } });
+        const saved = await studio.skillShowcase(slug, change);
         setSkills((prev) => prev?.map((x) => (x.slug === slug ? { ...x, card: saved.card } : x)) ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
@@ -555,7 +553,7 @@ export function SkillLibrary() {
                           type="button"
                           aria-label={k.removeShowcase}
                           title={k.removeShowcase}
-                          onClick={() => setShowcase(current.slug, (ids) => ids.filter((x) => x !== id))}
+                          onClick={() => setShowcase(current.slug, { remove: [id] })}
                           className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white opacity-80 hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-lime"
                         >
                           <X className="size-3.5" />
@@ -597,7 +595,7 @@ export function SkillLibrary() {
             const added = picked.current;
             picked.current = [];
             setPicking(false);
-            if (added.length) setShowcase(current.slug, (ids) => [...ids, ...added]);
+            if (added.length) setShowcase(current.slug, { add: added });
           }}
         />
       )}

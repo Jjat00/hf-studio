@@ -434,6 +434,8 @@ export const studio = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  skillShowcase: (slug: string, change: { add?: string[]; remove?: string[] }) =>
+    call<SkillSummary>(`/v1/skills/${encodeURIComponent(slug)}/showcase`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) }),
   deleteSkill: (slug: string) => call<void>(`/v1/skills/${encodeURIComponent(slug)}`, { method: "DELETE" }),
   sendChat: async (id: string, body: ChatMessageBody, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) => {
     const res = await fetch(`${BASE}/v1/chats/${id}/messages`, {
