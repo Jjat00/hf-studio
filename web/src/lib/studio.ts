@@ -924,9 +924,13 @@ export type ProjectDocSummary = {
   updated_at: string;
 };
 export type ProjectDoc = ProjectDocSummary & { markdown: string };
-export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[] };
+export const SKILL_CATEGORIES = ["cine", "anuncios", "personajes", "producto", "video", "audio", "redes", "otros"] as const;
+export type SkillCategory = (typeof SKILL_CATEGORIES)[number];
+/** Ficha de la galería de /skills (no llega al agente): para qué sirve, categoría, pedidos y generaciones de muestra. */
+export type SkillCard = { summary?: string; category?: SkillCategory; examples?: string[]; showcase?: string[] };
+export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[]; card: SkillCard };
 export type Skill = SkillSummary & { body: string };
-export type SkillBody = ({ slug: string; description: string; body: string } | { skill_md: string }) & { files?: Record<string, string> };
+export type SkillBody = ({ slug: string; description: string; body: string } | { skill_md: string }) & { files?: Record<string, string>; card?: SkillCard };
 export type ChatQuestion = { id: string; question: string; options: { label: string; detail?: string }[] };
 export type ChatPart =
   | { type: "text"; text: string }

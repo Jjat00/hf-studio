@@ -1,4 +1,9 @@
 ---
+summary: Tráiler o teaser de una historia en tres actos de intensidad.
+category: cine
+examples:
+- Teaser de 30 s para mi serie de ciencia ficción
+- Tráiler de 90 s de un thriller en la selva
 name: trailer-teaser
 description: >-
   Estructura y propone un tráiler (60-150 s) o teaser (15-60 s) de un proyecto o idea: tres actos de intensidad creciente, título y un button final. Úsala cuando el usuario pida un tráiler, teaser, avance o promo de una historia.

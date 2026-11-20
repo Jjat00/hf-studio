@@ -1,4 +1,9 @@
 ---
+summary: Aterriza una idea vaga en un tratamiento de director y el brief del proyecto.
+category: cine
+examples:
+- Tengo la idea de un corto sobre un abuelo y su nieto, aterrízala
+- Tratamiento para un anuncio de café colombiano
 name: tratamiento
 description: >-
   Escribe el tratamiento de director de un proyecto (logline, historia, tono, referencias, enfoque visual y sonoro, personajes, formato) y lo convierte en el brief del proyecto. Úsala al inicio de cualquier corto, anuncio, videoclip o serie, o cuando el usuario tenga una idea vaga y quiera "aterrizarla".

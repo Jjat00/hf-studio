@@ -384,13 +384,16 @@ class Skill(Base):
     # Archivos de referencia de la skill (`{ruta: texto}`, como references/ en un SKILL.md): el agente lee solo el
     # que necesita con `read_skill_file`, en vez de cargarlos todos en cada mensaje.
     files: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Ficha para la galería de /skills (`summary`, `category`, `examples`, `showcase`): solo para la persona; el
+    # agente no la recibe.
+    card: Mapped[dict | None] = mapped_column(JSON, default=dict)
     created_by: Mapped[str] = mapped_column(ForeignKey("api_clients.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
     def out(self, full: bool = True) -> dict:
         files = [{"path": k, "chars": len(v)} for k, v in sorted((self.files or {}).items())]
-        data = {"slug": self.slug, "description": self.description, "files": files,
+        data = {"slug": self.slug, "description": self.description, "files": files, "card": self.card or {},
                 "updated_at": self.updated_at.replace(tzinfo=UTC).isoformat()}  # fmt: skip
         return {**data, "body": self.body} if full else data
 
@@ -475,7 +478,7 @@ ADDED_COLUMNS = {
     "uploads": {"source": "VARCHAR(80)"},
     "space_runs": {"idempotency_key": "VARCHAR(200)", "request_hash": "VARCHAR(64)"},
     "spaces": {"flow": "JSON"},
-    "skills": {"files": "JSON"},
+    "skills": {"files": "JSON", "card": "JSON"},
 }
 
 

@@ -87,7 +87,7 @@ export function Supercomputer() {
         </nav>
       </aside>
       <main className="flex min-w-0 flex-1 flex-col">
-        <ChatPanel key={session} chatId={chatParam} onChatId={openChat} onActivity={loadList} />
+        <ChatPanel key={session} chatId={chatParam} onChatId={openChat} onActivity={loadList} initialText={chatParam ? undefined : (params.get("q") ?? undefined)} />
       </main>
     </div>
   );

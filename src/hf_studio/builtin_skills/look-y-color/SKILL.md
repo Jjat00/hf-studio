@@ -1,4 +1,9 @@
 ---
+summary: Define el look visual y la paleta del proyecto con fotogramas de prueba.
+category: cine
+examples:
+- Lookbook neo-noir con neones para mi corto
+- ¿Qué paleta usar para un videoclip melancólico de otoño?
 name: look-y-color
 description: >-
   Define el look del proyecto (lookbook con referencias, cámara, lente, luz, paleta) y su color script (cómo cambia el color con la emoción escena a escena), con fotogramas de prueba baratos. Úsala antes de una serie de tomas, cuando el usuario hable de estética, mood board, look o paleta, o quiera "que todo se vea igual".

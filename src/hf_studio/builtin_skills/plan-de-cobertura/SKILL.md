@@ -1,4 +1,9 @@
 ---
+summary: Los ángulos de una escena (maestro, planos, insertos) para montarla.
+category: cine
+examples:
+- Cobertura para una discusión de pareja en la cocina
+- Planea los ángulos de una cena de cuatro amigos
 name: plan-de-cobertura
 description: >-
   Planea la cobertura de una escena (plano maestro, planos individuales, OTS, insertos, cutaways, reacciones) respetando el eje de 180 grados, y la propone como tomas que montan entre sí. Úsala para diálogos, discusiones, escenas de mesa o acciones que se van a montar con varios ángulos.

@@ -1,4 +1,9 @@
 ---
+summary: Una hoja de personaje 16:9 (cuerpo y rostro) para reutilizar el mismo personaje.
+category: personajes
+examples:
+- Hoja de personaje de una barista de 25 años con delantal verde
+- Haz el character sheet de la persona de esta foto
 name: character-sheet
 description: Crea la hoja de personaje (character sheet) de un personaje a partir de una imagen o de una descripción en texto. Es una sola imagen horizontal con dos paneles y nada más, el cuerpo completo sin la cabeza y el rostro de frente. Úsala cuando el usuario pida un character sheet, una hoja de personaje, la ficha visual de un personaje o un personaje consistente para usar después en videos.
 ---

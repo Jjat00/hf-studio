@@ -411,6 +411,11 @@ class SkillIn(BaseModel):
     files: dict[str, str] | None = Field(
         None, description="Archivos de referencia {ruta: texto}; en una edición, si no viene, se conservan"
     )
+    card: dict | None = Field(
+        None,
+        description="Ficha de la galería: summary, category, examples (pedidos de ejemplo) y showcase (ids de "
+        "generaciones). En una edición, si no viene, se conserva",
+    )
 
 
 class ChatIn(BaseModel):
@@ -2389,6 +2394,23 @@ def create_app(
 
     # --- Skills de Supercomputer -------------------------------------------------------------------
 
+    cards_filled = False
+
+    async def fill_cards(session: AsyncSession) -> None:
+        """Una vez por arranque: las skills incluidas instaladas antes de las fichas reciben la suya si no tienen."""
+        nonlocal cards_filled
+        if cards_filled:
+            return
+        cards_filled = True
+        builtin = skill_files.builtin()
+        rows = await session.scalars(select(Skill).where(Skill.slug.in_(list(builtin))))
+        changed = False
+        for skill in rows:
+            if not skill.card and builtin[skill.slug][3]:
+                skill.card, changed = builtin[skill.slug][3], True
+        if changed:
+            await session.commit()
+
     def skill_fields(body: SkillIn) -> tuple[str, str, str]:
         if body.skill_md:
             return skill_files.parse_skill_md(body.skill_md)
@@ -2396,6 +2418,7 @@ def create_app(
 
     async def seed_skills(session: AsyncSession, owner: ApiClient) -> None:
         """Instala una vez las skills que trae HF Studio (las que el usuario ya tenga o haya borrado no se tocan)."""
+        await fill_cards(session)
         pending, marker = skill_files.unseeded(settings.storage_dir)
         if not pending:
             return
@@ -2403,9 +2426,16 @@ def create_app(
         existing = set(await session.scalars(select(Skill.slug).where(Skill.slug.in_(pending))))
         for slug in pending:
             if slug not in existing:
-                description, text_, files = builtin[slug]
+                description, text_, files, card = builtin[slug]
                 session.add(
-                    Skill(slug=slug, description=description, body=text_, files=files, created_by=owner.id)
+                    Skill(
+                        slug=slug,
+                        description=description,
+                        body=text_,
+                        files=files,
+                        card=card,
+                        created_by=owner.id,
+                    )
                 )
         await session.commit()
         skill_files.mark_seeded(marker, pending)
@@ -2434,7 +2464,14 @@ def create_app(
         if await session.scalar(select(Skill.id).where(Skill.slug == slug)):
             raise ServiceError(409, "skill_exists", f"There is already a skill called /{slug}")
         files = skill_files.check_files(body.files)
-        skill = Skill(slug=slug, description=description, body=text_, files=files, created_by=owner.id)
+        card = (
+            skill_files.check_card(body.card)
+            if body.card is not None
+            else skill_files.parse_card(body.skill_md or "")
+        )
+        skill = Skill(
+            slug=slug, description=description, body=text_, files=files, card=card, created_by=owner.id
+        )
         session.add(skill)
         await session.commit()
         return skill.out()
@@ -2448,6 +2485,8 @@ def create_app(
         skill.slug, skill.description, skill.body, skill.updated_at = new_slug, description, text_, utcnow()
         if body.files is not None:
             skill.files = skill_files.check_files(body.files)
+        if body.card is not None:
+            skill.card = skill_files.check_card(body.card)
         await session.commit()
         return skill.out()
 

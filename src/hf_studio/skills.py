@@ -23,6 +23,13 @@ MAX_FILES = 100
 MAX_FILES_TOTAL = 2_000_000
 MENTION = re.compile(r"(?:^|(?<=\s))/([a-z0-9][a-z0-9-]{0,62})(?=$|[\s.,;:!?)])")
 MAX_INVOKED = 3
+# Ficha de la skill para la galería de /skills: para qué sirve, categoría, pedidos de ejemplo y generaciones de
+# muestra. No llega al agente (él lee la descripción y el cuerpo).
+CATEGORIES = ("cine", "anuncios", "personajes", "producto", "video", "audio", "redes", "otros")
+MAX_SUMMARY = 300
+MAX_EXAMPLES = 8
+MAX_EXAMPLE = 500
+MAX_SHOWCASE = 6
 
 
 class SkillError(Exception):
@@ -77,8 +84,36 @@ def check_files(files: dict[str, str] | None) -> dict[str, str]:
     return clean
 
 
-def parse_skill_md(text: str) -> tuple[str, str, str]:
-    """(slug, descripción, cuerpo) de un SKILL.md: frontmatter con `name` y `description` y el resto como cuerpo."""
+def check_card(card: dict | None) -> dict:
+    """Valida la ficha: `summary`, `category` (una de CATEGORIES), `examples` (pedidos) y `showcase` (ids de
+    generaciones). Devuelve solo los campos con valor."""
+    card = card or {}
+    if not isinstance(card, dict):
+        raise SkillError(422, "invalid_card", "The card must be an object")
+    clean: dict = {}
+    summary = " ".join(str(card.get("summary") or "").split())
+    if len(summary) > MAX_SUMMARY:
+        raise SkillError(422, "summary_too_long", f"The summary is limited to {MAX_SUMMARY} characters")
+    if summary:
+        clean["summary"] = summary
+    category = str(card.get("category") or "").strip().lower()
+    if category and category not in CATEGORIES:
+        raise SkillError(422, "invalid_category", f"The category must be one of {', '.join(CATEGORIES)}")
+    if category:
+        clean["category"] = category
+    for key, limit, size in (("examples", MAX_EXAMPLES, MAX_EXAMPLE), ("showcase", MAX_SHOWCASE, 64)):
+        items = card.get(key) or []
+        if not isinstance(items, list) or not all(isinstance(x, str) for x in items):
+            raise SkillError(422, f"invalid_{key}", f"{key} must be a list of strings")
+        items = list(dict.fromkeys(x.strip() for x in items if x.strip()))
+        if len(items) > limit or any(len(x) > size for x in items):
+            raise SkillError(422, f"too_many_{key}", f"{key}: up to {limit} items of {size} characters")
+        if items:
+            clean[key] = items
+    return clean
+
+
+def _split(text: str) -> tuple[dict, str]:
     text = text.lstrip("﻿")
     match = re.match(r"^---\s*\n(.*?)\n---\s*(?:\n|$)(.*)$", text, re.DOTALL)
     if not match:
@@ -89,8 +124,24 @@ def parse_skill_md(text: str) -> tuple[str, str, str]:
         raise SkillError(422, "bad_frontmatter", f"The frontmatter is not valid YAML: {exc}") from exc
     if not isinstance(meta, dict):
         raise SkillError(422, "bad_frontmatter", "The frontmatter must have name and description")
+    return meta, match.group(2)
+
+
+def parse_skill_md(text: str) -> tuple[str, str, str]:
+    """(slug, descripción, cuerpo) de un SKILL.md: frontmatter con `name` y `description` y el resto como cuerpo."""
+    meta, body = _split(text)
     name, description = str(meta.get("name") or ""), str(meta.get("description") or "")
-    return check(slugify(name), description, match.group(2))
+    return check(slugify(name), description, body)
+
+
+def parse_card(text: str) -> dict:
+    """Ficha opcional del frontmatter de un SKILL.md (`summary`, `category`, `examples`); vacía si no la trae o
+    si no es válida (una ficha mala no impide importar la skill)."""
+    try:
+        meta, _ = _split(text)
+        return check_card({k: meta.get(k) for k in ("summary", "category", "examples")})
+    except SkillError:
+        return {}
 
 
 def invoked(text: str, known: set[str]) -> list[str]:
@@ -115,17 +166,18 @@ def skill_block(slug: str, body: str, files: list[str] | None = None) -> str:
 BUILTIN_DIR = Path(__file__).with_name("builtin_skills")
 
 
-def builtin() -> dict[str, tuple[str, str, dict[str, str]]]:
-    """Skills que trae HF Studio: `{slug: (descripción, cuerpo, archivos)}` desde builtin_skills/<carpeta>/."""
-    found: dict[str, tuple[str, str, dict[str, str]]] = {}
+def builtin() -> dict[str, tuple[str, str, dict[str, str], dict]]:
+    """Skills que trae HF Studio: `{slug: (descripción, cuerpo, archivos, ficha)}` desde builtin_skills/<carpeta>/."""
+    found: dict[str, tuple[str, str, dict[str, str], dict]] = {}
     for main in sorted(BUILTIN_DIR.glob("*/SKILL.md")):
-        slug, description, body = parse_skill_md(main.read_text(encoding="utf-8"))
+        text = main.read_text(encoding="utf-8")
+        slug, description, body = parse_skill_md(text)
         files = {
             f.relative_to(main.parent).as_posix(): f.read_text(encoding="utf-8")  # con / también en Windows
             for f in sorted(main.parent.rglob("*"))
             if f.is_file() and f != main and f.suffix in FILE_TYPES
         }
-        found[slug] = (description, body, check_files(files))
+        found[slug] = (description, body, check_files(files), parse_card(text))
     return found
 
 

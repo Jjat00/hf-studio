@@ -1,4 +1,9 @@
 ---
+summary: Parte un guion en escenas, personajes, lugares y props para producirlo.
+category: cine
+examples:
+- Desglosa este guion de 3 páginas y dime qué elementos crear
+- Tengo este relato corto, conviértelo en escenas para producir
 name: desglose-guion
 description: >-
   Desglosa un guion o texto en escenas y elementos de producción (personajes, extras, lugares, props, vestuario, efectos, sonido, VFX) y decide cuáles se crean como elementos. Úsala cuando el usuario pegue o adjunte un guion, escaleta o relato para producirlo.
