@@ -197,7 +197,8 @@ export function SkillLibrary() {
     let showcase = draft.showcase;
     if (draft.original) {
       await queue.current;
-      showcase = (await studio.skill(draft.original).catch(() => null))?.card?.showcase ?? showcase;
+      const fresh = await studio.skill(draft.original).catch(() => null);
+      if (fresh) showcase = fresh.card?.showcase ?? []; // sin muestras, la ficha no trae la clave
     }
     const card: SkillCard = {
       summary: draft.summary.trim() || undefined,
@@ -485,7 +486,7 @@ export function SkillLibrary() {
                       <button type="button" onClick={() => setOpened(s.slug)} className="rounded-lg px-2 py-1 text-xs text-fg-3 hover:text-fg">
                         {k.open}
                       </button>
-                      <button type="button" title={k.edit} aria-label={`${k.edit}: ${s.slug}`} onClick={() => edit(s.slug)} className="rounded-lg p-1.5 text-fg-3 hover:text-fg">
+                      <button type="button" disabled={saving > 0} title={k.edit} aria-label={`${k.edit}: ${s.slug}`} onClick={() => edit(s.slug)} className="rounded-lg p-1.5 text-fg-3 hover:text-fg disabled:opacity-50">
                         <Pencil className="size-4" />
                       </button>
                       <button type="button" title={k.delete} aria-label={`${k.delete}: ${s.slug}`} onClick={() => remove(s.slug)} className="rounded-lg p-1.5 text-fg-3 hover:text-danger">
