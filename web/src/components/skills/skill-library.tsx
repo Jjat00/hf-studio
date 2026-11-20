@@ -193,11 +193,17 @@ export function SkillLibrary() {
     if (!draft) return;
     setBusy(true);
     setError(null);
+    // El formulario no edita las muestras: se mandan las vigentes en el servidor, tras los cambios en cola.
+    let showcase = draft.showcase;
+    if (draft.original) {
+      await queue.current;
+      showcase = (await studio.skill(draft.original).catch(() => null))?.card?.showcase ?? showcase;
+    }
     const card: SkillCard = {
       summary: draft.summary.trim() || undefined,
       category: draft.category || undefined,
       examples: draft.examples.split("\n").map((x) => x.trim()).filter(Boolean),
-      showcase: draft.showcase,
+      showcase,
     };
     const body = { slug: draft.slug.trim(), description: draft.description, body: draft.body, card };
     try {
@@ -580,7 +586,7 @@ export function SkillLibrary() {
               </section>
             )}
             <div className="mt-6 flex justify-end gap-2">
-              <button type="button" onClick={() => edit(current.slug)} className="flex h-9 items-center gap-1.5 rounded-xl bg-surface-4 px-3 text-sm text-fg-2 hover:text-fg">
+              <button type="button" disabled={saving > 0} onClick={() => edit(current.slug)} className="disabled:opacity-50 flex h-9 items-center gap-1.5 rounded-xl bg-surface-4 px-3 text-sm text-fg-2 hover:text-fg">
                 <Pencil className="size-4" /> {k.edit}
               </button>
             </div>
