@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { CreationsPicker } from "@/components/studio/creations-picker";
 import { outputSrc, SKILL_CATEGORIES, studio, type SkillCard, type SkillCategory, type SkillSummary } from "@/lib/studio";
@@ -87,6 +87,44 @@ function Thumb({ g, className }: { g: Generation; className: string }) {
   );
 }
 
+/** Ventana modal accesible: foco dentro (en `[data-autofocus]`), Tab atrapado, Escape cierra y, al cerrar, el foco
+ * vuelve a donde estaba. */
+function Dialog({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const close = useEffectEvent(onClose);
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    panel.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return close();
+      if (e.key !== "Tab" || !panel.current) return;
+      const items = [...panel.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")];
+      if (!items.length) return;
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && (document.activeElement === first || !panel.current.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !panel.current.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      opener?.focus?.();
+    };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={label}>
+      <button type="button" tabIndex={-1} aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-black/70" />
+      <div ref={panel} className="thin-scrollbar relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-card border border-line bg-surface-1 p-5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 /** Galería de skills de Supercomputer: qué hace cada una, pedidos de ejemplo que se prueban con un clic y
  * generaciones de muestra. También crea, edita, importa un SKILL.md y borra. */
 export function SkillLibrary() {
@@ -101,6 +139,8 @@ export function SkillLibrary() {
   const [opened, setOpened] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const picked = useRef<string[]>([]);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const [saving, setSaving] = useState(0);
   const file = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
 
@@ -209,20 +249,20 @@ export function SkillLibrary() {
   }
 
   /** Cambia las generaciones de muestra de una skill (sin tocar el resto de su ficha). */
-  async function setShowcase(skill: SkillSummary, ids: string[]) {
+  /** Cambia las muestras de una skill. Los cambios van en cola, uno detrás de otro, y cada uno se aplica sobre las
+   * muestras que hay en ese momento en el servidor: dos clics seguidos en «Quitar» no se pisan. */
+  function setShowcase(slug: string, change: (ids: string[]) => string[]) {
     setError(null);
-    try {
-      const full = await studio.skill(skill.slug);
-      const saved = await studio.updateSkill(skill.slug, {
-        slug: full.slug,
-        description: full.description,
-        body: full.body,
-        card: { ...full.card, showcase: ids.slice(0, MAX_SHOWCASE) },
-      });
-      setSkills((prev) => prev?.map((x) => (x.slug === skill.slug ? { ...x, card: saved.card } : x)) ?? null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    setSaving((n) => n + 1);
+    queue.current = queue.current
+      .then(async () => {
+        const full = await studio.skill(slug);
+        const ids = [...new Set(change(full.card?.showcase ?? []))].slice(0, MAX_SHOWCASE);
+        const saved = await studio.updateSkill(slug, { slug: full.slug, description: full.description, body: full.body, card: { ...full.card, showcase: ids } });
+        setSkills((prev) => prev?.map((x) => (x.slug === slug ? { ...x, card: saved.card } : x)) ?? null);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSaving((n) => n - 1));
   }
 
   async function remove(slug: string) {
@@ -455,14 +495,13 @@ export function SkillLibrary() {
       </div>
 
       {current && !picking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setOpened(null)}>
-          <div className="thin-scrollbar max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-card border border-line bg-surface-1 p-5" onClick={(e) => e.stopPropagation()}>
+        <Dialog label={`/${current.slug}`} onClose={() => setOpened(null)}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-mono text-lg font-semibold text-fg">/{current.slug}</p>
                 <p className="mt-0.5 text-xs text-fg-4">{k.categories[categoryOf(current)]}</p>
               </div>
-              <button type="button" aria-label={k.close} onClick={() => setOpened(null)} className="text-fg-3 hover:text-fg">
+              <button type="button" data-autofocus aria-label={k.close} onClick={() => setOpened(null)} className="rounded-lg text-fg-3 hover:text-fg">
                 <X className="size-5" />
               </button>
             </div>
@@ -497,7 +536,7 @@ export function SkillLibrary() {
               <div className="flex items-center justify-between">
                 <h2 className="text-xs font-semibold tracking-wide text-fg-4 uppercase">{k.showcase}</h2>
                 {(current.card?.showcase?.length ?? 0) < MAX_SHOWCASE ? (
-                  <button type="button" onClick={() => setPicking(true)} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-fg-3 hover:text-fg">
+                  <button type="button" disabled={saving > 0} onClick={() => setPicking(true)} className="flex items-center gap-1.5 disabled:opacity-50 rounded-lg px-2 py-1 text-xs text-fg-3 hover:text-fg">
                     <ImagePlus className="size-3.5" /> {k.addShowcase}
                   </button>
                 ) : (
@@ -515,8 +554,8 @@ export function SkillLibrary() {
                           type="button"
                           aria-label={k.removeShowcase}
                           title={k.removeShowcase}
-                          onClick={() => setShowcase(current, (current.card.showcase ?? []).filter((x) => x !== id))}
-                          className="absolute top-1.5 right-1.5 hidden rounded-full bg-black/60 p-1 text-white group-hover:block"
+                          onClick={() => setShowcase(current.slug, (ids) => ids.filter((x) => x !== id))}
+                          className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1 text-white opacity-80 hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-lime"
                         >
                           <X className="size-3.5" />
                         </button>
@@ -545,8 +584,7 @@ export function SkillLibrary() {
                 <Pencil className="size-4" /> {k.edit}
               </button>
             </div>
-          </div>
-        </div>
+        </Dialog>
       )}
       {current && picking && (
         <CreationsPicker
@@ -555,10 +593,10 @@ export function SkillLibrary() {
           onPickGeneration={(g) => picked.current.push(g.id)}
           onClose={() => {
             // Se guardan juntas al cerrar: el selector llama a onPickGeneration una vez por generación marcada.
-            const ids = [...new Set([...(current.card?.showcase ?? []), ...picked.current])];
+            const added = picked.current;
             picked.current = [];
             setPicking(false);
-            if (ids.length !== (current.card?.showcase?.length ?? 0)) void setShowcase(current, ids);
+            if (added.length) setShowcase(current.slug, (ids) => [...ids, ...added]);
           }}
         />
       )}
