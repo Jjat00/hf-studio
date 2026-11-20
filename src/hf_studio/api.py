@@ -414,7 +414,7 @@ class SkillIn(BaseModel):
     card: dict | None = Field(
         None,
         description="Ficha de la galería: summary, category, examples (pedidos de ejemplo) y showcase (ids de "
-        "generaciones). En una edición, si no viene, se conserva",
+        "generaciones). En una edición, si no viene, se conserva; si viene sin `showcase`, se conservan las muestras",
     )
 
 
@@ -2486,7 +2486,10 @@ def create_app(
         if body.files is not None:
             skill.files = skill_files.check_files(body.files)
         if body.card is not None:
-            skill.card = skill_files.check_card(body.card)
+            card = skill_files.check_card(body.card)
+            if "showcase" not in body.card and (skill.card or {}).get("showcase"):
+                card["showcase"] = skill.card["showcase"]  # el editor no las toca: se conservan las vigentes
+            skill.card = card
         await session.commit()
         return skill.out()
 

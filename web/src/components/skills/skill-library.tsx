@@ -193,18 +193,12 @@ export function SkillLibrary() {
     if (!draft) return;
     setBusy(true);
     setError(null);
-    // El formulario no edita las muestras: se mandan las vigentes en el servidor, tras los cambios en cola.
-    let showcase = draft.showcase;
-    if (draft.original) {
-      await queue.current;
-      const fresh = await studio.skill(draft.original).catch(() => null);
-      if (fresh) showcase = fresh.card?.showcase ?? []; // sin muestras, la ficha no trae la clave
-    }
+    // El formulario no edita las muestras: sin `showcase`, el servidor conserva las vigentes.
     const card: SkillCard = {
       summary: draft.summary.trim() || undefined,
       category: draft.category || undefined,
       examples: draft.examples.split("\n").map((x) => x.trim()).filter(Boolean),
-      showcase,
+      ...(draft.original ? {} : { showcase: draft.showcase }),
     };
     const body = { slug: draft.slug.trim(), description: draft.description, body: draft.body, card };
     try {

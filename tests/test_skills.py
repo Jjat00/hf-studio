@@ -138,6 +138,20 @@ async def test_skill_card_for_the_gallery(env):  # noqa: F811
         "/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "Otra", "body": "P", "card": card}
     )
     assert put.json()["card"] == {"summary": "x", "examples": ["a"], "showcase": ["gen-1"]}
+    # Sin `showcase` en la ficha, las muestras vigentes se conservan; con lista vacía, se quitan.
+    kept = await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "Otra", "body": "P", "card": {"summary": "y"}},
+    )
+    assert kept.json()["card"] == {"summary": "y", "showcase": ["gen-1"]}
+    cleared = await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"summary": "y", "showcase": []}},
+    )
+    assert cleared.json()["card"] == {"summary": "y"}
+    await http.put(
+        "/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "O", "body": "P", "card": card}
+    )
     bad = await http.put(
         "/v1/skills/ads-ugc",
         json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"category": "nada"}},
