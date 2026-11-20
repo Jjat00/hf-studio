@@ -1,4 +1,9 @@
 ---
+summary: Dónde está cada personaje y la cámara para que las tomas casen.
+category: cine
+examples:
+- 'Bloqueo de una escena: dos detectives interrogan a un sospechoso'
+- Mis tomas no casan entre sí, ordena la geografía
 name: puesta-en-escena
 description: >-
   Define la geografía y el bloqueo de una escena (posiciones, recorridos, entradas y salidas, eje de 180 grados, dirección de pantalla, posiciones de cámara) antes de las tomas. Úsala en escenas con dos o más personajes, persecuciones, entradas y salidas o cuando las tomas "no casan" entre sí.

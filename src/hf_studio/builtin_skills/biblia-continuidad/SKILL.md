@@ -1,4 +1,9 @@
 ---
+summary: Mantiene iguales caras, vestuario y props de una toma a otra.
+category: personajes
+examples:
+- Arma la biblia de continuidad de mi corto con Lucía y su perro Toby
+- La cara de mi protagonista cambia entre tomas, arréglalo
 name: biblia-continuidad
 description: >-
   Crea y mantiene la biblia de continuidad del proyecto (personajes, lugares, props con hojas de referencia, rasgos fijos y vestuario por escena) y la aplica en cada toma. Úsala al empezar un proyecto con personajes recurrentes, cuando una cara o vestuario "deriva" entre tomas, o antes de una serie de tomas.

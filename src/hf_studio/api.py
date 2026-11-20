@@ -399,6 +399,11 @@ class RunApprove(BaseModel):
     )
 
 
+class ShowcaseIn(BaseModel):
+    add: list[str] = Field(default_factory=list, max_length=skill_files.MAX_SHOWCASE)
+    remove: list[str] = Field(default_factory=list, max_length=50)
+
+
 class SkillIn(BaseModel):
     slug: str | None = Field(None, max_length=64, description="Nombre con el que se llama: /slug")
     description: str | None = Field(None, max_length=skill_files.MAX_DESCRIPTION)
@@ -410,6 +415,11 @@ class SkillIn(BaseModel):
     )
     files: dict[str, str] | None = Field(
         None, description="Archivos de referencia {ruta: texto}; en una edición, si no viene, se conservan"
+    )
+    card: dict | None = Field(
+        None,
+        description="Ficha de la galería: summary, category, examples (pedidos de ejemplo) y showcase (ids de "
+        "generaciones). En una edición, si no viene, se conserva; si viene sin `showcase`, se conservan las muestras",
     )
 
 
@@ -2389,6 +2399,24 @@ def create_app(
 
     # --- Skills de Supercomputer -------------------------------------------------------------------
 
+    cards_filled = False
+    showcase_lock = asyncio.Lock()
+
+    async def fill_cards(session: AsyncSession) -> None:
+        """Una vez por arranque: las skills incluidas instaladas antes de las fichas reciben la suya si no tienen."""
+        nonlocal cards_filled
+        if cards_filled:
+            return
+        cards_filled = True
+        builtin = skill_files.builtin()
+        rows = await session.scalars(select(Skill).where(Skill.slug.in_(list(builtin))))
+        changed = False
+        for skill in rows:
+            if not skill.card and builtin[skill.slug][3]:
+                skill.card, changed = builtin[skill.slug][3], True
+        if changed:
+            await session.commit()
+
     def skill_fields(body: SkillIn) -> tuple[str, str, str]:
         if body.skill_md:
             return skill_files.parse_skill_md(body.skill_md)
@@ -2396,6 +2424,7 @@ def create_app(
 
     async def seed_skills(session: AsyncSession, owner: ApiClient) -> None:
         """Instala una vez las skills que trae HF Studio (las que el usuario ya tenga o haya borrado no se tocan)."""
+        await fill_cards(session)
         pending, marker = skill_files.unseeded(settings.storage_dir)
         if not pending:
             return
@@ -2403,9 +2432,16 @@ def create_app(
         existing = set(await session.scalars(select(Skill.slug).where(Skill.slug.in_(pending))))
         for slug in pending:
             if slug not in existing:
-                description, text_, files = builtin[slug]
+                description, text_, files, card = builtin[slug]
                 session.add(
-                    Skill(slug=slug, description=description, body=text_, files=files, created_by=owner.id)
+                    Skill(
+                        slug=slug,
+                        description=description,
+                        body=text_,
+                        files=files,
+                        card=card,
+                        created_by=owner.id,
+                    )
                 )
         await session.commit()
         skill_files.mark_seeded(marker, pending)
@@ -2434,7 +2470,21 @@ def create_app(
         if await session.scalar(select(Skill.id).where(Skill.slug == slug)):
             raise ServiceError(409, "skill_exists", f"There is already a skill called /{slug}")
         files = skill_files.check_files(body.files)
-        skill = Skill(slug=slug, description=description, body=text_, files=files, created_by=owner.id)
+        card = (
+            skill_files.check_card(body.card)
+            if body.card is not None
+            else skill_files.parse_card(body.skill_md or "")
+        )
+        showcase = card.pop("showcase", [])
+        skill = Skill(
+            slug=slug,
+            description=description,
+            body=text_,
+            files=files,
+            card=card,
+            showcase=showcase,
+            created_by=owner.id,
+        )
         session.add(skill)
         await session.commit()
         return skill.out()
@@ -2448,8 +2498,28 @@ def create_app(
         skill.slug, skill.description, skill.body, skill.updated_at = new_slug, description, text_, utcnow()
         if body.files is not None:
             skill.files = skill_files.check_files(body.files)
+        if body.card is not None:
+            card = skill_files.check_card(body.card)
+            showcase = card.pop("showcase", [])
+            if "showcase" in body.card:  # sin la clave (el editor), las muestras no se tocan
+                skill.showcase = showcase
+            skill.card = card
         await session.commit()
         return skill.out()
+
+    @app.post("/v1/skills/{slug}/showcase", tags=["supercomputer"])
+    async def change_showcase(slug: str, body: ShowcaseIn, session: Session, _: Owner) -> dict:
+        """Añade o quita generaciones de muestra de la ficha sin tocar nada más de la skill (el cambio se aplica
+        sobre las muestras guardadas, así dos cambios seguidos no se pisan)."""
+        async with showcase_lock:  # el servidor es un solo proceso: los cambios de muestras van de uno en uno
+            skill = await get_skill_or_404(session, slug)
+            await session.refresh(skill, ["showcase"])
+            ids = [x for x in (skill.showcase or []) if x not in body.remove]
+            ids += [x for x in body.add if x not in ids]
+            skill.showcase = skill_files.check_card({"showcase": ids}).get("showcase", [])
+            await session.commit()
+            # Solo las muestras: el resto de la ficha de este objeto puede ser anterior a una edición simultánea.
+            return {"slug": skill.slug, "showcase": list(skill.showcase or [])}
 
     @app.get("/v1/skills/{slug}/files/{path:path}", tags=["supercomputer"])
     async def get_skill_file(slug: str, path: str, session: Session, _: Owner) -> dict:

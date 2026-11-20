@@ -434,6 +434,8 @@ export const studio = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  skillShowcase: (slug: string, change: { add?: string[]; remove?: string[] }) =>
+    call<{ slug: string; showcase: string[] }>(`/v1/skills/${encodeURIComponent(slug)}/showcase`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(change) }),
   deleteSkill: (slug: string) => call<void>(`/v1/skills/${encodeURIComponent(slug)}`, { method: "DELETE" }),
   sendChat: async (id: string, body: ChatMessageBody, onEvent: (e: ChatEvent) => void, signal?: AbortSignal) => {
     const res = await fetch(`${BASE}/v1/chats/${id}/messages`, {
@@ -924,9 +926,13 @@ export type ProjectDocSummary = {
   updated_at: string;
 };
 export type ProjectDoc = ProjectDocSummary & { markdown: string };
-export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[] };
+export const SKILL_CATEGORIES = ["cine", "anuncios", "personajes", "producto", "video", "audio", "redes", "otros"] as const;
+export type SkillCategory = (typeof SKILL_CATEGORIES)[number];
+/** Ficha de la galería de /skills (no llega al agente): para qué sirve, categoría, pedidos y generaciones de muestra. */
+export type SkillCard = { summary?: string; category?: SkillCategory; examples?: string[]; showcase?: string[] };
+export type SkillSummary = { slug: string; description: string; updated_at: string; files: { path: string; chars: number }[]; card: SkillCard };
 export type Skill = SkillSummary & { body: string };
-export type SkillBody = ({ slug: string; description: string; body: string } | { skill_md: string }) & { files?: Record<string, string> };
+export type SkillBody = ({ slug: string; description: string; body: string } | { skill_md: string }) & { files?: Record<string, string>; card?: SkillCard };
 export type ChatQuestion = { id: string; question: string; options: { label: string; detail?: string }[] };
 export type ChatPart =
   | { type: "text"; text: string }

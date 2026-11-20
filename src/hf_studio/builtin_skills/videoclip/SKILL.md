@@ -1,4 +1,9 @@
 ---
+summary: Un video musical con tomas sincronizadas a las secciones y el tempo de la canción.
+category: video
+examples:
+- Videoclip para mi canción de reguetón a 95 BPM
+- Visualizer para esta canción lo-fi
 name: videoclip
 description: >-
   Planea un video musical (actuación, narrativa, concepto o híbrido) a partir de una canción, con tomas sincronizadas a sus secciones y su tempo. Úsala cuando el usuario quiera un videoclip, un visualizer o imágenes para una canción.

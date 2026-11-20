@@ -7,15 +7,18 @@ import { outputSrc, studio } from "@/lib/studio";
 import type { Generation } from "@/lib/types";
 
 /** Ventana para elegir creaciones propias (imagen o video) como entrada. Llama a `onPick` con la URL vigente de
- * cada una. Con `max` mayor que 1 se marcan varias y se añaden juntas, en el orden en que se marcaron. */
+ * cada una, o a `onPickGeneration` con la generación tal cual (sin pedir una URL nueva). Con `max` mayor que 1 se
+ * marcan varias y se añaden juntas, en el orden en que se marcaron. `kind="any"` muestra imágenes y videos. */
 export function CreationsPicker({
   kind,
   onPick,
+  onPickGeneration,
   onClose,
   max = 1,
 }: {
-  kind: "image" | "video";
-  onPick: (url: string) => void;
+  kind: "image" | "video" | "any";
+  onPick?: (url: string) => void;
+  onPickGeneration?: (g: Generation) => void;
   onClose: () => void;
   max?: number;
 }) {
@@ -29,7 +32,12 @@ export function CreationsPicker({
 
   useEffect(() => {
     studio.list(100).then(
-      (res) => setItems(res.generations.filter((g) => g.status === "completed" && g.outputs[0]?.kind === kind)),
+      (res) =>
+        setItems(
+          res.generations.filter(
+            (g) => g.status === "completed" && (kind === "any" ? ["image", "video"].includes(g.outputs[0]?.kind) : g.outputs[0]?.kind === kind),
+          ),
+        ),
       (e) => {
         setError(e instanceof Error ? e.message : String(e));
         setItems([]); // termina la carga aunque falle
@@ -48,7 +56,9 @@ export function CreationsPicker({
     try {
       for (const id of selected) {
         setBusy(id);
-        onPick((await studio.useOutput(id, 0)).url);
+        const g = items?.find((x) => x.id === id);
+        if (onPickGeneration && g) onPickGeneration(g);
+        else onPick?.((await studio.useOutput(id, 0)).url);
       }
       onClose();
     } catch (e) {
@@ -62,7 +72,8 @@ export function CreationsPicker({
     setBusy(g.id);
     setError(null);
     try {
-      onPick((await studio.useOutput(g.id, 0)).url);
+      if (onPickGeneration) onPickGeneration(g);
+      else onPick?.((await studio.useOutput(g.id, 0)).url);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -103,7 +114,7 @@ export function CreationsPicker({
                     title={prompt}
                     className="group relative aspect-square overflow-hidden rounded-xl bg-surface-3 disabled:opacity-60"
                   >
-                    {kind === "video" ? (
+                    {g.outputs[0].kind === "video" ? (
                       <video src={src} className="size-full object-cover" muted playsInline preload="metadata" />
                     ) : (
                       // eslint-disable-next-line @next/next/no-img-element

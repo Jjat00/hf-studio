@@ -1,4 +1,9 @@
 ---
+summary: Revisa lo generado, elige la mejor toma y propone solo lo que hay que rehacer.
+category: cine
+examples:
+- ¿Qué tal quedaron las tomas de hoy?
+- Revisa estas 4 versiones y dime cuál sirve
 name: revision-dailies
 description: >-
   Revisa las generaciones terminadas como si fueran dailies (encuadre, actuación, continuidad, artefactos, ritmo), elige la toma buena, da notas concretas y propone solo las regeneraciones necesarias. Úsala cuando lleguen resultados, el usuario pregunte "¿qué tal quedó?" o diga que algo no le gusta.

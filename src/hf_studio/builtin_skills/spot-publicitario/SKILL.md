@@ -1,4 +1,9 @@
 ---
+summary: Un comercial de 6, 15 o 30 s con gancho, producto héroe y cierre de marca.
+category: anuncios
+examples:
+- Spot de 15 s para una cerveza artesanal
+- Comercial de 30 s para mi app de finanzas
 name: spot-publicitario
 description: >-
   Planea y propone un anuncio de 6, 15 o 30 segundos (gancho, problema, producto como héroe, prueba, cierre con marca y CTA) con producto consistente. Úsala cuando el usuario pida un comercial, spot, anuncio en video o pieza de marca (no UGC: para UGC usa la skill de UGC si existe).

@@ -1,4 +1,9 @@
 ---
+summary: Convierte una idea en una lista de tomas numerada con su storyboard.
+category: cine
+examples:
+- 'Lista de tomas para un corto de 30 s: un ladrón escapa por los tejados'
+- Storyboard de una escena de persecución en moto
 name: lista-de-tomas
 description: >-
   Convierte una escena, guion o idea de varios momentos en una lista de tomas numerada (plano, lente, movimiento, duración, elementos) y en su storyboard de fotogramas, y la propone como una sola tarjeta. Úsala cuando el usuario pida un corto, una secuencia, "varias tomas", un storyboard o una lista de tomas.

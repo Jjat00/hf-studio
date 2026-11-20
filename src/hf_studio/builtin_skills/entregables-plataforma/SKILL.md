@@ -1,4 +1,9 @@
 ---
+summary: Las versiones de una pieza para Reels, TikTok, Shorts, YouTube o cine.
+category: redes
+examples:
+- Necesito este spot en 9:16, 1:1 y 16:9
+- Kit de formatos para lanzar mi video en Instagram y YouTube
 name: entregables-plataforma
 description: >-
   Planea las versiones de una pieza para cada plataforma (Reels, TikTok, Shorts, YouTube, web, cine 21:9, feed 1:1) con zonas seguras, duraciones y ratios. Úsala cuando el usuario diga dónde se publicará, pida "versiones" de un video o un kit de formatos.

@@ -116,3 +116,85 @@ async def test_builtin_skills_are_installed_once(env):  # noqa: F811
     await http.delete("/v1/skills/character-sheet")
     listed = [s["slug"] for s in (await http.get("/v1/skills")).json()["skills"]]
     assert "character-sheet" not in listed  # borrada por el usuario: no vuelve
+
+
+async def test_skill_card_for_the_gallery(env):  # noqa: F811
+    _, http, claude = env
+    md = SKILL_MD.replace(
+        "description:",
+        "summary: Guiones UGC listos para grabar.\ncategory: anuncios\nexamples:\n  - Anuncio de 20 s para mi café\ndescription:",
+    )
+    made = (await http.post("/v1/skills", json={"skill_md": md})).json()
+    assert made["card"] == {
+        "summary": "Guiones UGC listos para grabar.",
+        "category": "anuncios",
+        "examples": ["Anuncio de 20 s para mi café"],
+    }
+    # Editar sin `card` la conserva; con `card`, la reemplaza (y se validan categoría y tamaños).
+    await http.put("/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "Otra", "body": "Pasos"})
+    assert (await http.get("/v1/skills/ads-ugc")).json()["card"]["category"] == "anuncios"
+    card = {"summary": "x", "examples": ["a", "a", " "], "showcase": ["gen-1"]}
+    put = await http.put(
+        "/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "Otra", "body": "P", "card": card}
+    )
+    assert put.json()["card"] == {"summary": "x", "examples": ["a"], "showcase": ["gen-1"]}
+    # Sin `showcase` en la ficha, las muestras vigentes se conservan; con lista vacía, se quitan.
+    kept = await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "Otra", "body": "P", "card": {"summary": "y"}},
+    )
+    assert kept.json()["card"] == {"summary": "y", "showcase": ["gen-1"]}
+    cleared = await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"summary": "y", "showcase": []}},
+    )
+    assert cleared.json()["card"] == {"summary": "y"}
+    await http.put(
+        "/v1/skills/ads-ugc", json={"slug": "ads-ugc", "description": "O", "body": "P", "card": card}
+    )
+    shown = await http.post("/v1/skills/ads-ugc/showcase", json={"add": ["gen-2", "gen-1"], "remove": []})
+    assert shown.json() == {"slug": "ads-ugc", "showcase": ["gen-1", "gen-2"]}
+    shown = await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-1"]})
+    assert shown.json()["showcase"] == ["gen-2"]
+    assert (await http.get("/v1/skills/ads-ugc")).json()["card"] == {
+        "summary": "x",
+        "examples": ["a"],
+        "showcase": ["gen-2"],
+    }
+    # Ficha y muestras viven aparte: editar una no pisa la otra.
+    await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"summary": "z"}},
+    )
+    shown = await http.post("/v1/skills/ads-ugc/showcase", json={"add": ["gen-3"]})
+    assert shown.json()["showcase"] == ["gen-2", "gen-3"]
+    assert (await http.get("/v1/skills/ads-ugc")).json()["card"] == {
+        "summary": "z",
+        "showcase": ["gen-2", "gen-3"],
+    }
+    await http.post("/v1/skills/ads-ugc/showcase", json={"remove": ["gen-3"]})
+    await http.put(
+        "/v1/skills/ads-ugc",
+        json={
+            "slug": "ads-ugc",
+            "description": "O",
+            "body": "P",
+            "card": {"summary": "x", "examples": ["a"]},
+        },
+    )
+    over = await http.post("/v1/skills/ads-ugc/showcase", json={"add": [f"g{i}" for i in range(6)]})
+    assert over.json()["error"]["code"] == "too_many_showcase"
+    bad = await http.put(
+        "/v1/skills/ads-ugc",
+        json={"slug": "ads-ugc", "description": "O", "body": "P", "card": {"category": "nada"}},
+    )
+    assert bad.json()["error"]["code"] == "invalid_category"
+    listed = {s["slug"]: s for s in (await http.get("/v1/skills")).json()["skills"]}
+    assert listed["ads-ugc"]["card"]["showcase"] == ["gen-2"]
+    # Las incluidas traen su ficha.
+    assert listed["tratamiento"]["card"]["summary"] and listed["tratamiento"]["card"]["examples"]
+    # La ficha no llega al agente.
+    chat = (await http.post("/v1/chats", json={})).json()
+    await send(http, chat["id"], "/ads-ugc anuncio")
+    sent = json.dumps(claude.requests[-1])
+    assert "gen-1" not in sent and "anuncios" not in sent

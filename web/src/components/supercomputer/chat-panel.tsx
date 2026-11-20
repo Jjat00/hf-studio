@@ -271,6 +271,8 @@ export type ChatPanelProps = {
   variant?: "page" | "panel";
   /** Tras cada respuesta (para releer la lista de chats). */
   onActivity?: () => void;
+  /** Texto con el que empieza el compositor (p. ej. «/videoclip Videoclip para…» desde la galería de skills). */
+  initialText?: string;
   /** Saludo del chat vacío y sugerencias en las que se hace clic (en `panel`). */
   greeting?: ReactNode;
   suggestions?: string[];
@@ -285,7 +287,7 @@ export type ChatPanelProps = {
  * llegan como tarjetas con precio; solo el clic del usuario en una de ellas genera (o el tope de generación
  * automática que el usuario fijó).
  */
-export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onActivity, greeting, suggestions, quickActions, quickActionsTitle, placeholder }: ChatPanelProps) {
+export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onActivity, initialText, greeting, suggestions, quickActions, quickActionsTitle, placeholder }: ChatPanelProps) {
   const { t, locale } = useI18n();
   const s = t.supercomputer;
   const panel = variant === "panel";
@@ -297,7 +299,7 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
   const [pending, setPending] = useState<ChatMessage | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [cost, setCost] = useState<number | null>(null);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText ?? "");
   const [mode, setMode] = useState<ChatMode>("ask");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
