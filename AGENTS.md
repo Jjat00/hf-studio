@@ -46,10 +46,10 @@ owner's credits.
 - Kling 3.0 elements: `list_elements` / `create_element` (2–4 JPG/PNG images). Put their `el_…` ids in the model's
   `elements` field and cite each as `@name` in the prompt; they run on APIMart and KIE only (KIE also needs
   `image_url`).
-- Seedance 2.5 Draft (`bytedance/seedance-2.5-draft/…`, APIMart and KIE only): a cheap 480p draft of a Seedance 2.5
-  video. To get the same scene at 1080p, generate `bytedance/seedance-2.5-draft/final` with
-  `draft_generation_id` = the draft's generation id; it runs on the store that made the draft (within 3 days on
-  APIMart, 7 on KIE) and its price is approximate.
+- Seedance 2.5 Draft (`bytedance/seedance-2.5-draft/…`, on Higgsfield, APIMart and KIE): a cheap 480p draft of a
+  Seedance 2.5 video. To get the same scene at 1080p, generate `bytedance/seedance-2.5-draft/final` with
+  `draft_generation_id` = the draft's generation id; it runs on the provider that made the draft (within 7 days on
+  Higgsfield and KIE, 3 on APIMart) and its price is approximate.
 - Genjutsu Restyle (`higgsfield/genjutsu/restyle/v1.0`) restyles a video and keeps its motion and audio: pick the
   style with `list_styles` and pass its id in `preset_id` (styles change without notice). Prefer Higgsfield's own
   functions over imitating them: AI Influencer (`higgsfield/ai-influencer`) takes `selection` keys from
@@ -76,7 +76,7 @@ cd web && pnpm lint && pnpm exec next typegen && npx tsc --noEmit
   (free Spanish voices with edge-tts: catalog and cached samples, used by the `/voices` page), `pricing.py`
   (quotes), `usage.py` (spend by day, provider and model for the `/usage` page: quoted price, not the reconciled charge), `mcp_server.py` (MCP tools), `mcp_ui/generation.html` (MCP Apps chat card, plain HTML and JS that talks to the host over postMessage), `setup.py` (first run and `connect`), `launcher.py` (`start`), `store/` (models that only APIMart and KIE sell, `store: true`: one module per family with `MODELS`, its
   routes and price; the router never offers them to Higgsfield. A module may also add cheaper store routes to a
-  Higgsfield id, as `seedream.py`, `kling_image.py` and `ltx.py` do), `catalog.json` (105 model schemas,
+  Higgsfield id, as `seedream.py`, `kling_image.py` and `ltx.py` do), `catalog.json` (108 model schemas,
   regenerated with `hf-studio sync-catalog`; entries whose `docs_url` is on open.higgsfield.ai are hand-written and kept), `spaces.py` (Spaces canvas: graph validation), `space_runs.py` (server-side runs of a
   canvas with an approved budget), `space_tools.py` (free local tools as catalog models: frame, combine, mix, run with ffmpeg by an
   internal worker-only provider), `factory.py` (Content Factory: the `hf-studio/content-factory` catalog model and its worker-only provider; narrates each scene with edge-tts or ElevenLabs, renders 9:16, 16:9 or 1:1 with a pinned `npx hyperframes` and mixes the voice at -14 LUFS; reports unavailable without Node.js 22+), `factory_formats.py` (video formats: what-if, quick and long explainers, top list, news, tutorial, versus, story, product ad and a custom one; structure, tone, pacing, durations, aspects and whether they search the web), `factory_script.py` (episode script format and `POST /v1/factory/scripts`: Claude with structured output, or with web search and a strict `submit_script` tool when the format researches; technical fields travel in one `data` JSON string and are validated here), `factory_compose.py` (deterministic HyperFrames HTML: data layouts, word-synced captions, WAAPI animations, safe zones per aspect), `factory_rich.py` (technical layouts: KaTeX equations revealed on cue words, function plots, signals with a real FFT spectrum, three.js 3D driven by `hf-seek` with a 2D fallback, diagrams, code; KaTeX and three.js vendored in `factory_assets/vendor`), `factory_math.py` (whitelist expression parser evaluated with numpy, never `eval`; LaTeX checks, FFT, code highlighting, JSON safe inside `<script>`), `factory_styles.py` (the visual styles; bundled OFL fonts in `factory_assets/fonts`, previews in `web/public/factory`), `factory_world.py` (hand-drawn continent outlines for the dot map), `space_audio.py` (Spaces audio nodes: voice, effect and music on ElevenLabs as catalog models), `space_assistant.py` (Spaces

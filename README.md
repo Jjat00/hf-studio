@@ -109,7 +109,7 @@ the cheapest provider that offers **the exact same model and settings**:
   an approved budget. It keeps the language of the reference (pacing, camera, color, type) without copying it shot
   by shot.
 - **Draft first, then 1080p:** Seedance 2.5 Draft makes a cheap 480p draft, and "Finalize" renders that same scene
-  at 1080p (APIMart and KIE only).
+  at 1080p (Higgsfield, APIMart or KIE).
 - **Spaces, a node canvas to generate step by step** (`/spaces`, inspired by Magnific Spaces): connect texts,
   media, lists and any catalog model, and each step's output feeds the next one. Every node shows its cost in USD
   before you generate and keeps its run history. Right-click or press `/` to add a node; drag an output to an empty

@@ -100,7 +100,7 @@ al proveedor más barato que ofrezca **exactamente el mismo modelo y la misma co
   que corres con un presupuesto aprobado. Conserva el lenguaje de la referencia (ritmo, cámara, color, tipografía)
   sin copiarla toma por toma.
 - **Primero el borrador, luego 1080p:** Seedance 2.5 Draft hace un borrador barato a 480p y «Pasar a 1080p» renderiza
-  esa misma escena a 1080p (solo APIMart y KIE).
+  esa misma escena a 1080p (Higgsfield, APIMart o KIE).
 - **Spaces, un lienzo de nodos para generar por pasos** (`/spaces`, inspirado en Magnific Spaces): conecta textos,
   medios, listas y cualquier modelo del catálogo; la salida de cada paso alimenta al siguiente. Cada nodo muestra su
   costo en USD antes de generar y guarda su historial. Clic derecho o `/` para añadir un nodo; arrastra una salida a un

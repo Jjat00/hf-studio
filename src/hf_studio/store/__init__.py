@@ -41,7 +41,7 @@ def models() -> dict[str, dict[str, Any]]:
         for model in getattr(module, "MODELS", ()):
             if model["id"] in found:
                 raise ValueError(f"store model {model['id']} is defined twice")
-            found[model["id"]] = {**model, "store": True}
+            found[model["id"]] = {"store": True, **model}  # `store: False` si Higgsfield también lo hace
     return found
 
 

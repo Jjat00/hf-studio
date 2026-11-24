@@ -18,7 +18,7 @@ export function isFinishableDraft(g: Pick<Generation, "model" | "status">) {
 }
 
 /**
- * «Pasar a 1080p»: el mismo borrador (prompt, referencias, duración, semilla) renderizado a 1080p en la tienda que
+ * «Pasar a 1080p»: el mismo borrador (prompt, referencias, duración, semilla) renderizado a 1080p en el proveedor que
  * lo hizo. Cotiza, muestra el precio, y solo con el OK del usuario genera con ese tope. `onStarted` recibe la nueva
  * generación; sin él, abre su detalle.
  */

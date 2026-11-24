@@ -1,7 +1,14 @@
 """Seedance 2.5 Draft: borrador barato a 480p y, del borrador elegido, el video final a 1080p con la misma escena.
 
 El final reutiliza el prompt, las referencias, la duración, el formato, la semilla y el audio del borrador, así
-que es la misma toma en alta calidad, no otra tirada. Solo lo ofrecen las tiendas (Higgsfield no):
+que es la misma toma en alta calidad, no otra tirada. Lo ofrecen Higgsfield (desde el 2026-11) y las tiendas:
+
+- Higgsfield: https://open.higgsfield.ai/models/bytedance/seedance-2.5/finalize-draft/api-reference. Borrador con
+  `draft: true` en el mismo endpoint de Seedance 2.5 (fuerza 480p, MP4 y bitrate estándar; se cotiza con su
+  `/estimate` a 480p); final con `bytedance/seedance-2.5/finalize-draft`, `draft_id` = el `request_id` del
+  borrador y `resolution: 1080p` (vale 7 días). El final cobra por segundo de salida a su propia tarifa, que
+  `/estimate` no da sin un borrador real: `HIGGSFIELD_FINAL_USD` (publicada el 2026-11-24), aproximado. El router
+  lo resuelve en `Router._higgsfield_draft`.
 
 - APIMart `seedance-2.5`: https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation.md (sección
   «Draft mode»). Borrador con `draft: true` (solo 480p); final con `draft_task_id` (solo 1080p, sin reenviar
@@ -30,8 +37,11 @@ FINAL_ID = f"{FAMILY}/final"
 MODES = ("text-to-video", "image-to-video", "reference-to-video")
 DOCS = "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation"
 # Cuánto vale un borrador en cada tienda para hacer su final.
-EXPIRES = {"apimart": timedelta(days=3), "kie": timedelta(days=7)}
+EXPIRES = {"higgsfield": timedelta(days=7), "apimart": timedelta(days=3), "kie": timedelta(days=7)}
 KIE_FINAL = "bytedance/seedance-2-5-draft"
+HIGGSFIELD_FINAL = "bytedance/seedance-2.5/finalize-draft"
+# USD por segundo de salida del final en Higgsfield, sin y con video de entrada en el borrador (2026-11-24).
+HIGGSFIELD_FINAL_USD = {False: 0.6518, True: 0.7858}
 
 
 def draft_id(mode: str) -> str:
@@ -40,6 +50,11 @@ def draft_id(mode: str) -> str:
 
 def is_draft(model_id: str) -> bool:
     return model_id.startswith(f"{FAMILY}/") and model_id != FINAL_ID
+
+
+def higgsfield_base(model_id: str) -> str:
+    """El modelo de Seedance 2.5 de Higgsfield que hace el borrador (`draft: true`)."""
+    return f"bytedance/seedance-2.5/{model_id.removeprefix(f'{FAMILY}/')}"
 
 
 def _seedance_25(mode: str) -> dict[str, Any]:
@@ -66,16 +81,17 @@ def _models() -> list[dict[str, Any]]:
                 ),
                 "family": "seedance-2-5-draft",
                 "notes": [
-                    "A 480p preview billed like a normal 480p Seedance 2.5 video, on APIMart or KIE (not Higgsfield).",
+                    "A 480p preview billed like a normal 480p Seedance 2.5 video, on Higgsfield, APIMart or KIE.",
                     (
                         f"To get the 1080p video, run {FINAL_ID} with draft_generation_id = this generation's id. It "
                         "keeps the prompt, references, duration, aspect ratio, seed and audio, so it is the same shot."
                     ),
-                    "The draft can be finished within 3 days on APIMart and 7 days on KIE.",
+                    "The draft can be finished within 7 days on Higgsfield and KIE, and 3 days on APIMart.",
                     *base.get("notes", []),
                 ],
                 "docs_url": DOCS,
                 "input_schema": schema,
+                "store": False,  # también Higgsfield (`Router._higgsfield_draft`)
             }
         )
     found.append(
@@ -94,8 +110,10 @@ def _models() -> list[dict[str, Any]]:
                     "the draft."
                 ),
                 "Billed like a 1080p Seedance 2.5 video of the same duration (approximate: settled after generating).",
+                "Higgsfield finishes its drafts as MP4 only.",
             ],
             "docs_url": DOCS,
+            "store": False,
             "input_schema": {
                 "type": "object",
                 "title": "Seedance 2.5 Draft final",
