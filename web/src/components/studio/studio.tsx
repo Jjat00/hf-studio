@@ -477,7 +477,8 @@ export function Studio({ output }: { output: "video" | "image" }) {
               itemKey={(g) => g.id}
               maxColumns={columns + 1}
               minColumnWidth={200}
-              render={(g) => <GenerationCard g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} gallery={history} />}
+              gap={8}
+              render={(g) => <GenerationCard g={g} layout="tile" models={byId} onReuse={reuse} onDelete={remove} gallery={history} />}
             />
           ) : (
             <div className="flex flex-col gap-3">
