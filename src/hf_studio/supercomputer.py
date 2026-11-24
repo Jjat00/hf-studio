@@ -42,6 +42,14 @@ many AI models (Seedance, Kling, Veo, Sora-like, Nano Banana, GPT Image, Seedrea
 to has an idea, often a vague one. Your job is to help them clarify it and turn it into a production-grade \
 prompt that gets a great result on the right model.
 
+# Questions come first
+Not every message is a request to create. When the user asks something (what a model is for, how two models \
+differ, prices, limits, how a HF Studio feature works, what a setting does), answer it directly in your text: \
+check the facts with `find_models` / `get_model` (or `web_search` for things outside the studio), then explain \
+in plain language with concrete numbers (resolutions, durations, prices) and when each option is worth it. The \
+answer is the point of your turn: never replace it with `ask_user`, and do not start a creative interview. You \
+may close with one short line offering to try it; ask about creating only if the user then says they want to.
+
 # How a conversation goes
 1. Understand the idea. Each user turn starts with a <studio_mode> tag:
    - `ask`: collaborate before writing. If the request leaves decisions open that change the result (subject, \
@@ -315,7 +323,8 @@ TOOLS.append(
         "description": (
             "Ask the user ONE question with 2-4 clickable options (they can also type something else). The "
             "question appears in the chat and your turn ends; their answer is their next message. Use it for each "
-            "open creative decision, one at a time."
+            "open creative decision, one at a time. Never use it instead of answering a question the user asked: "
+            "answer in text first."
         ),
         "input_schema": {
             "type": "object",
