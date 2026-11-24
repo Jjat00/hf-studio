@@ -15,6 +15,7 @@ import {
   Palette,
   Plus,
   ScanEye,
+  Clapperboard,
   Search,
   Sparkles,
   Video,
@@ -141,6 +142,8 @@ export function Composer({
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [extra, setExtraState] = useState<CinemaExtra>(EMPTY_CINEMA);
   const [panel, setPanel] = useState<Panel | null>(null);
+  // Como Higgsfield (2026-11): la fila de dirección va plegada y se abre con su botón o al abrir una de sus ventanas.
+  const [direction, setDirection] = useState(false);
   const [refsTab, setRefsTab] = useState<RefsTab>("uploads");
   // Casilla a la que van las imágenes que se añadan (primer o último fotograma); null: la primera libre.
   const [frameTarget, setFrameTarget] = useState<string | null>(null);
@@ -567,7 +570,7 @@ export function Composer({
       <div className="relative min-w-0 flex-1 rounded-[22px] border border-line-2 bg-surface-2 p-1.5 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.8)]">
         <CinemaAnchorContext.Provider value={panelsBelow ? "below" : "above"}>
           {isCinema ? (
-            <CinemaControls
+            (direction || (panel !== null && panel !== "refs" && panel !== "style")) && <CinemaControls
               variant="row"
               keys={cinemaKeys}
               values={values}
@@ -805,6 +808,7 @@ export function Composer({
                   }}
                 >
                   <Plus className="size-4" />
+                  {refs.length > 0 && <span className="ml-0.5 text-[12px] font-semibold">{refs.length}</span>}
                 </IconChip>
               )}
               {imageSlot && (
@@ -815,6 +819,11 @@ export function Composer({
               {cinemaKeys.includes("camera_movement") && (
                 <IconChip title={c.movement} onClick={() => openPanel("camera", { cameraTab: "movement" })}>
                   <ScanEye className="size-4" />
+                </IconChip>
+              )}
+              {isCinema && (
+                <IconChip title={c.direction} onClick={() => setDirection(!direction)}>
+                  <Clapperboard className={clsx("size-4", direction && "text-lime")} />
                 </IconChip>
               )}
               <Pop
@@ -973,7 +982,7 @@ const CHIP = "flex h-8 items-center gap-1 rounded-lg bg-surface-4/60 px-2 text-[
 
 function IconChip({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) {
   return (
-    <button type="button" title={title} aria-label={title} onClick={onClick} className="flex size-8 items-center justify-center rounded-lg text-fg-2 transition-colors hover:bg-surface-5 hover:text-fg">
+    <button type="button" title={title} aria-label={title} onClick={onClick} className="flex h-8 min-w-8 items-center justify-center rounded-lg px-1 text-fg-2 transition-colors hover:bg-surface-5 hover:text-fg">
       {children}
     </button>
   );

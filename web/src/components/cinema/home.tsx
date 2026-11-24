@@ -322,8 +322,16 @@ function HomeView({
       <div className="mt-8 w-full max-w-[880px]">
         <Composer panelsBelow onGenerated={generations.add} />
       </div>
+      {/* Como Higgsfield (2026-11): los proyectos justo debajo del compositor; lo reciente, después. */}
+      <div className="mt-12 w-full">
+        <button type="button" onClick={onAll} className="mb-4 flex items-center gap-1 text-[18px] font-semibold text-fg hover:text-lime">
+          {cs.myProjects} <ChevronRight className="size-5" />
+        </button>
+        <ProjectGrid projects={projects} onCreate={onCreate} limit={5} />
+        {projects?.length === 0 && <p className="mt-4 text-sm text-fg-3">{cs.noProjects}</p>}
+      </div>
       {(generations.loading || generations.error || latest.length > 0) && (
-        <div className="mt-12 w-full">
+        <div className="mt-16 w-full">
           <button type="button" onClick={onGenerations} className="mb-4 flex items-center gap-1 text-[18px] font-semibold text-fg hover:text-lime">
             {cs.recent} <ChevronRight className="size-5" />
           </button>
@@ -331,13 +339,6 @@ function HomeView({
           {(generations.loading || latest.length > 0) && <GenerationsGrid list={generations} items={latest} empty={cs.noGenerations} />}
         </div>
       )}
-      <div className="mt-16 w-full">
-        <button type="button" onClick={onAll} className="mb-4 flex items-center gap-1 text-[18px] font-semibold text-fg hover:text-lime">
-          {cs.myProjects} <ChevronRight className="size-5" />
-        </button>
-        <ProjectGrid projects={projects} onCreate={onCreate} limit={5} />
-        {projects?.length === 0 && <p className="mt-4 text-sm text-fg-3">{cs.noProjects}</p>}
-      </div>
     </div>
   );
 }
