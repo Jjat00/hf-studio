@@ -69,9 +69,9 @@ elegida. delete_voice borra una voz de la cuenta (pide confirmación). Para espa
 Al generar audio, pasa title, category (voice, scream, laugh, creature, ambience, impact, foley, transition,
 music, other) y tags para que quede bien ordenado en la sonoteca. Antes de generar un sonido, busca en
 list_sounds si ya existe uno que sirva: reutilizarlo es gratis.
-Seedance 2.5 Draft (bytedance/seedance-2.5-draft/…, solo APIMart y KIE): borrador barato a 480p. Para la misma
-escena en 1080p, genera bytedance/seedance-2.5-draft/final con draft_generation_id = id de la generación del
-borrador (va a la tienda que lo hizo; vale 3 días en APIMart y 7 en KIE; precio aproximado). Úsalo para probar
+Seedance 2.5 Draft (bytedance/seedance-2.5-draft/…, en Higgsfield, APIMart y KIE): borrador barato a 480p. Para la
+misma escena en 1080p, genera bytedance/seedance-2.5-draft/final con draft_generation_id = id de la generación del
+borrador (va al proveedor que lo hizo; vale 7 días en Higgsfield y KIE y 3 en APIMart; precio aproximado). Úsalo para probar
 varias versiones de una escena larga o cara antes de pagar la buena en 1080p.
 Elementos: personajes, lugares o props reutilizables con nombre, descripción y 1 a 4 imágenes (Kling 3.0 pide 2+)
 JPG/PNG. create_element los guarda; list_elements los muestra. Para usarlos, pon sus ids (el_…) en el campo

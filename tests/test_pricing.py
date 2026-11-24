@@ -333,3 +333,29 @@ def test_placeholders_fill_an_empty_required_list_of_an_if_branch():
         assert added and get_catalog().validate("minimax/h3-lite/reference-to-video", filled) == []
     real = {"prompt": "x", "image_urls": ["https://x/a.png"], "video_urls": []}
     assert fill_placeholders(schema, real) == (real, [])
+
+
+def test_rates_per_video_second_with_4k_and_hdr():
+    """Texto de Higgsfield desde 2026-11-24 (Seedance 2.5 y Kling 4.0), con 4K y el recargo HDR."""
+    import pytest
+
+    from hf_studio.pricing import approximate
+
+    kling = (
+        "Standard self-serve rates in USD per video second: 720p: $0.1257; 1080p: $0.1879; 4K: $0.549. Total price "
+        "= selected rate × output duration in seconds.\n\nHDR adds $0.047 per second of output video at 1080p or "
+        "$0.078 at 4K, after base-price discounts, including fixed-price agreements. SDR has no additional charge."
+    )
+    assert approximate(kling, {"duration": 5, "resolution": "1080p"}, {})["usd"] == pytest.approx(0.9395)
+    hdr = approximate(kling, {"duration": 5, "resolution": "4k", "dynamic_range": "hdr"}, {})
+    assert hdr["usd"] == pytest.approx(5 * (0.549 + 0.078))
+    assert (
+        approximate(kling, {"duration": 5, "resolution": "720p", "dynamic_range": "hdr"}, {})["usd"] is None
+    )
+    refs = (
+        "Standard self-serve rates in USD per second of generated video.\n\n- Without video input: 480p: $0.1177; "
+        "720p: $0.2647; 1080p: $0.6518.\n- With video input: 480p: $0.1387; 720p: $0.3264; 1080p: $0.7858.\n\n"
+        "Total price = selected rate × output duration in seconds."
+    )
+    with_video = approximate(refs, {"duration": 5, "resolution": "720p", "video_urls": ["v"]}, {})
+    assert with_video["usd"] == pytest.approx(5 * 0.3264)

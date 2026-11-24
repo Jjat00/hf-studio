@@ -1,15 +1,16 @@
-"""Kling que Higgsfield no trae: Kling 2.1 (Standard, Pro y Master) y Kling AI Avatar (imagen + audio), en KIE.
+"""Kling que Higgsfield no trae: Kling 2.1 (Standard y Pro) y Kling AI Avatar (imagen + audio), en KIE.
 
 Fuentes (revisadas el 2026-10-17):
 - KIE, API unificada (`jobs/createTask`), un id por variante:
   https://docs.kie.ai/market/kling/v2-1-standard.md y .../v2-1-pro.md (imagen a video; Pro admite
-  `tail_image_url`), .../v2-1-master-text-to-video.md y .../v2-1-master-image-to-video.md. Todas: `duration`
-  "5" o "10", `negative_prompt` hasta 500 caracteres, `cfg_scale` de 0 a 1 en pasos de 0,1.
+  `tail_image_url`). Las dos: `duration` "5" o "10", `negative_prompt` hasta 500 caracteres, `cfg_scale` de 0 a 1 en pasos de 0,1.
   https://docs.kie.ai/market/kling/ai-avatar-standard.md y .../ai-avatar-pro.md: imagen, audio (hasta 5
   minutos) y prompt obligatorios.
 - Tabla pública `api.kie.ai/client/v1/model-pricing/page`: Kling 2.1 por video (`kling 2.1, video-generation,
-  standard-5.0s`, `kling 2.1, image-to-video, master-10.0s`…); AI Avatar por segundo de audio
+  standard-5.0s`…); AI Avatar por segundo de audio
   (`kling ai avatar, lip sync, pro-1080p (audio up to 5 minutes)`).
+
+Kling 2.1 Master salió el 2026-11-24: KIE lo retiró (responde 410 y su fila ya no está en la tabla).
 
 APIMart no vende Kling 2.1 ni AI Avatar (sin filas en su tabla). El precio del avatar depende de la duración
 del audio: `hints["input_audio_seconds"]` (ver `avatars.audio_seconds`).
@@ -32,10 +33,6 @@ V21 = (
     ("kling-video/v2.1/standard/image-to-video", "kling/v2-1-standard", "Kling 2.1 Standard",
      "video-generation, standard"),
     ("kling-video/v2.1/pro/image-to-video", "kling/v2-1-pro", "Kling 2.1 Pro", "video-generation, pro"),
-    ("kling-video/v2.1/master/image-to-video", "kling/v2-1-master-image-to-video", "Kling 2.1 Master",
-     "image-to-video, master"),
-    ("kling-video/v2.1/master/text-to-video", "kling/v2-1-master-text-to-video", "Kling 2.1 Master",
-     "text-to-video, master"),
 )  # fmt: skip
 AVATARS = (("standard", "Standard", "720p"), ("pro", "Pro", "1080p"))
 

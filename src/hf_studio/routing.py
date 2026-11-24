@@ -32,6 +32,7 @@ from .space_tools import (
     TOOL_PROVIDER,
     is_tool,
 )
+from .store import seedance_draft
 from .store.seedance_draft import FINAL_ID as DRAFT_FINAL
 
 BALANCE_TTL = 60.0
@@ -265,6 +266,8 @@ class Router:
         """Una opción por canal del proveedor que puede hacer el pedido (los que no, van a `excluded`)."""
         info = {"provider": provider.name, "title": provider.title}
         if provider.name == DEFAULT_PROVIDER:
+            if seedance_draft.is_draft(model["id"]) or model["id"] == DRAFT_FINAL:
+                return await self._higgsfield_draft(provider, model, arguments, hints, excluded, route)
             if model.get("store"):
                 # Modelo que solo venden las tiendas (`store/`): Higgsfield no lo tiene.
                 excluded.append(
@@ -307,6 +310,44 @@ class Router:
             if option is not None:
                 options.append(option)
         return options
+
+    async def _higgsfield_draft(
+        self, provider: Provider, model: dict, arguments: dict, hints: dict, excluded: list, route: str | None
+    ) -> list[Option]:
+        """Seedance 2.5 Draft en Higgsfield: el borrador es su Seedance 2.5 con `draft: true` (siempre 480p y MP4) y
+        el final, `finalize-draft` con el `request_id` del borrador (ver `store/seedance_draft.py`)."""
+        info = {"provider": provider.name, "title": provider.title, "model": model["id"]}
+        if arguments.get("output_format") not in (None, "mp4"):
+            excluded.append({**info, "reason": "Higgsfield makes Seedance 2.5 drafts as MP4 only"})
+            return []
+        if model["id"] == DRAFT_FINAL:
+            if route is not None and route != seedance_draft.HIGGSFIELD_FINAL:
+                return []
+            draft = hints.get("draft") or {}
+            duration = draft.get("duration")
+            usd = (
+                round(seedance_draft.HIGGSFIELD_FINAL_USD[bool(draft.get("has_video"))] * duration, 4)
+                if isinstance(duration, int | float) and duration > 0
+                else None
+            )
+            body = {"draft_id": draft.get("task_id"), "resolution": "1080p"}
+            return [Option(provider.name, provider.title, seedance_draft.HIGGSFIELD_FINAL, body, usd,
+                           "approx" if usd is not None else "unavailable",
+                           "Higgsfield's published 1080p finalization rate per output second")]  # fmt: skip
+        base_id = seedance_draft.higgsfield_base(model["id"])
+        base = self.catalog.get(base_id)
+        if base is None or (route is not None and route != base_id):
+            return []
+        draft_args = {**arguments, "resolution": "480p"}
+        priced = await quote(provider, self.catalog, base, draft_args, hints)
+        if priced["kind"] == "unavailable" and priced.get("errors"):
+            excluded.append({**info, "reason": priced["basis"]})
+            return []
+        return [Option(
+            provider.name, provider.title, base_id, {**draft_args, "draft": True}, priced["usd"], priced["kind"],
+            priced["basis"], credits=priced.get("credits"), discount_pct=priced.get("discount_pct"),
+            missing=priced.get("missing") or [], description=priced.get("description"),
+        )]  # fmt: skip
 
     def _route_option(
         self,

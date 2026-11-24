@@ -38,29 +38,28 @@ def refused(model_id: str, **extra) -> None:
 
 def test_every_model_is_in_the_catalog_on_kie_only():
     ids = {m["id"] for m in k.MODELS}
-    assert len(ids) == 6 and set(ROUTES) == ids
+    assert len(ids) == 4 and set(ROUTES) == ids
     assert not hasattr(k, "apimart")  # APIMart no vende Kling 2.1 ni AI Avatar
     for model_id in ids:
         assert get_catalog().get(model_id)["store"] is True
 
 
 def test_kling21_bodies_and_prices():
-    t2v = "kling-video/v2.1/master/text-to-video"
-    assert body(t2v, prompt="a fox", negative_prompt="") == {
-        "prompt": "a fox", "duration": "5", "aspect_ratio": "16:9", "cfg_scale": 0.5}  # fmt: skip
-    assert ROUTES[t2v].model == "kling/v2-1-master-text-to-video"
-    assert price(t2v, prompt="x", duration=10) == 2.52
+    std = "kling-video/v2.1/standard/image-to-video"
+    assert body(std, prompt="a fox", image_url=IMG, negative_prompt="") == {
+        "prompt": "a fox", "image_url": IMG, "duration": "5", "cfg_scale": 0.5}  # fmt: skip
+    assert ROUTES[std].model == "kling/v2-1-standard"
     pro = "kling-video/v2.1/pro/image-to-video"
     out = body(pro, prompt="runs", image_url=IMG, end_image_url=END, negative_prompt="blur", duration=10)
     assert out == {"prompt": "runs", "image_url": IMG, "tail_image_url": END, "negative_prompt": "blur",
                    "duration": "10", "cfg_scale": 0.5}  # fmt: skip
     assert price(pro, prompt="x", image_url=IMG) == 0.44
     assert price("kling-video/v2.1/standard/image-to-video", prompt="x", image_url=IMG, duration=10) == 0.505
-    assert price("kling-video/v2.1/master/image-to-video", prompt="x", image_url=IMG) == 1.26
+    assert "kling-video/v2.1/master/text-to-video" not in ROUTES  # KIE lo retiró el 2026-11-24
     # Solo Pro tiene último fotograma; cfg_scale en pasos de 0,1
     refused("kling-video/v2.1/standard/image-to-video", prompt="x", image_url=IMG, end_image_url=END)
-    refused(t2v, prompt="x", cfg_scale=0.55)
-    assert body(t2v, prompt="x", cfg_scale=0.3)["cfg_scale"] == 0.3
+    refused(std, prompt="x", image_url=IMG, cfg_scale=0.55)
+    assert body(std, prompt="x", image_url=IMG, cfg_scale=0.3)["cfg_scale"] == 0.3
 
 
 def test_ai_avatar_is_priced_by_the_audio():

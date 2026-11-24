@@ -1,10 +1,10 @@
-"""Seedance 2.5 Draft (`store/seedance_draft.py`): borrador a 480p y final a 1080p en la misma tienda. Sin gastar."""
+"""Seedance 2.5 Draft (`store/seedance_draft.py`): borrador a 480p y final a 1080p en el mismo proveedor. Sin gastar."""
 
 from __future__ import annotations
 
 from sqlalchemy import update
 
-from hf_studio.db import Job
+from hf_studio.db import Job, utcnow
 from hf_studio.store import seedance_draft as sd
 from tests.test_routing import env, tick  # noqa: F401  (fixture)
 
@@ -37,8 +37,10 @@ async def test_the_draft_is_seedance_25_at_480p_with_draft_on(env):  # noqa: F81
     quote = (
         await http.post("/v1/estimate", json={"model": T2V, "input": {"prompt": "x", "duration": 8}})
     ).json()
-    assert [o["provider"] for o in quote["options"]] == ["apimart", "kie"]  # Higgsfield no lo ofrece
+    assert [o["provider"] for o in quote["options"]] == ["apimart", "kie", "higgsfield"]
     assert quote["usd"] == round(8 * 0.09608, 4)
+    higgsfield = quote["options"][-1]
+    assert higgsfield["model"] == "bytedance/seedance-2.5/text-to-video" and higgsfield["usd"] == 1.51
     await draft(http, app, fakes)
     sent = fakes.sent["apimart"][0]
     assert sent["model"] == "seedance-2.5" and sent["draft"] is True and sent["resolution"] == "480p"
@@ -85,6 +87,42 @@ async def test_a_kie_draft_is_finished_on_kie(env):  # noqa: F811
         "model": "bytedance/seedance-2-5-draft",
         "input": {"draft_task_id": "kie-draft", "resolution": "1080p", "output_format": "mp4"},
     }
+
+
+async def test_a_higgsfield_draft_is_finished_on_higgsfield(env):  # noqa: F811
+    app, http, fakes = env
+    job = (await http.post("/v1/generations", json={
+        "model": T2V, "input": {"prompt": "a fox", "duration": 8}, "provider": "higgsfield", "max_usd": 5,
+    })).json()  # fmt: skip
+    await tick(app)
+    assert fakes.sent["higgsfield"][0] == {
+        "prompt": "a fox",
+        "duration": 8,
+        "resolution": "480p",
+        "draft": True,
+    }
+    async with app.state.sessions() as s:  # Higgsfield simulado no termina: se da por terminado
+        await s.execute(
+            update(Job)
+            .where(Job.id == job["id"])
+            .values(status="completed", finished_at=utcnow(), hf_request_id="hf-draft")
+        )
+        await s.commit()
+    quote = (
+        await http.post("/v1/estimate", json={"model": FINAL, "input": {"draft_generation_id": job["id"]}})
+    ).json()
+    assert [o["provider"] for o in quote["options"]] == ["higgsfield"]
+    assert quote["kind"] == "approx" and quote["usd"] == round(8 * 0.6518, 4)
+    mov = (
+        await http.post("/v1/estimate", json={
+            "model": FINAL, "input": {"draft_generation_id": job["id"], "output_format": "mov"}})
+    ).json()  # fmt: skip
+    assert mov["options"] == [] and "MP4" in mov["excluded"][0]["reason"]
+    await http.post("/v1/generations", json={
+        "model": FINAL, "input": {"draft_generation_id": job["id"]}, "max_usd": quote["usd"],
+    })  # fmt: skip
+    await tick(app)
+    assert fakes.sent["higgsfield"][-1] == {"draft_id": "hf-draft", "resolution": "1080p"}
 
 
 async def test_only_your_finished_drafts_can_be_finished(env):  # noqa: F811

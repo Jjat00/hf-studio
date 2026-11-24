@@ -103,6 +103,18 @@ def _count_video_inputs(args: dict) -> int:
     return n
 
 
+def _hdr_rate(text: str, res: str) -> float | None:
+    """Recargo HDR por segundo de salida (Kling 4.0, 2026-11-24): «HDR adds $0.047 per second of output video at
+    1080p or $0.078 at 4K»."""
+    if m := re.search(r"HDR adds (.*?)(?:,|\.\s|\.$)", text):
+        rates = {
+            r.lower(): float(v)
+            for v, r in re.findall(MONEY + r"(?: per second of output video)? at (\d+[pK])", m.group(1))
+        }
+        return rates.get(res)
+    return None
+
+
 def approximate(
     description: str, args: dict, hints: dict, model_id: str | None = None, output_follows_input: bool = False
 ) -> dict:
@@ -166,11 +178,22 @@ def approximate(
     # A3b) Kling 4.0 desde 2026-11: «- Without video input: 720p: $0.1257; 1080p: $0.1879. - With video input: 720p:
     # $0.1544; …. Total price = selected rate × output duration in seconds. Input video duration is not added». La
     # tarifa depende de si hay video de entrada, pero solo se cobra la salida.
-    if m := re.search(r"Without video input: (.*?)\.\s*- With video input: (.*?)\.\s", text):
-        rates = dict(re.findall(r"(\d+p): " + MONEY, m.group(2 if has_video_input else 1)))
+    # A3d) Seedance 2.5 y Kling 4.0 desde 2026-11-24: «Standard self-serve rates in USD per video second: 480p:
+    # $0.1177; 720p: $0.2647; 1080p: $0.6518. Total price = selected rate × output duration» (Kling 4.0 suma «4K:
+    # $0.549»). Seedance 2.5 reference-to-video lo da en dos listas, sin y con video de entrada (como A3b).
+    per_rate = re.search(r"Without video input: (.*?)\.\s*- With video input: (.*?)\.\s", text)
+    plain_rate = re.search(r"rates in USD per video second: (.*?)\.\s", text)
+    if per_rate or plain_rate:
+        listed = per_rate.group(2 if has_video_input else 1) if per_rate else plain_rate.group(1)
+        rates = {r.lower(): v for r, v in re.findall(r"(\d+[pK]): " + MONEY, listed)}
         if res in rates:
-            return {"usd": seconds * float(rates[res]), "basis": f"{seconds:g}s × ${rates[res]}/s at {res}",
-                    "missing": []}  # fmt: skip
+            usd, basis = seconds * float(rates[res]), f"{seconds:g}s × ${rates[res]}/s at {res}"
+            if str(args.get("dynamic_range") or "").lower() == "hdr":
+                hdr = _hdr_rate(text, res)
+                if hdr is None:
+                    return {"usd": None, "basis": f"no published HDR rate for {res}", "missing": []}
+                usd, basis = usd + seconds * hdr, f"{basis} + HDR {seconds:g}s × ${hdr:g}/s"
+            return {"usd": usd, "basis": basis, "missing": []}
 
     # A3c) Kling 4.0 Flash (2026-11): «720p: without input video, $0.094 per output second. With input video, $0.063
     # per billable second. Billable duration = output duration + max(total input video duration, output duration)».

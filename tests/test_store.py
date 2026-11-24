@@ -17,6 +17,7 @@ from hf_studio.providers.base import Polled
 from hf_studio.providers.kie import KIEEndpoint, KIEProvider
 from hf_studio.providers.registry import PROVIDERS
 from hf_studio.providers.routes import routes_for
+from hf_studio.store import seedance_draft
 from tests.test_providers import KEYS, mock, settings
 from tests.test_routing import env, tick  # noqa: F401  (fixture)
 
@@ -29,7 +30,9 @@ def test_store_models_are_in_the_catalog_and_never_shadow_higgsfield():
     catalog = get_catalog()
     for model_id, model in STORE.items():
         assert model_id not in HIGGSFIELD_IDS, f"{model_id} is also a Higgsfield id"
-        assert catalog.get(model_id)["store"] is True
+        # Seedance 2.5 Draft también corre en Higgsfield (con su Seedance 2.5 y `draft: true`)
+        higgsfield_too = model_id.startswith(f"{seedance_draft.FAMILY}/")
+        assert catalog.get(model_id)["store"] is not higgsfield_too
         Draft202012Validator.check_schema(model["input_schema"])
         for key in ("title", "summary", "workflow", "family", "output", "capabilities", "notes", "docs_url"):
             assert model[key] is not None, f"{model_id}: {key}"

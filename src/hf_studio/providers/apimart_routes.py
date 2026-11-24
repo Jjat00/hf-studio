@@ -770,25 +770,29 @@ def _k4_edit_length(source: dict, hints: dict) -> None:
 def kling4() -> Routes:
     base = "kling-video/v4.0"
     common = ("prompt", "duration", "resolution")
+    # Sin 4k ni HDR: APIMart solo hace 720p y 1080p en SDR; esos pedidos van a Higgsfield o KIE.
+    res = {"resolution": ("720p", "1080p"), "dynamic_range": ("sdr",)}
+    SDR = {"dynamic_range": lambda v: None}  # sdr es lo que APIMart ya hace: no se envía
     return {
         f"{base}/text-to-video": Route(
-            P, K4, Spec(P, K4, keep=(*common, "aspect_ratio"), build=_k4_mentions), _k4_price
+            P, K4, Spec(P, K4, allowed=res, keep=(*common, "aspect_ratio"), convert=SDR, build=_k4_mentions), _k4_price
         ),
         f"{base}/image-to-video": Route(
-            P, K4, Spec(P, K4, keep=(*common, "image_url", "image_urls", "end_image_url"), build=_k4_frames),
+            P, K4, Spec(P, K4, allowed=res, keep=(*common, "image_url", "image_urls", "end_image_url"), convert=SDR,
+                 build=_k4_frames),
             _k4_price,
         ),
         f"{base}/reference-to-video": Route(
             P, K4,
-            Spec(P, K4, keep=(*common, "image_urls", "video_urls"),
-                 convert={"aspect_ratio": lambda v: "auto" if v == "adaptive" else v},
+            Spec(P, K4, allowed=res, keep=(*common, "image_urls", "video_urls"),
+                 convert={**SDR, "aspect_ratio": lambda v: "auto" if v == "adaptive" else v},
                  fixed={"omni_reference_task_type": "reference"}, build=_k4_mentions),
             _k4_price, check=_k4_refs_length,
         ),
         f"{base}/video-edit": Route(
             P, K4,
-            Spec(P, K4, keep=(*common, "video_url", "image_urls"),
-                 convert={"aspect_ratio": lambda v: None if v == "adaptive" else v,
+            Spec(P, K4, allowed=res, keep=(*common, "video_url", "image_urls"),
+                 convert={**SDR, "aspect_ratio": lambda v: None if v == "adaptive" else v,
                           "video_urls": _no_list("reference videos in an edit")},
                  fixed={"omni_reference_task_type": "edit"}, build=_k4_mentions),
             _k4_price, check=_k4_edit_length,

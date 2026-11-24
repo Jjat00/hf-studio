@@ -7,11 +7,14 @@ Higgsfield vende `kling-image/v4.0/{text-to-image,edit}` (una imagen, 2k/4k/8k, 
 - KIE `kling-4-0/image`: https://docs.kie.ai/market/kling-4-0/image.md. `prompt` hasta 20000 (cita `@image_1`…,
   como Higgsfield), `image_urls` hasta 10 (JPG o PNG de 20 MB), `resolution` 2k/4k/8k, `aspect_ratio` auto y las 8
   relaciones de Higgsfield; `mode` default con `count` 1 por omisión. Precio por imagen `kling image 4.0, image,
-  <res>` más `..., reference image or element (each)` por referencia. No se usan `elements` ni la serie.
-- APIMart `kling-v4-image`: https://docs.apimart.ai/en/api-reference/images/kling-v4-image/generation.md. Solo
-  2K y 4K (sin 8K), `size` auto y las mismas 8 relaciones, `n` 1 por omisión. Precio `kling-v4-image|<RES>` por
-  imagen. Solo texto a imagen: cobra las referencias una vez por pedido con una clave (`kling-v4-image@input`)
-  que su tabla no publica, así que la edición no tendría precio.
+  <res>` más `..., reference image or element (each)` por referencia. No se usan `elements`. La serie de
+  Higgsfield (`.../series`, 2 a 10 imágenes, 2026-11-17) es `mode: series` con `count`: se cotiza por imagen y,
+  como KIE no dice si las referencias se cobran una vez o por imagen, con la cota alta (por imagen).
+- APIMart `kling-v4-image`: https://docs.apimart.ai/en/api-reference/images/kling-v4-image/generation.md. 2K,
+  4K y 8K (el 8K tiene precio desde el 2026-11-24), `size` auto y las mismas 8 relaciones, `n` 1 por omisión.
+  Precio `kling-v4-image|<RES>` por imagen. Solo texto a imagen: cobra las referencias una vez por pedido con
+  una clave (`kling-v4-image@input`) que su tabla no publica, así que la edición no tendría precio. Su serie
+  (`sequential_image_generation: auto` y `max_images`) llega solo a 4 imágenes.
 - Long Image, una sola imagen muy alta (una página de producto desde 1 a 3 fotos, o el diseño de una web):
   KIE `kling-4-0/long-image` (https://docs.kie.ai/market/kling-4-0/long-image.md: `skill` ecommerce|webpage,
   `length` short|medium|long solo en ecommerce, `resolution` 1k|2k, `image_urls` 1 a 3 en ecommerce,
@@ -37,6 +40,7 @@ APIMART_IMAGE = "kling-v4-image"
 APIMART_LONG = "kling-v4-long-image"
 APIMART_IMAGE_MODELS = frozenset({APIMART_IMAGE, APIMART_LONG})
 KIE_MAX_PROMPT = 20000
+APIMART_MAX_SERIES = 4
 REF_PRICE = "kling image 4.0, image, reference image or element (each)"
 LONG_INPUT_PRICE = "kling image 4.0, long-image, input image (each)"
 
@@ -91,10 +95,35 @@ def _kie_prompt(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
 
 
 def _kie_image_price(i: dict[str, Any], h: dict[str, Any], p: dict[str, float]) -> float | None:
-    base = per_unit(p, f"kling image 4.0, image, {i.get('resolution', '2k')}")
-    refs = len(i.get("image_urls") or [])
+    count = int(i.get("series_amount") or 1)
+    base = per_unit(p, f"kling image 4.0, image, {i.get('resolution', '2k')}", count)
+    refs = len(i.get("image_urls") or []) * count  # en la serie, cota alta: cada referencia por imagen
     extra = per_unit(p, REF_PRICE, refs) if refs else 0.0
     return None if base is None or extra is None else round(base + extra, 4)
+
+
+def _skip(_value: Any) -> None:
+    """Campo aceptado que no se envía tal cual (`build` lo traduce)."""
+
+
+def _kie_series(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    return {**_kie_prompt(source, out), "mode": "series", "count": source["series_amount"]}
+
+
+def _apimart_series(source: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    count = source["series_amount"]
+    if count > APIMART_MAX_SERIES:
+        raise unsupported("apimart", f"APIMart makes series of at most {APIMART_MAX_SERIES} images")
+    return {
+        **out,
+        "sequential_image_generation": "auto",
+        "sequential_image_generation_options": {"max_images": count},
+    }
+
+
+def _apimart_image_price(i: dict[str, Any], h: dict[str, Any], p: dict[str, float]) -> float | None:
+    res = str(i.get("resolution", "2k")).upper()
+    return per_unit(p, f"{APIMART_IMAGE}|{res}", int(i.get("series_amount") or 1))
 
 
 def _long_images(i: dict[str, Any]) -> int:
@@ -119,10 +148,17 @@ def kie() -> dict[str, Route]:
     image = Spec(
         "kie", KIE_IMAGE, keep=("prompt", "image_urls", "resolution", "aspect_ratio"), build=_kie_prompt
     )
+    series = Spec(
+        "kie", KIE_IMAGE, keep=("prompt", "image_urls", "resolution", "aspect_ratio"),
+        convert={"series_amount": _skip}, build=_kie_series,
+    )  # fmt: skip
+    series_notes = ("References are quoted as charged once per image (KIE does not say; upper bound)",)
     long_keep = ("prompt", "resolution")
     return {
         f"{HF}/text-to-image": Route("kie", KIE_IMAGE, image, _kie_image_price),
         f"{HF}/edit": Route("kie", KIE_IMAGE, image, _kie_image_price),
+        f"{HF}/text-to-image/series": Route("kie", KIE_IMAGE, series, _kie_image_price),
+        f"{HF}/edit/series": Route("kie", KIE_IMAGE, series, _kie_image_price, notes=series_notes),
         ECOMMERCE: Route(
             "kie",
             KIE_LONG,
@@ -158,8 +194,12 @@ def _apimart_webpage(source: dict[str, Any], out: dict[str, Any]) -> dict[str, A
 
 
 def apimart() -> dict[str, Route]:
+    image = {"keep": ("prompt",), "rename": {"aspect_ratio": "size"}, "convert": {"resolution": upper}}
     return {
         f"{HF}/text-to-image": Route(
+            "apimart", APIMART_IMAGE, Spec("apimart", APIMART_IMAGE, **image), _apimart_image_price
+        ),
+        f"{HF}/text-to-image/series": Route(
             "apimart",
             APIMART_IMAGE,
             Spec(
@@ -167,10 +207,10 @@ def apimart() -> dict[str, Route]:
                 APIMART_IMAGE,
                 keep=("prompt",),
                 rename={"aspect_ratio": "size"},
-                convert={"resolution": upper},
-                allowed={"resolution": {"2k", "4k"}},
-            ),
-            lambda i, h, p: per_unit(p, f"{APIMART_IMAGE}|{str(i.get('resolution', '2k')).upper()}"),
+                convert={"resolution": upper, "series_amount": _skip},
+                build=_apimart_series,
+            ),  # fmt: skip,
+            _apimart_image_price,
         ),
         WEBPAGE: Route(
             "apimart",
