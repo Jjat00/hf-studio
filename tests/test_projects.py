@@ -172,3 +172,36 @@ async def test_an_upload_can_be_removed_from_the_list(env):  # noqa: F811
     assert (await http.delete(f"/v1/uploads/{up['id']}")).status_code == 204
     assert all(u["id"] != up["id"] for u in (await http.get("/v1/uploads")).json()["uploads"])
     assert (await http.delete(f"/v1/uploads/{up['id']}")).status_code == 404
+
+
+async def test_project_thumbnails_and_cover_use_the_local_copy(env):  # noqa: F811
+    """La URL del proveedor caduca (APIMart a los pocos días): la miniatura y la portada sirven la copia local."""
+    from sqlalchemy import update
+
+    from hf_studio.db import Job
+
+    app, http, _ = env
+    project = (await http.post("/v1/projects", json={"name": "Casa"})).json()
+    job = (
+        await http.post(
+            "/v1/generations",
+            json={"model": T2V, "input": VIDEO, "max_usd": 0.71, "project_id": project["id"]},
+        )
+    ).json()
+    remote = "https://getapib.org/f/images/aiimg_1.jpg"
+    async with app.state.sessions() as s:
+        await s.execute(
+            update(Job)
+            .where(Job.id == job["id"])
+            .values(
+                status="completed",
+                outputs=[{"kind": "image", "url": remote}],
+                files=[{"index": 0, "name": "0.jpg"}],
+            )
+        )
+        await s.commit()
+    local = f"/v1/generations/{job['id']}/files/0.jpg"
+    listed = (await http.get("/v1/projects")).json()["projects"]
+    assert listed[0]["thumbnails"] == [local]
+    await http.patch(f"/v1/projects/{project['id']}", json={"cover": remote})
+    assert (await http.get(f"/v1/projects/{project['id']}")).json()["cover"] == local

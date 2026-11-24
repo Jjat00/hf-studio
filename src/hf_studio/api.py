@@ -1578,13 +1578,37 @@ def create_app(
     async def project_view(session: AsyncSession, project: Project, full: bool = False) -> dict:
         count = await session.scalar(select(func.count(Job.id)).where(Job.project_id == project.id))
         latest = await session.scalars(
-            select(Job.outputs)
+            select(Job)
             .where(Job.project_id == project.id, Job.status == "completed", Job.hidden.is_(False))
             .order_by(Job.created_at.desc())
             .limit(4)
         )
-        thumbs = [o.get("url") for outs in latest for o in (outs or [])[:1] if o.get("url")]
+        # La copia local de la primera salida (como `file_url` en job_out): la URL del proveedor caduca (APIMart a
+        # los pocos días) y las de herramientas locales (`local://`) no se pueden abrir en el navegador.
+        thumbs = []
+        for job in latest:
+            first = (job.outputs or [None])[0]
+            local = next((f for f in job.files or [] if f.get("index") == 0), None)
+            if local:
+                thumbs.append(f"/v1/generations/{job.id}/files/{local['name']}")
+            elif first and str(first.get("url", "")).startswith("http"):
+                thumbs.append(first["url"])
         data = {**project.out(full), "generations": count or 0, "thumbnails": thumbs}
+        if project.cover and project.cover.startswith("http"):
+            # La portada guarda la URL del proveedor de una salida propia: se sirve su copia local, que no caduca.
+            jobs = await session.scalars(
+                select(Job).where(Job.project_id == project.id, Job.status == "completed")
+            )
+            for job in jobs:
+                index = next(
+                    (i for i, o in enumerate(job.outputs or []) if o.get("url") == project.cover), None
+                )
+                local = next(
+                    (f for f in job.files or [] if index is not None and f.get("index") == index), None
+                )
+                if local:
+                    data["cover"] = f"/v1/generations/{job.id}/files/{local['name']}"
+                    break
         if full:
             folders = await session.scalars(
                 select(Folder).where(Folder.project_id == project.id).order_by(Folder.name)

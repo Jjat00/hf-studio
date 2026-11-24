@@ -9,12 +9,13 @@ import type { useGenerations } from "@/components/generations/use-generations";
 import { useI18n } from "@/components/i18n-provider";
 import { Masonry } from "@/components/masonry";
 import { Markdown } from "@/components/supercomputer/chat-panel";
-import { modelMap, outputOf, reuseHref, studio } from "@/lib/studio";
+import { apiSrc, modelMap, outputOf, reuseHref, studio } from "@/lib/studio";
 import type { Generation, ModelSummary, Project, ProjectSummary } from "@/lib/types";
 
 /** Portada de un proyecto: la elegida o un mosaico con sus últimas salidas. */
 export function ProjectCover({ project, className }: { project: Pick<ProjectSummary, "cover" | "thumbnails" | "name">; className?: string }) {
-  const thumbs = project.cover ? [project.cover] : project.thumbnails.slice(0, 4);
+  // Las rutas de la API (`/v1/generations/…/files/…`, la copia local) van por el proxy de la UI.
+  const thumbs = (project.cover ? [project.cover] : project.thumbnails.slice(0, 4)).map((src) => (src.startsWith("/v1/") ? apiSrc(src) : src));
   return (
     <div className={clsx("relative aspect-video overflow-hidden rounded-xl bg-surface-3", className)}>
       {thumbs.length === 0 ? (
