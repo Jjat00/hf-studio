@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertTriangle, AudioLines, Loader2, Video } from "lucide-react";
+import clsx from "clsx";
+import { AlertTriangle, AudioLines, BookOpen, Folder, Loader2, Video } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioPlayer } from "@/components/generations/generation-card";
@@ -89,6 +90,7 @@ export function AudioStudio() {
   const [quoted, setQuoted] = useState<{ key: string; value: (Estimate & { audio_quote?: string }) | null; error?: string } | null>(null);
   const [quoteNonce, setQuoteNonce] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [view, setView] = useState<"history" | "how">("history"); // como Higgsfield: Historial y Cómo funciona
   const [formError, setFormError] = useState<string | null>(null);
   const idempotency = useRef<{ key: string; body: string } | null>(null);
 
@@ -198,13 +200,13 @@ export function AudioStudio() {
   }
 
   const sources = useMemo(() => items.map((g) => [g, sourceOf(g)] as const).filter(([, s]) => s), [items]);
-  const recent = items.filter((g) => g.model === AUDIO_SERVICES[service] && g.status === "completed").slice(0, 8);
+  const recent = items.filter((g) => g.model === AUDIO_SERVICES[service] && g.status === "completed").slice(0, 24);
   const short = costShort(estimate);
   const credits = status?.credits_left;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100dvh-56px)] lg:flex-none lg:flex-row">
-      <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[470px]">
+      <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[420px]">
         <nav className="hide-scrollbar flex gap-5 overflow-x-auto px-6 pt-5">
           {SERVICES.map((s) => (
             <button
@@ -351,15 +353,31 @@ export function AudioStudio() {
       </aside>
 
       <section className="flex min-h-[60vh] min-w-0 flex-1 flex-col gap-4 rounded-panel border border-line bg-surface-1 p-5">
-        <div>
-          <h1 className="headline text-[34px] text-lime">{a.title}</h1>
-          <p className="mt-1 text-sm text-fg-3">{a.subtitle}</p>
+        <div className="flex items-center gap-2">
+          {(["history", "how"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={clsx(
+                "flex h-10 items-center gap-2 rounded-xl px-3 text-[15px] font-medium transition-colors",
+                view === v ? "bg-surface-4 text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" : "text-fg-3 hover:text-fg-2",
+              )}
+            >
+              {v === "history" ? <Folder className="size-4" /> : <BookOpen className="size-4" />}
+              {v === "history" ? t.studio.history : t.studio.howItWorks}
+            </button>
+          ))}
         </div>
-        <h2 className="text-sm font-semibold text-fg-2">{a.recent}</h2>
-        {recent.length === 0 ? (
-          <p className="text-sm text-fg-3">{a.noRecent}</p>
+        {view === "how" || recent.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+            <AudioLines className="size-10 text-lime" />
+            <h1 className="headline mt-4 text-[34px] uppercase">{a.title}</h1>
+            <p className="mt-2 max-w-lg text-[15px] text-fg-3">{a.subtitle}</p>
+            {view === "history" && <p className="mt-4 text-sm text-fg-4">{a.noRecent}</p>}
+          </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
             {recent.map((g) => (
               <button key={g.id} type="button" onClick={() => router.push(`/history/${g.id}`)} className="text-left">
                 <AudioPlayer src={outputSrc(g.outputs[0])} />
