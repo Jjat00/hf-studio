@@ -194,7 +194,7 @@ def kling() -> dict[str, Route]:
 # --- Kling 4.0 (2026-10-27) -----------------------------------------------------------------------
 # Fuente: docs.kie.ai (`kling-4.0/keyframe-to-video` y `kling-4.0/reference-to-video`). Cita los medios como
 # Higgsfield (@image_1, @video_1). No tiene edición de video. Fotogramas y referencias exigen prompt. Desde el
-# 2026-11-24 hace 4k y HDR (`dynamic_range`, recargo por segundo de salida), que Higgsfield y APIMart no tienen.
+# 2026-11-24 hace 4k y HDR (`dynamic_range`, recargo por segundo de salida), como Higgsfield (APIMart no).
 
 K4_FRAMES = "kling-4.0/keyframe-to-video"
 K4_REFS = "kling-4.0/reference-to-video"
