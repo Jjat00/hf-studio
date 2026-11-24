@@ -18,21 +18,21 @@ export default async function Explore() {
         ))}
       </section>
 
-      <section className="grid grid-cols-1 gap-4 px-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Link href="/video" className="grain group relative flex min-h-[400px] flex-col justify-between overflow-hidden rounded-[24px] bg-surface-3 p-8">
+      <section className="grid grid-cols-1 gap-4 px-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <Link href="/video" className="grain group relative flex min-h-[312px] flex-col justify-between overflow-hidden rounded-[24px] bg-surface-3 p-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/art/explore-hero.webp" alt="" className="absolute inset-0 size-full object-cover transition-transform duration-700 group-hover:scale-[1.02]" />
           <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/10" />
           <div className="relative">
-            <p className="headline text-[40px] leading-[1.02] text-lime uppercase md:text-[52px]">{e.promoTitle1}</p>
-            <p className="headline text-[40px] leading-[1.02] uppercase md:text-[52px]">{e.promoTitle2}</p>
+            <p className="headline text-[34px] leading-[1.02] text-lime uppercase md:text-[40px]">{e.promoTitle1}</p>
+            <p className="headline text-[34px] leading-[1.02] uppercase md:text-[40px]">{e.promoTitle2}</p>
             <p className="mt-4 max-w-md text-[16px] text-white/80">{e.promoBody}</p>
           </div>
           <span className="relative mt-6 inline-flex w-fit items-center gap-2 rounded-xl bg-lime px-5 py-3 text-[16px] font-semibold text-ink shadow-[inset_0_-3px_0_rgba(80,100,0,0.35)]">
             {e.promoCta} <ArrowRight className="size-4" />
           </span>
         </Link>
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
           {TILES.map((f) => (
             <FeatureCard key={f.href + f.icon} f={f} />
           ))}

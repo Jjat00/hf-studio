@@ -12,34 +12,30 @@ const KIND_ICON = { Video, Image: ImageIcon, Agents: Bot };
 export function FeatureCard({ f }: { f: Feature }) {
   const { t, pick } = useI18n();
   const Icon = ICONS[f.icon];
-  const KindIcon = KIND_ICON[f.kind];
+  // Como las de Higgsfield (2026-11): icono arriba a la izquierda, insignia arriba a la derecha y el texto abajo.
   return (
     <Link
       href={f.href}
-      className="group flex min-h-[188px] flex-col rounded-[22px] border border-line bg-surface-2 p-5 transition-colors hover:border-line-2 hover:bg-surface-3"
+      title={t.kinds[f.kind]}
+      className="group flex min-h-[148px] flex-col rounded-[18px] border border-line bg-surface-2 p-4 transition-colors hover:border-line-2 hover:bg-surface-3"
     >
-      <div className="flex items-start justify-between">
-        <Icon className="size-6 text-fg" strokeWidth={2.2} />
-        <span className="flex items-center gap-1.5 rounded-xl bg-surface-4 px-2.5 py-1.5 text-[15px] font-medium text-fg-2">
-          <KindIcon className="size-4" /> {t.kinds[f.kind]}
-        </span>
+      <div className="flex items-start justify-between gap-2">
+        <Icon className="size-5 text-fg-2 group-hover:text-lime" strokeWidth={2.2} />
+        {f.badge && (
+          <span
+            className={
+              f.badge === "TOP"
+                ? "rounded-md bg-pink px-1.5 py-0.5 text-[11px] font-extrabold text-white italic"
+                : "rounded-md bg-lime px-1.5 py-0.5 text-[11px] font-extrabold text-ink italic"
+            }
+          >
+            {t.badges[f.badge]}
+          </span>
+        )}
       </div>
-      <div className="mt-auto">
-        <p className="flex items-center gap-2 text-[19px] font-semibold tracking-[-0.01em]">
-          <span className="truncate">{pick(f.title)}</span>
-          {f.badge && (
-            <span
-              className={
-                f.badge === "TOP"
-                  ? "rounded-md bg-pink px-1.5 py-0.5 text-[13px] font-extrabold text-white italic"
-                  : "rounded-md bg-lime px-1.5 py-0.5 text-[13px] font-extrabold text-ink italic"
-              }
-            >
-              {t.badges[f.badge]}
-            </span>
-          )}
-        </p>
-        <p className="mt-1.5 text-[15px] leading-snug text-fg-3">{pick(f.description)}</p>
+      <div className="mt-auto pt-4">
+        <p className="text-[15px] leading-tight font-semibold tracking-[-0.01em]">{pick(f.title)}</p>
+        <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-fg-3">{pick(f.description)}</p>
       </div>
     </Link>
   );
