@@ -603,3 +603,65 @@ export function SkillLibrary() {
     </div>
   );
 }
+
+/**
+ * Galería de skills bajo el compositor de Supercomputer, como la de Higgsfield: pestañas por categoría y tarjetas con
+ * su muestra; elegir una escribe `/skill` y su primer pedido de ejemplo en el compositor.
+ */
+export function SkillShowcase({ onPick }: { onPick: (text: string) => void }) {
+  const { t } = useI18n();
+  const k = t.skills;
+  const [skills, setSkills] = useState<SkillSummary[] | null>(null);
+  const [category, setCategory] = useState<SkillCategory | null>(null);
+  useEffect(() => {
+    studio.skills().then(
+      (r) => setSkills(r.skills),
+      () => setSkills([]),
+    );
+  }, []);
+  const showcase = useShowcase(useMemo(() => [...new Set((skills ?? []).flatMap((s) => (s.card?.showcase ?? []).slice(0, 1)))].sort(), [skills]));
+  const present = useMemo(() => SKILL_CATEGORIES.filter((c) => skills?.some((s) => categoryOf(s) === c)), [skills]);
+  if (!skills?.length) return null;
+  const visible = skills.filter((s) => !category || categoryOf(s) === category);
+  return (
+    <div className="mt-14 w-full">
+      <div className="mb-5 flex flex-wrap justify-center gap-1.5">
+        {[null, ...present].map((c) => (
+          <button
+            key={c ?? "all"}
+            type="button"
+            onClick={() => setCategory(c)}
+            className={`h-8 rounded-lg px-3 text-[13px] font-medium ${category === c ? "bg-surface-4 text-fg" : "text-fg-3 hover:text-fg"}`}
+          >
+            {c ? k.categories[c] : k.all}
+          </button>
+        ))}
+      </div>
+      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {visible.map((s) => {
+          const Icon = ICONS[categoryOf(s)];
+          const g = (s.card?.showcase ?? []).map((id) => showcase[id]).find((x): x is Generation => !!x && x.outputs.length > 0);
+          const example = s.card?.examples?.[0] ?? "";
+          return (
+            <li key={s.slug}>
+              <button type="button" onClick={() => onPick(`/${s.slug} ${example}`.trimEnd() + " ")} title={s.card?.summary ?? s.description} className="group block w-full text-left">
+                <span className="flex aspect-[2/1] items-center justify-center overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-surface-3 via-surface-2 to-lime/5">
+                  {g ? <Thumb g={g} className="size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <Icon className="size-7 text-lime/80 transition-transform group-hover:scale-110" />}
+                </span>
+                <span className="mt-2 flex items-start gap-2 px-1">
+                  <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-surface-3 text-fg-2">
+                    <Icon className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-medium text-fg">{s.card?.summary?.split(/[.:]/)[0] || `/${s.slug}`}</span>
+                    <span className="block truncate font-mono text-[12px] text-fg-4">/{s.slug}</span>
+                  </span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { SkillShowcase } from "@/components/skills/skill-library";
 import { Lightbox, type Viewable } from "@/components/lightbox";
 import { Logo } from "@/components/logo";
 import { CreationsPicker } from "@/components/studio/creations-picker";
@@ -1196,7 +1197,7 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
     );
   } else if (empty) {
     body = (
-      <div className="flex flex-1 flex-col items-center justify-center px-4">
+      <div className="thin-scrollbar flex flex-1 flex-col items-center overflow-y-auto px-4 pt-[12vh] pb-10">
         <div className="w-full max-w-2xl">
           {greeting ?? (
             <div className="mb-6 flex flex-col items-center gap-3 text-center">
@@ -1216,6 +1217,17 @@ export function ChatPanel({ chatId, onChatId, projectId, variant = "page", onAct
           </div>
           {error && <p className="mt-3 text-center text-sm text-danger">{error}</p>}
         </div>
+        {/* Como Higgsfield: la galería de skills debajo; elegir una la escribe en el compositor. */}
+        {!greeting && (
+          <div className="w-full max-w-6xl">
+            <SkillShowcase
+              onPick={(text) => {
+                setText(text);
+                requestAnimationFrame(() => input.current?.focus());
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   } else {

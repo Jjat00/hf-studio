@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { Loader2, MessageSquare, Plus, Trash2 } from "lucide-react";
+import { Boxes, FolderOpen, Loader2, MessageSquare, Plus, Sparkles, Terminal, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
@@ -58,6 +59,19 @@ export function Supercomputer() {
           <button type="button" onClick={newChat} className="flex w-full items-center gap-2 rounded-xl bg-surface-3 px-3 py-2 text-sm font-medium text-fg hover:bg-surface-4">
             <Plus className="size-4" /> {s.newChat}
           </button>
+          {/* Como Higgsfield: accesos a lo que el agente usa, encima de los chats. */}
+          <nav className="mt-2 flex flex-col gap-0.5">
+            {[
+              { href: "/cinema", label: t.nav.projects, icon: FolderOpen },
+              { href: "/skills", label: t.nav.skills, icon: Sparkles },
+              { href: "/elements", label: t.nav.elements, icon: Boxes },
+              { href: "/mcp", label: t.nav.mcp, icon: Terminal },
+            ].map((l) => (
+              <Link key={l.href} href={l.href} className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-fg-2 hover:bg-surface-3 hover:text-fg">
+                <l.icon className="size-4 text-fg-3" /> {l.label}
+              </Link>
+            ))}
+          </nav>
         </div>
         <p className="px-4 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{s.chats}</p>
         <nav className="thin-scrollbar flex-1 overflow-y-auto px-2 pb-3">
