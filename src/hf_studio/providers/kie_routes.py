@@ -193,7 +193,8 @@ def kling() -> dict[str, Route]:
 
 # --- Kling 4.0 (2026-10-27) -----------------------------------------------------------------------
 # Fuente: docs.kie.ai (`kling-4.0/keyframe-to-video` y `kling-4.0/reference-to-video`). Cita los medios como
-# Higgsfield (@image_1, @video_1). No tiene edición de video. Fotogramas y referencias exigen prompt.
+# Higgsfield (@image_1, @video_1). No tiene edición de video. Fotogramas y referencias exigen prompt. Desde el
+# 2026-11-24 hace 4k y HDR (`dynamic_range`, recargo por segundo de salida), que Higgsfield y APIMart no tienen.
 
 K4_FRAMES = "kling-4.0/keyframe-to-video"
 K4_REFS = "kling-4.0/reference-to-video"
@@ -203,7 +204,7 @@ K4_PROMPT_MAX = 8000
 def _k4_prompt(source: dict, out: dict) -> dict:
     if len(source.get("prompt") or "") > K4_PROMPT_MAX:
         raise unsupported(P, f"KIE takes prompts of up to {K4_PROMPT_MAX} characters")
-    return _need_prompt(source, out)
+    return _need_prompt(source, _k4_hdr(source, out))
 
 
 def _k4_refs_length(source: dict, hints: dict) -> None:
@@ -227,27 +228,43 @@ def _k4_frames(source: dict, out: dict) -> dict:
     return _k4_prompt(source, out)
 
 
+def _k4_hdr(source: dict, out: dict) -> dict:
+    """HDR (`dynamic_range: hdr`, 2026-11-24) solo a 1080p y 4k: a 720p KIE responde con un error de parámetro."""
+    if source.get("dynamic_range") == "hdr" and source.get("resolution", "720p") == "720p":
+        raise unsupported(P, "KIE makes HDR video at 1080p or 4k only")
+    return out
+
+
 def _k4_price(row: str):
     def price(i: dict, hints: dict, prices: dict) -> float | None:
         res, output = i.get("resolution", "720p"), i.get("duration")
         if output is None:
             return None
+        hdr = 0.0
+        if i.get("dynamic_range") == "hdr":  # recargo por segundo de salida
+            hdr = per_second(prices, f"kling 4.0, hdr add-on, {res} (output seconds only)", output)
+            if hdr is None:
+                return None
         if row == "keyframe-to-video":
-            return per_second(prices, f"kling 4.0, {row}, {res}", output)
-        if not i.get("video_urls"):
-            return per_second(prices, f"kling 4.0, {row}, {res} no video input", output)
-        # Como Kling en Higgsfield y APIMart: salida + max(salida, segundos de entrada), sin tope (cota alta).
-        seconds = video_seconds(hints)
-        if seconds is None:
-            return None
-        return per_second(prices, f"kling 4.0, {row}, {res} with video input", output + max(output, seconds))
+            base = per_second(prices, f"kling 4.0, {row}, {res}", output)
+        elif not i.get("video_urls"):
+            base = per_second(prices, f"kling 4.0, {row}, {res} no video input", output)
+        else:
+            # Como Kling en Higgsfield y APIMart: salida + max(salida, segundos de entrada), sin tope (cota alta).
+            seconds = video_seconds(hints)
+            if seconds is None:
+                return None
+            base = per_second(
+                prices, f"kling 4.0, {row}, {res} with video input", output + max(output, seconds)
+            )
+        return None if base is None else round(base + hdr, 4)
 
     return price
 
 
 def kling4() -> dict[str, Route]:
     base = "kling-video/v4.0"
-    common = ("prompt", "duration", "resolution")
+    common = ("prompt", "duration", "resolution", "dynamic_range")
     frames = _k4_price("keyframe-to-video")
     return {
         f"{base}/text-to-video": Route(

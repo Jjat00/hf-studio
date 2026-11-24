@@ -2226,6 +2226,112 @@
       }
     },
     {
+      "id": "higgsfield-ai/soul/v2/image-to-image",
+      "title": "SOUL V2 — Image to image API",
+      "summary": "Soul 2 from a reference image: portraits and scenes guided by one photo, with an optional Soul ID and Soul style.",
+      "workflow": "edit",
+      "family": "soul-2",
+      "output": "image",
+      "capabilities": [
+        "edit"
+      ],
+      "notes": [
+        "image_url is required, also with a custom_reference_id (Soul ID trained for Soul 2 in the same account).",
+        "batch_size is 1 or 4. resolution 720p (default) or 1080p. aspect_ratio defaults to 4:3. seed from 1 to 1000000.",
+        "Price (2026-11): about $0.004 per image at 720p (4 images at 1080p: $0.023), the same as Soul 2 text to image."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/higgsfield-ai/soul/v2/image-to-image/api-reference",
+      "input_schema": {
+        "properties": {
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "title": "Image",
+            "description": "Reference image (required, also when using a Soul ID)."
+          },
+          "aspect_ratio": {
+            "default": "4:3",
+            "enum": [
+              "9:16",
+              "16:9",
+              "4:3",
+              "3:4",
+              "1:1",
+              "2:3",
+              "3:2"
+            ],
+            "title": "Aspect Ratio",
+            "type": "string"
+          },
+          "resolution": {
+            "default": "720p",
+            "enum": [
+              "720p",
+              "1080p"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          },
+          "enhance_prompt": {
+            "default": true,
+            "title": "Enhance Prompt",
+            "type": "boolean",
+            "description": "Reference-image prompt processing is always on for this model."
+          },
+          "custom_reference_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Custom Reference Id"
+          },
+          "custom_reference_strength": {
+            "default": 1.0,
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Custom Reference Strength",
+            "type": "number"
+          },
+          "style_id": {
+            "format": "uuid",
+            "title": "Style Id",
+            "type": "string"
+          },
+          "seed": {
+            "maximum": 1000000,
+            "minimum": 1,
+            "title": "Seed",
+            "type": "integer"
+          },
+          "batch_size": {
+            "default": 1,
+            "enum": [
+              1,
+              4
+            ],
+            "title": "Batch Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt",
+          "image_url"
+        ],
+        "title": "SoulV2ImageToImageSchema",
+        "type": "object"
+      }
+    },
+    {
       "id": "higgsfield-ai/soul/v2/standard",
       "title": "SOUL V2 — Text to image API",
       "summary": "Text to image with SOUL V2: request parameters, examples and response handling.",
@@ -3369,6 +3475,86 @@
       }
     },
     {
+      "id": "kling-image/v4.0/edit/series",
+      "title": "Kling Image 4.0 — Edit series API",
+      "summary": "Kling Image 4.0 series from 1 to 10 reference images: 2 to 10 coherent images that keep the same subject, at 2K, 4K or 8K.",
+      "workflow": "series",
+      "family": "kling-image-4",
+      "output": "image",
+      "capabilities": [
+        "edit",
+        "image-references"
+      ],
+      "notes": [
+        "prompt is required (up to 50,000 characters); cite the images as @image_1, @image_2… and describe the whole sequence.",
+        "image_urls: 1 to 10 JPG or PNG, up to 30 MB, at least 300 px per side, aspect ratio 2:5 to 5:2. series_amount: 2 to 10 images.",
+        "Price (2026-11): per image, $0.063 at 2k, $0.094 at 4k, $0.157 at 8k (a 4-image series at 2k costs $0.252). Reference images are free."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-image/v4.0/edit/series/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling Image 4.0 Edit Series",
+        "required": [
+          "prompt",
+          "image_urls",
+          "series_amount"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 50000
+          },
+          "image_urls": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "title": "Images",
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "resolution": {
+            "enum": [
+              "2k",
+              "4k",
+              "8k"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "2k"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "21:9",
+              "auto"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
+          },
+          "series_amount": {
+            "type": "integer",
+            "title": "Images in the series",
+            "minimum": 2,
+            "maximum": 10,
+            "description": "Number of related images (2 to 10). Charged per image.",
+            "default": 4
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
       "id": "kling-image/v4.0/text-to-image",
       "title": "Kling Image 4.0 — Text to image API",
       "summary": "Kling Image 4.0 text to image: realistic scenes, products and text-rich designs at 2K, 4K or native 8K.",
@@ -3422,6 +3608,74 @@
             "type": "string",
             "title": "Aspect ratio",
             "default": "auto"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "kling-image/v4.0/text-to-image/series",
+      "title": "Kling Image 4.0 — Series API",
+      "summary": "Kling Image 4.0 series: 2 to 10 coherent images from one prompt (storyboards, collections, sequences) at 2K, 4K or 8K.",
+      "workflow": "series",
+      "family": "kling-image-4",
+      "output": "image",
+      "capabilities": [
+        "text-to-image"
+      ],
+      "notes": [
+        "prompt is required (up to 50,000 characters): describe the whole sequence. series_amount: 2 to 10 images, generated together.",
+        "resolution: 2k (default), 4k or 8k. aspect_ratio defaults to auto.",
+        "Price (2026-11): per image, $0.063 at 2k, $0.094 at 4k, $0.157 at 8k (a 4-image series at 2k costs $0.252)."
+      ],
+      "docs_url": "https://open.higgsfield.ai/models/kling-image/v4.0/text-to-image/series/api-reference",
+      "input_schema": {
+        "type": "object",
+        "title": "Kling Image 4.0 Text to Image Series",
+        "required": [
+          "prompt",
+          "series_amount"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "minLength": 1,
+            "maxLength": 50000
+          },
+          "resolution": {
+            "enum": [
+              "2k",
+              "4k",
+              "8k"
+            ],
+            "type": "string",
+            "title": "Resolution",
+            "default": "2k"
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "3:2",
+              "2:3",
+              "21:9",
+              "auto"
+            ],
+            "type": "string",
+            "title": "Aspect ratio",
+            "default": "auto"
+          },
+          "series_amount": {
+            "type": "integer",
+            "title": "Images in the series",
+            "minimum": 2,
+            "maximum": 10,
+            "description": "Number of related images (2 to 10). Charged per image.",
+            "default": 4
           }
         },
         "additionalProperties": false
@@ -5734,7 +5988,8 @@
       "notes": [
         "image_url (first frame) is required. image_urls are middle keyframes in order (max 8), not style references; end_image_url is the optional last frame.",
         "No aspect_ratio: the output follows the input frames.",
-        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed.",
+        "resolution 4k and dynamic_range hdr run on KIE only (2026-11): 4K costs about $0.495/s and HDR adds $0.0425/s at 1080p or $0.07/s at 4k. HDR is not available at 720p."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/image-to-video/api-reference",
       "input_schema": {
@@ -5783,13 +6038,29 @@
           "resolution": {
             "enum": [
               "720p",
-              "1080p"
+              "1080p",
+              "4k"
             ],
             "type": "string",
             "title": "Resolution",
-            "default": "1080p"
+            "default": "1080p",
+            "description": "720p or 1080p; 4k runs on KIE only."
+          },
+          "dynamic_range": {
+            "enum": [
+              "hdr"
+            ],
+            "type": "string",
+            "title": "HDR",
+            "description": "hdr for HDR video (HEVC 10-bit, BT.2020, HLG) at 1080p or 4k; leave it empty for SDR. KIE only."
           }
         }
+      },
+      "store_only": {
+        "resolution": [
+          "4k"
+        ],
+        "dynamic_range": null
       }
     },
     {
@@ -5808,7 +6079,8 @@
         "Needs a prompt plus at least one non-empty image_urls or video_urls list.",
         "Cite references in the prompt as @image_1, @image_2… and @video_1, @video_2… in array order.",
         "Input videos are trimmed to their first 30 s; output duration stays 3–30 s.",
-        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed.",
+        "resolution 4k and dynamic_range hdr run on KIE only (2026-11): 4K costs about $0.495/s and HDR adds $0.0425/s at 1080p or $0.07/s at 4k. HDR is not available at 720p."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/reference-to-video/api-reference",
       "input_schema": {
@@ -5877,11 +6149,13 @@
           "resolution": {
             "enum": [
               "720p",
-              "1080p"
+              "1080p",
+              "4k"
             ],
             "type": "string",
             "title": "Resolution",
-            "default": "1080p"
+            "default": "1080p",
+            "description": "720p or 1080p; 4k runs on KIE only."
           },
           "aspect_ratio": {
             "enum": [
@@ -5894,8 +6168,22 @@
             "type": "string",
             "title": "Aspect ratio",
             "default": "adaptive"
+          },
+          "dynamic_range": {
+            "enum": [
+              "hdr"
+            ],
+            "type": "string",
+            "title": "HDR",
+            "description": "hdr for HDR video (HEVC 10-bit, BT.2020, HLG) at 1080p or 4k; leave it empty for SDR. KIE only."
           }
         }
+      },
+      "store_only": {
+        "resolution": [
+          "4k"
+        ],
+        "dynamic_range": null
       }
     },
     {
@@ -5911,7 +6199,8 @@
       "notes": [
         "prompt is required. duration is an integer from 3 to 30 seconds (default 10).",
         "aspect_ratio: 21:9, 16:9, 9:16 or 1:1 (adaptive is not supported here).",
-        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed."
+        "Price (2026-11): 720p $0.1257/s and 1080p $0.1879/s of output; with input video 720p $0.1544/s and 1080p $0.2336/s. Only the output is billed.",
+        "resolution 4k and dynamic_range hdr run on KIE only (2026-11): 4K costs about $0.495/s and HDR adds $0.0425/s at 1080p or $0.07/s at 4k. HDR is not available at 720p."
       ],
       "docs_url": "https://open.higgsfield.ai/models/kling-video/v4.0/text-to-video/api-reference",
       "input_schema": {
@@ -5936,11 +6225,13 @@
           "resolution": {
             "enum": [
               "720p",
-              "1080p"
+              "1080p",
+              "4k"
             ],
             "type": "string",
             "title": "Resolution",
-            "default": "1080p"
+            "default": "1080p",
+            "description": "720p or 1080p; 4k runs on KIE only."
           },
           "aspect_ratio": {
             "enum": [
@@ -5952,8 +6243,22 @@
             "type": "string",
             "title": "Aspect ratio",
             "default": "16:9"
+          },
+          "dynamic_range": {
+            "enum": [
+              "hdr"
+            ],
+            "type": "string",
+            "title": "HDR",
+            "description": "hdr for HDR video (HEVC 10-bit, BT.2020, HLG) at 1080p or 4k; leave it empty for SDR. KIE only."
           }
         }
+      },
+      "store_only": {
+        "resolution": [
+          "4k"
+        ],
+        "dynamic_range": null
       }
     },
     {
