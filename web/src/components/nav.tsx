@@ -238,6 +238,8 @@ function NavLinks() {
           </div>
         )}
       </div>
+      {/* En escritorio, «Más» se abre bajo su propio botón (lg:relative); en móvil, a todo el ancho de la barra. */}
+      <div className="lg:relative">
       <button
         type="button"
         onClick={() => {
@@ -257,11 +259,11 @@ function NavLinks() {
         <ChevronDown className={clsx("hidden size-3.5 transition-transform lg:block", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute inset-x-2 top-full z-50 mt-1 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl lg:inset-x-auto lg:right-2 lg:w-[260px]">
+        <div className="absolute inset-x-2 top-full z-50 mt-1 max-h-[calc(100dvh-4rem)] overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl lg:inset-x-auto lg:left-0 lg:w-[260px]">
           {/* En pantallas angostas la barra no muestra las secciones: van aquí, con sus funciones. */}
           <div className="grid grid-cols-2 gap-0.5 border-b border-line pb-3 sm:grid-cols-4 lg:hidden">
             {[...PRIMARY, ...PRODUCTS].map((item) => (
-              <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
+              <NavLink key={item.label} item={item} active={isActive(item)} onClick={close} block />
             ))}
           </div>
           <div className="grid grid-cols-1 gap-3 border-b border-line py-3 sm:grid-cols-3 lg:hidden">{/* Imagen, Video, Audio, Agentes y Estudios */}
@@ -290,6 +292,7 @@ function NavLinks() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
