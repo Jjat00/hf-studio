@@ -18,6 +18,8 @@ import {
   Loader2,
   AtSign,
   ChevronRight,
+  ExternalLink,
+  Pencil,
   Plus,
   SlidersHorizontal,
 } from "lucide-react";
@@ -83,7 +85,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [view, setView] = useState<"history" | "how">("how");
+  const [view, setView] = useState<"history" | "how">("history"); // como Higgsfield: se abre en lo generado
   const [keepAudio, setKeepAudio] = useState(false);
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   const [columns, setColumns] = useState(3);
@@ -636,15 +638,15 @@ export function Studio({ output }: { output: "video" | "image" }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100dvh-56px)] lg:flex-none lg:flex-row">
       {/* Panel izquierdo */}
-      <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[470px]">
-        <nav className="hide-scrollbar flex gap-5 overflow-x-auto px-6 pt-5">
+      <aside className="flex min-h-0 w-full shrink-0 flex-col rounded-panel border border-line bg-surface-1 lg:w-[420px]">
+        <nav className="hide-scrollbar flex gap-4 overflow-x-auto px-5 pt-4">
           {tabs.map((tb) => (
             <button
               key={tb.key}
               type="button"
               onClick={() => go({ tab: tb.key, mode: tb.modes[0].key })}
               className={clsx(
-                "border-b-2 pb-3 text-[17px] font-medium whitespace-nowrap transition-colors",
+                "border-b-2 pb-2.5 text-[15px] font-medium whitespace-nowrap transition-colors",
                 tb.key === tab.key ? "border-fg text-fg" : "border-transparent text-fg-3 hover:text-fg-2",
               )}
             >
@@ -654,7 +656,7 @@ export function Studio({ output }: { output: "video" | "image" }) {
         </nav>
 
         <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-3 pb-3">
-          <HeroCard mode={mode} modelName={name} docs={detail?.docs_url} />
+          <HeroCard mode={mode} modelName={name} onChange={() => setPickerOpen(true)} />
 
           {tab.modes.length > 1 && (
             <div className="grid gap-1 rounded-2xl border border-line bg-surface-2 p-1" style={{ gridTemplateColumns: `repeat(${tab.modes.length}, minmax(0, 1fr))` }}>
@@ -821,6 +823,11 @@ export function Studio({ output }: { output: "video" | "image" }) {
           <ToolbarTab active={view === "how"} onClick={() => setView("how")} icon={<BookOpen className="size-4" />}>
             {t.studio.howItWorks}
           </ToolbarTab>
+          {detail?.docs_url && (
+            <a href={detail.docs_url} target="_blank" rel="noreferrer" aria-label="Docs" title="Docs" className="flex size-10 items-center justify-center rounded-xl text-fg-3 hover:text-fg-2">
+              <ExternalLink className="size-4" />
+            </a>
+          )}
           {view === "history" && history.length > 0 && (
             <div className="ml-auto flex items-center gap-2">
               {layout === "grid" && (
@@ -892,28 +899,26 @@ const TONES: Record<Mode["hero"]["tone"], string> = {
   violet: "from-black/80 via-black/30 to-transparent",
 };
 
-function HeroCard({ mode, modelName, docs }: { mode: Mode; modelName: string; docs?: string }) {
+function HeroCard({ mode, modelName, onChange }: { mode: Mode; modelName: string; onChange: () => void }) {
   const { t, pick } = useI18n();
   const title = pick(mode.hero.title);
   const subtitle = pick(mode.hero.subtitle);
   return (
-    <div className="grain relative h-[196px] shrink-0 overflow-hidden rounded-2xl bg-surface-3">
+    <div className="grain relative h-[176px] shrink-0 overflow-hidden rounded-2xl bg-surface-3">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={mode.hero.art} alt="" className="absolute inset-0 size-full object-cover" />
       <div className={clsx("absolute inset-0 bg-gradient-to-t", TONES[mode.hero.tone])} />
-      {docs && (
-        <a
-          href={docs}
-          target="_blank"
-          rel="noreferrer"
-          className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-black/55 px-3 py-1.5 text-[14px] font-medium backdrop-blur-md hover:bg-black/70"
-        >
-          <BookOpen className="size-4" /> {t.studio.howItWorks}
-        </a>
-      )}
-      <div className="absolute bottom-4 left-4 right-4">
-        <p className="headline text-[28px] text-lime drop-shadow">{title}</p>
-        <p className="mt-1 text-[15px] font-medium text-white/85">{modelName ? `${modelName} · ${subtitle}` : subtitle}</p>
+      {/* Como en Higgsfield: «Cambiar» abre el selector de modelo. */}
+      <button
+        type="button"
+        onClick={onChange}
+        className="absolute top-3 right-3 flex items-center gap-1.5 rounded-xl bg-black/55 px-3 py-1.5 text-[14px] font-medium backdrop-blur-md hover:bg-black/70"
+      >
+        <Pencil className="size-3.5" /> {t.studio.changeModel}
+      </button>
+      <div className="absolute right-4 bottom-4 left-4">
+        <p className="headline text-[26px] text-lime drop-shadow">{title}</p>
+        <p className="mt-1 text-[14px] font-medium text-white/85">{modelName ? `${modelName} · ${subtitle}` : subtitle}</p>
       </div>
     </div>
   );
