@@ -93,7 +93,7 @@ def test_v15_text_to_video_channels():
     # Doc del 2026-11-19: de 1 a 15 s y también 1080p sin imágenes
     hd = {**logical, "duration": 5, "resolution": "1080p"}
     assert ext.translate(hd)["resolution"] == "1080p"
-    assert ext.price(hd, {}, PRICES["apimart"]) == pytest.approx(0.05736 * 5, abs=1e-3)
+    assert ext.price(hd, {}, PRICES["apimart"]) == pytest.approx(0.035 * 5, abs=1e-3)
     kie = KIE[f"{V15}/text-to-video"]
     assert kie.model == "grok-imagine-video-1-5-preview" and not kie.official
     assert kie.price(logical, {}, PRICES["kie"]) == pytest.approx(0.0225 * 8)

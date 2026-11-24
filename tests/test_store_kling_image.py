@@ -40,8 +40,8 @@ def test_higgsfield_model_gets_cheaper_store_routes():
     assert (
         apimart.price(logical(t2i, resolution="4k"), {}, _prices("apimart")) == 0.0857
     )  # per_unit redondea a 4 decimales
-    with pytest.raises(ProviderError):  # APIMart no tiene 8K
-        apimart.translate(logical(t2i, resolution="8k"))
+    assert apimart.translate(logical(t2i, resolution="8k"))["resolution"] == "8K"  # con precio desde el 24-11
+    assert apimart.price(logical(t2i, resolution="8k"), {}, _prices("apimart")) == 0.1429
     # APIMart cobra las referencias sin publicar el importe: la edición no va por ahí
     assert not routes_for(PROVIDERS["apimart"].routes(), edit)
     with pytest.raises(ProviderError):  # KIE corta el prompt en 20000 caracteres
@@ -92,3 +92,21 @@ def test_minimax_h3_lite_and_highspeed_schemas_follow_higgsfield(variant):
     i2v = f"minimax/{variant}/image-to-video"
     assert get_catalog().validate(i2v, {"prompt": "a fox", "end_image_url": IMG[0]}) == []
     assert get_catalog().validate(i2v, {"prompt": "a fox"})
+
+
+def test_series_runs_on_kie_and_apimart_priced_per_image():
+    series = "kling-image/v4.0/text-to-image/series"
+    kie = routes_for(PROVIDERS["kie"].routes(), series)[0]
+    apimart = routes_for(PROVIDERS["apimart"].routes(), series)[0]
+    body = logical(series, series_amount=4)
+    assert kie.translate(body)["mode"] == "series" and kie.translate(body)["count"] == 4
+    assert kie.price(body, {}, _prices("kie")) == round(4 * 0.0565, 4)
+    assert apimart.translate(body)["sequential_image_generation_options"] == {"max_images": 4}
+    assert apimart.price(body, {}, _prices("apimart")) == round(4 * 0.0571432, 4)
+    with pytest.raises(ProviderError):  # APIMart llega a 4 imágenes
+        apimart.translate(logical(series, series_amount=5))
+    edit = logical("kling-image/v4.0/edit/series", series_amount=3, image_urls=["https://cdn.test/a.png"])
+    kie_edit = routes_for(PROVIDERS["kie"].routes(), "kling-image/v4.0/edit/series")[0]
+    assert kie_edit.price(edit, {}, _prices("kie")) == round(
+        3 * 0.0565 + 3 * 0.0025, 4
+    )  # referencia por imagen
