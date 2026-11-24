@@ -30,11 +30,22 @@ import {
 import { l, type L } from "./i18n";
 
 /**
- * Menús desplegables de la barra, al estilo de Higgsfield: cada sección (Imagen, Video, Audio) abre dos
- * columnas, «Funciones» (lo que puedes hacer) y «Modelos» (con qué). Todo apunta a rutas del estudio.
+ * Menús desplegables de la barra, al estilo de Higgsfield (noviembre de 2026): cada sección (Imagen, Video, Audio)
+ * abre una fila de tarjetas con arte, dos columnas compactas, «Funciones» y «Modelos» (las cinco primeras y el resto
+ * con «Más»), y una franja con lo destacado. Todo apunta a rutas del estudio.
  */
 export type MenuEntry = { title: L; description: L; href: string; icon: LucideIcon; badge?: "TOP" | "NEW" };
-export type MegaMenu = { key: "image" | "video" | "audio"; href: string; features: MenuEntry[]; models: MenuEntry[] };
+/** Tarjeta grande de la fila superior del panel (con arte, o con un icono si no hay imagen). */
+export type MenuCard = { title: L; href: string; art?: string; icon: LucideIcon };
+export type MegaMenu = {
+  key: "image" | "video" | "audio";
+  href: string;
+  cards: MenuCard[];
+  features: MenuEntry[];
+  models: MenuEntry[];
+  /** Franja inferior: lo que se quiere destacar ahora (normalmente el modelo NEW de la última actualización). */
+  promo: MenuEntry;
+};
 
 const img = (id: string) => `/image?model=${id}`;
 const vid = (id: string) => `/video?model=${id}`;
@@ -43,6 +54,13 @@ export const MEGA_MENUS: MegaMenu[] = [
   {
     key: "image",
     href: "/image",
+    cards: [
+      { title: l("Crear imagen", "Create Image"), href: "/image", art: "/art/text-to-image.webp", icon: ImagePlus },
+      { title: l("Editar imagen", "Edit Image"), href: "/image?tab=create&mode=edit", art: "/art/image-edit.webp", icon: Brush },
+      { title: l("Ads Studio", "Ads Studio"), href: "/image?tab=create&mode=ads", art: "/art/presets/hero-shot.webp", icon: Megaphone },
+      { title: l("AI Influencer", "AI Influencer"), href: "/influencer", art: "/art/presets/ai-influencer.webp", icon: UserRound },
+    ],
+    promo: { title: l("Kling Image 4.0 Series", "Kling Image 4.0 Series"), description: l("De 2 a 10 imágenes coherentes con un solo prompt", "2 to 10 coherent images from one prompt"), href: img("kling-image/v4.0/text-to-image/series"), icon: Layers, badge: "NEW" },
     features: [
       { title: l("Crear imagen", "Create Image"), description: l("Genera imágenes con IA", "Generate AI images"), href: "/image", icon: ImagePlus },
       { title: l("Editar imagen", "Edit Image"), description: l("Cambia partes de una foto con texto", "Change parts of a photo with text"), href: "/image?tab=create&mode=edit", icon: Brush },
@@ -79,6 +97,13 @@ export const MEGA_MENUS: MegaMenu[] = [
   {
     key: "video",
     href: "/video",
+    cards: [
+      { title: l("Crear video", "Create Video"), href: "/video", art: "/art/text-to-video.webp", icon: Video },
+      { title: l("Editar video", "Edit Video"), href: "/video?tab=edit&mode=edit", art: "/art/video-edit.webp", icon: Wand2 },
+      { title: l("Cinema Studio", "Cinema Studio"), href: "/cinema", art: "/art/use-cases/director-scene.webp", icon: Clapperboard },
+      { title: l("Genjutsu", "Genjutsu"), href: "/video?tab=genjutsu", art: "/art/explore/genjutsu.webp", icon: Sparkles },
+    ],
+    promo: { title: l("Seedance 2.5", "Seedance 2.5"), description: l("Videos de calidad de cine de hasta 30 segundos", "Cinematic grade videos up to 30 seconds"), href: vid("bytedance/seedance-2.5/text-to-video"), icon: AudioLines },
     features: [
       { title: l("Crear video", "Create Video"), description: l("Genera videos con IA", "Generate AI videos"), href: "/video", icon: Video },
       { title: l("Cinema Studio", "Cinema Studio"), description: l("Video cinematográfico con referencias", "Cinematic video from your references"), href: vid("higgsfield/cinema-studio/4.0"), icon: Clapperboard },
@@ -122,6 +147,12 @@ export const MEGA_MENUS: MegaMenu[] = [
   {
     key: "audio",
     href: "/audio",
+    cards: [
+      { title: l("Texto a voz", "Text to Speech"), href: "/audio?tab=text-to-speech", icon: Mic },
+      { title: l("Cambio de voz", "Voice Change"), href: "/voice", art: "/art/use-cases/voice-swap.svg", icon: AudioLines },
+      { title: l("Música", "Music"), href: "/audio?tab=music", art: "/art/use-cases/soundtrack.svg", icon: Music },
+    ],
+    promo: { title: l("Eleven v4", "Eleven v4"), description: l("Narración expresiva con control de estabilidad", "Expressive narration with stability controls"), href: "/audio?tab=text-to-speech&model=eleven_v4", icon: AudioLines },
     features: [
       { title: l("Texto a voz", "Text to Speech"), description: l("Genera voz a partir de texto", "Generate speech from text"), href: "/audio?tab=text-to-speech", icon: Mic },
       { title: l("Cambio de voz", "Voice Change"), description: l("Cambia la voz de cualquier video", "Swap voices in any video"), href: "/voice", icon: AudioLines },

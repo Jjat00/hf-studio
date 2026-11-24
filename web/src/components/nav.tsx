@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ChevronDown, FolderOpen, Globe, LogOut, Menu, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, Globe, LogOut, Menu, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -87,43 +87,94 @@ function NavLink({ item, active, onClick, block }: { item: Item; active: boolean
   );
 }
 
-function MenuRow({ entry, onClick }: { entry: MenuEntry; onClick: () => void }) {
+const SHOWN = 5; // entradas por columna antes de «Más», como Higgsfield
+
+/** Fila compacta de una columna: icono, nombre y su insignia. La descripción va en el título (al pasar el cursor). */
+function MenuItem({ entry, onClick }: { entry: MenuEntry; onClick: () => void }) {
   const { locale } = useI18n();
   const Icon = entry.icon;
   return (
-    <Link href={entry.href} onClick={onClick} className="group flex items-center gap-3 rounded-xl px-2 py-1.5 hover:bg-surface-4">
-      <span className="relative flex size-10 shrink-0 items-center justify-center rounded-xl border border-line-2 bg-surface-2 text-fg-2 group-hover:text-lime">
-        <Icon className="size-[18px]" />
-        {entry.badge && (
-          <span className="absolute -top-1.5 -left-1.5">
-            <Badge kind={entry.badge} />
-          </span>
-        )}
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-[14px] font-medium text-fg">{entry.title[locale]}</span>
-        <span className="block truncate text-[12.5px] text-fg-3">{entry.description[locale]}</span>
-      </span>
+    <Link
+      href={entry.href}
+      onClick={onClick}
+      title={entry.description[locale]}
+      className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13.5px] font-medium text-fg hover:bg-surface-4"
+    >
+      <Icon className="size-4 shrink-0 text-fg-3 group-hover:text-lime" />
+      <span className="truncate">{entry.title[locale]}</span>
+      {entry.badge && <Badge kind={entry.badge} />}
     </Link>
   );
 }
 
-/** Panel desplegable de una sección: «Funciones» a la izquierda y «Modelos» a la derecha. */
-function MegaPanel({ menu, onClose }: { menu: MegaMenu; onClose: () => void }) {
+function MenuColumn({ title, entries, onClose }: { title: string; entries: MenuEntry[]; onClose: () => void }) {
   const { t } = useI18n();
+  const [all, setAll] = useState(false);
+  const shown = all ? entries : entries.slice(0, SHOWN);
   return (
-    <div className="thin-scrollbar grid max-h-[calc(100dvh-5rem)] w-[min(880px,calc(100vw-1rem))] grid-cols-2 gap-4 overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl">
-      {[
-        [t.nav.features, menu.features],
-        [t.nav.modelsCol, menu.models],
-      ].map(([title, entries]) => (
-        <div key={title as string} className="min-w-0">
-          <p className="px-2 pb-1.5 text-[12px] font-medium text-fg-4">{title as string}</p>
-          {(entries as MenuEntry[]).map((e) => (
-            <MenuRow key={e.href + e.title.en} entry={e} onClick={onClose} />
-          ))}
-        </div>
+    <div className="min-w-0">
+      <p className="px-2 pb-1 text-[12px] font-medium text-fg-4">{title}</p>
+      {shown.map((e) => (
+        <MenuItem key={e.href + e.title.en} entry={e} onClick={onClose} />
       ))}
+      {entries.length > SHOWN && (
+        <button
+          type="button"
+          onClick={() => setAll(!all)}
+          aria-expanded={all}
+          className="flex items-center gap-1 px-2 py-1.5 text-[12.5px] font-medium text-fg-4 hover:text-fg"
+        >
+          {all ? t.nav.less : t.nav.more}
+          <ChevronDown className={clsx("size-3.5 transition-transform", all && "rotate-180")} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Panel desplegable de una sección, como el de Higgsfield: tarjetas con arte, «Funciones» y «Modelos», y lo destacado. */
+function MegaPanel({ menu, onClose }: { menu: MegaMenu; onClose: () => void }) {
+  const { t, locale } = useI18n();
+  const cardHrefs = new Set(menu.cards.map((c) => c.href));
+  const features = menu.features.filter((e) => !cardHrefs.has(e.href)); // lo que ya es tarjeta no se repite
+  const Promo = menu.promo.icon;
+  return (
+    <div className="thin-scrollbar max-h-[calc(100dvh-5rem)] w-[min(720px,calc(100vw-1rem))] overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl">
+      <div className={clsx("grid gap-3 border-b border-line pb-3", menu.cards.length === 3 ? "grid-cols-3" : "grid-cols-4")}>
+        {menu.cards.map((c) => {
+          const Icon = c.icon;
+          return (
+            <Link key={c.href} href={c.href} onClick={onClose} className="group block text-center">
+              <span className={clsx("relative flex items-center justify-center overflow-hidden rounded-xl border border-line-2 bg-surface-2", menu.cards.length === 3 ? "aspect-[2/1]" : "aspect-[16/10]")}>
+                {c.art ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.art} alt="" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                ) : (
+                  <Icon className="size-8 text-lime" />
+                )}
+              </span>
+              <span className="mt-1.5 block truncate text-[13px] font-medium text-fg group-hover:text-lime">{c.title[locale]}</span>
+            </Link>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-2 gap-4 py-3">
+        <MenuColumn title={t.nav.features} entries={features} onClose={onClose} />
+        <MenuColumn title={t.nav.modelsCol} entries={menu.models} onClose={onClose} />
+      </div>
+      <Link
+        href={menu.promo.href}
+        onClick={onClose}
+        className="group flex items-center gap-2.5 rounded-xl border border-line-2 bg-surface-2 px-3 py-2.5 text-[13px] hover:border-lime/40"
+      >
+        {menu.promo.badge ? <Badge kind={menu.promo.badge} /> : <Promo className="size-4 shrink-0 text-fg-3" />}
+        <span className="shrink-0 font-semibold text-fg">{menu.promo.title[locale]}</span>
+        <span className="min-w-0 truncate text-fg-3">{menu.promo.description[locale]}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-0.5 text-fg-4 group-hover:text-lime">
+          {t.nav.tryNow}
+          <ChevronRight className="size-3.5" />
+        </span>
+      </Link>
     </div>
   );
 }
