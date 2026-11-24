@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, EyeOff, Eye, Star } from "lucide-react";
+import { Check, EyeOff, Eye, LayoutGrid, Rows3, Star } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GenerationCard } from "@/components/generations/generation-card";
@@ -32,6 +32,8 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   const sentinel = useRef<HTMLDivElement>(null);
   const [models, setModels] = useState<Map<string, ModelSummary>>(new Map());
   const [selecting, setSelecting] = useState(false);
+  // Mosaico denso por omisión, como Higgsfield; «Con detalle» vuelve a las tarjetas con prompt, modelo y costo.
+  const [view, setView] = useState<"tile" | "grid">("tile");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -119,10 +121,12 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
   }
 
   return (
-    <div className="px-4 py-8 pb-28 md:px-8">
-      <h1 className="headline text-[40px] md:text-[56px]">{hidden ? h.hiddenTitle : h.title}</h1>
-      <p className="mt-2 text-fg-3">{hidden ? h.hiddenSubtitle : h.subtitle}</p>
-      <div className="mt-6 flex flex-wrap items-center gap-2">
+    <div className="px-4 py-4 pb-28 md:px-6">
+      {/* Como «My generations» de Higgsfield (2026-11): una barra compacta con título, filtros y la vista. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="mr-3 text-[18px] font-semibold" title={hidden ? h.hiddenSubtitle : h.subtitle}>
+          {hidden ? h.hiddenTitle : h.title}
+        </h1>
         {FILTERS.map((f) => (
           <button
             key={f}
@@ -141,10 +145,19 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
         ))}
         <button
           type="button"
+          onClick={() => setView(view === "tile" ? "grid" : "tile")}
+          title={h.view}
+          className="ml-auto flex h-10 items-center gap-2 rounded-xl bg-surface-3 px-3 text-[15px] font-medium text-fg-2 hover:text-fg"
+        >
+          {view === "tile" ? <Rows3 className="size-4" /> : <LayoutGrid className="size-4" />}
+          {view === "tile" ? h.detailed : h.compact}
+        </button>
+        <button
+          type="button"
           onClick={() => (selecting ? exit() : setSelecting(true))}
           aria-pressed={selecting}
           className={clsx(
-            "ml-auto h-10 rounded-xl px-4 text-[15px] font-medium transition-colors",
+            "h-10 rounded-xl px-4 text-[15px] font-medium transition-colors",
             selecting ? "bg-lime text-ink" : "bg-surface-3 text-fg-2 hover:text-fg",
           )}
         >
@@ -165,9 +178,9 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
           <Masonry
             items={shown}
             itemKey={(g) => g.id}
-            maxColumns={4}
-            minColumnWidth={280}
-            gap={20}
+            maxColumns={view === "tile" ? 5 : 4}
+            minColumnWidth={view === "tile" ? 220 : 280}
+            gap={view === "tile" ? 8 : 20}
             render={(g) => {
               const on = picked.has(g.id);
               return (
@@ -177,7 +190,7 @@ export function HistoryView({ hidden = false }: { hidden?: boolean }) {
                   <div inert={selecting}>
                     <GenerationCard
                       g={g}
-                      layout="grid"
+                      layout={view}
                       models={models}
                       onReuse={reuse}
                       gallery={shown}

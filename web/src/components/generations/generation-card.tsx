@@ -123,7 +123,8 @@ export function GenerationCard({
   gallery,
 }: {
   g: Generation;
-  layout: "grid" | "list";
+  /** `tile`: solo el medio, con el prompt y las acciones al pasar el cursor (la rejilla densa de la Biblioteca). */
+  layout: "grid" | "list" | "tile";
   models?: Map<string, ModelSummary>;
   onReuse?: (g: Generation) => void;
   onDelete?: (id: string) => void;
@@ -331,6 +332,19 @@ export function GenerationCard({
             {prompt || t.generation.noPrompt}
           </Link>
           <div className="mt-auto">{meta}</div>
+        </div>
+      </article>
+    );
+  }
+  if (layout === "tile") {
+    return (
+      <article className="group relative">
+        {media}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-1.5 overflow-hidden rounded-b-2xl bg-gradient-to-t from-black/85 via-black/50 to-transparent p-2 pt-12 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <Link href={detailHref} className="pointer-events-auto line-clamp-2 text-xs text-white/90 hover:text-white">
+            {prompt || modelName(g.model, locale, models)}
+          </Link>
+          <div className="pointer-events-auto min-w-0 [&>div]:flex-wrap [&>div]:justify-end">{actions}</div>
         </div>
       </article>
     );
