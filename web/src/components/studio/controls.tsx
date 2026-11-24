@@ -15,7 +15,7 @@ export function SettingCard({ label, children, error, className }: { label: stri
   );
 }
 
-function formatOption(key: string, v: string | number, labels?: Record<string, Record<string, string>>) {
+export function formatOption(key: string, v: string | number, labels?: Record<string, Record<string, string>>) {
   if (key === "duration") return `${v}s`;
   return labels?.[key]?.[String(v)] ?? String(v);
 }

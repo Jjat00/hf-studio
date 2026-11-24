@@ -16,6 +16,10 @@ import {
   Type,
   Wand2,
   Loader2,
+  AtSign,
+  ChevronRight,
+  Plus,
+  SlidersHorizontal,
 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -26,13 +30,14 @@ import { IMAGE_TABS, VIDEO_TABS, type Mode } from "@/lib/modes";
 import { ElementPicker } from "@/components/studio/element-picker";
 import { StylePicker } from "@/components/studio/style-picker";
 import { ElementRefsPicker, elementMention, type ElementRefs } from "@/components/studio/element-refs";
-import { cleanInput, defaultsFor, fieldsFor, takesStudioElements, type Field } from "@/lib/schema";
+import { cleanInput, defaultsFor, fieldsFor, humanize, takesStudioElements, type Field } from "@/lib/schema";
 import { probeDuration } from "@/lib/media";
 import { costShort, fieldErrors, formatUsd, isAudioModel, modelLabel, outputOf, reuseHref, studio, StudioError, VOICE_MODEL, type Estimate, modelMap } from "@/lib/studio";
 import { CostPanel, costAllowsDirectSubmit } from "./cost-panel";
 import type { Generation, ModelDetail, ModelSummary } from "@/lib/types";
 import { Masonry } from "@/components/masonry";
-import { Chip, FieldControl, SettingCard } from "./controls";
+import { Chip, FieldControl, SettingCard, formatOption } from "./controls";
+import { ComposerChip } from "./composer-chip";
 import { EmptyState } from "./empty-state";
 import { MediaSlot } from "./media-slot";
 import { ModelPicker, ModelRow } from "./model-picker";
@@ -389,6 +394,245 @@ export function Studio({ output }: { output: "video" | "image" }) {
   const { name } = detail ? modelLabel(detail.title) : { name: "" };
   const twoUp = media.length === 2 && media.every((m) => !m.multiple);
 
+  // Imagen, como en Higgsfield desde noviembre de 2026: el lienzo ocupa todo y el compositor va abajo, con el prompt y
+  // los ajustes en chips (cada uno abre su control). Video conserva el panel izquierdo, que Higgsfield también mantiene.
+  if (output === "image") {
+    const mediaCount = media.reduce((n, f) => {
+      const v = values[f.key];
+      return n + (Array.isArray(v) ? v.length : v ? 1 : 0);
+    }, 0);
+    const mediaMissing = media.some((f) => f.required && !values[f.key]) || media.some((f) => errors[f.key]);
+    const showCost = !!current?.error || confirmUnknown === estimateKey || !!formError;
+    // A la vista, como en Higgsfield, solo lo que se toca a diario; el resto va en «Avanzado».
+    const MAIN = ["mode", "resolution", "quality", "aspect_ratio", "batch_size", "num_images", "n", "series_amount", "output_format"];
+    const mainSettings = settings.filter((f) => MAIN.includes(f.key));
+    const moreSettings = [...settings.filter((f) => !MAIN.includes(f.key)), ...advanced];
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col lg:h-[calc(100dvh-56px)] lg:flex-none">
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2">
+          {tabs.length > 1 &&
+            tabs.map((tb) => (
+              <ToolbarTab key={tb.key} active={tb.key === tab.key} onClick={() => go({ tab: tb.key, mode: tb.modes[0].key })} icon={null}>
+                {pick(tb.label)}
+              </ToolbarTab>
+            ))}
+          {tab.modes.length > 1 && (
+            <div className="flex gap-1 rounded-xl border border-line bg-surface-2 p-1">
+              {tab.modes.map((m) => {
+                const Icon = MODE_ICON[m.icon];
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => go({ tab: tab.key, mode: m.key })}
+                    className={clsx(
+                      "flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold transition-colors",
+                      m.key === mode.key ? "bg-surface-5 text-fg" : "text-fg-3 hover:text-fg-2",
+                    )}
+                  >
+                    <Icon className="size-3.5" />
+                    {pick(m.label)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            {detail?.docs_url && (
+              <a href={detail.docs_url} target="_blank" rel="noreferrer" className="flex h-10 items-center gap-2 rounded-xl px-3 text-[15px] font-medium text-fg-3 hover:text-fg-2">
+                <BookOpen className="size-4" /> {t.studio.howItWorks}
+              </a>
+            )}
+            {history.length > 0 && (
+              <>
+                {layout === "grid" && (
+                  <input type="range" min={2} max={5} value={7 - columns} onChange={(e) => setColumns(7 - Number(e.target.value))} className="hidden w-28 md:block" aria-label={t.studio.size} />
+                )}
+                <ToolbarTab active={layout === "list"} onClick={() => setLayout("list")} icon={<Rows3 className="size-4" />}>
+                  {t.studio.list}
+                </ToolbarTab>
+                <ToolbarTab active={layout === "grid"} onClick={() => setLayout("grid")} icon={<LayoutGrid className="size-4" />}>
+                  {t.studio.grid}
+                </ToolbarTab>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-64">
+          {catalogError && <p className="mb-3 rounded-2xl bg-danger/10 p-3 text-sm text-danger">{catalogError}</p>}
+          {loading ? (
+            <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="shimmer aspect-square rounded-2xl" />
+              ))}
+            </div>
+          ) : history.length === 0 ? (
+            <StartCreating art={[hero.art, ...IMAGE_TABS.flatMap((tb) => tb.modes.map((m) => m.hero.art))]} model={name} body={pick(hero.subtitle)} />
+          ) : layout === "grid" ? (
+            <Masonry
+              items={history}
+              itemKey={(g) => g.id}
+              maxColumns={columns + 1}
+              minColumnWidth={200}
+              render={(g) => <GenerationCard g={g} layout="grid" models={byId} onReuse={reuse} onDelete={remove} gallery={history} />}
+            />
+          ) : (
+            <div className="flex flex-col gap-3">
+              {history.map((g) => (
+                <GenerationCard key={g.id} g={g} layout="list" models={byId} onReuse={reuse} onDelete={remove} gallery={history} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center px-3">
+          <div className="pointer-events-auto w-full max-w-[940px] rounded-[22px] border border-line-2 bg-surface-2/95 p-3 shadow-2xl backdrop-blur-md">
+            {showCost && (
+              <div className="mb-2">
+                {formError && <p className="mb-2 px-1 text-sm text-danger">{formError}</p>}
+                <CostPanel loading={!!detail && !current} estimate={current?.value ?? null} error={current?.error} needsConfirm={confirmUnknown === estimateKey} />
+              </div>
+            )}
+            <div className="flex items-stretch gap-3">
+              <div className="min-w-0 flex-1">
+                {prompt ? (
+                  <div className="relative">
+                    <textarea
+                      ref={promptRef}
+                      value={(values.prompt as string) ?? ""}
+                      onChange={(e) => setValue("prompt", e.target.value || undefined)}
+                      onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === "Enter" && submit()}
+                      rows={2}
+                      placeholder={t.studio.placeholderImage}
+                      className={clsx(
+                        "w-full resize-none bg-transparent px-1 pt-1 text-[15px] leading-relaxed outline-none placeholder:text-fg-4",
+                        errors.prompt && "placeholder:text-danger/70",
+                      )}
+                    />
+                    {errors.prompt && <p className="px-1 text-xs text-danger">{errors.prompt}</p>}
+                  </div>
+                ) : (
+                  <p className="px-1 pt-1 pb-3 text-[15px] text-fg-4">{pick(hero.subtitle)}</p>
+                )}
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {media.length > 0 && (
+                    <ComposerChip
+                      wide
+                      active={mediaMissing}
+                      icon={<Plus className={clsx("size-3.5", mediaMissing && "text-lime")} />}
+                      label={t.studio.inputs}
+                      value={mediaCount ? `${t.studio.inputs} · ${mediaCount}` : t.studio.inputs}
+                    >
+                      <div className={clsx("grid gap-2", twoUp ? "grid-cols-2" : "grid-cols-1")}>
+                        {media.map((f) => {
+                          const own = mode.labels?.[f.key];
+                          const [label, hint] = own ? [pick(own[0]), pick(own[1])] : (t.media.labels[f.key] ?? [f.label, f.hint]);
+                          return (
+                            <MediaSlot
+                              key={`${detail?.id}/${f.key}`}
+                              label={label}
+                              hint={hint}
+                              kind={f.media}
+                              multiple={f.multiple}
+                              max={f.max}
+                              required={f.required}
+                              value={values[f.key] as string | string[] | undefined}
+                              onChange={(v) => setValue(f.key, v)}
+                              compact={twoUp}
+                              error={errors[f.key]}
+                            />
+                          );
+                        })}
+                      </div>
+                    </ComposerChip>
+                  )}
+                  {detail && (elementsField || refSlot) && (
+                    <ComposerChip wide icon={<AtSign className="size-3.5" />} label={t.studio.elements} value={t.studio.elements}>
+                      {elementsField ? (
+                        <ElementPicker
+                          key={`${detail.id}/elements`}
+                          value={values.elements as string[] | undefined}
+                          onChange={(v) => setValue("elements", v.length ? v : undefined)}
+                          onPick={(el) => {
+                            const text = (values.prompt as string) ?? "";
+                            if (!text.includes(el.mention)) setValue("prompt", text ? `${text.trimEnd()} ${el.mention}` : el.mention);
+                          }}
+                        />
+                      ) : (
+                        <ElementRefsPicker key={`${detail.id}/refs`} room={refRoom} onAdd={addElementRefs} />
+                      )}
+                    </ComposerChip>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="flex h-8 max-w-60 items-center gap-1.5 rounded-lg bg-surface-4 px-2.5 text-[13px] font-semibold whitespace-nowrap text-fg hover:bg-surface-5"
+                  >
+                    <Sparkles className="size-3.5 text-lime" />
+                    <span className="truncate">{name || t.picker.chooseModel}</span>
+                    <ChevronRight className="size-3.5 shrink-0 text-fg-4" />
+                  </button>
+                  {detail && styleField && (
+                    <ComposerChip wide label={humanize(styleField.key, t.controls.fields)} value={humanize(styleField.key, t.controls.fields)} active={!!values[styleField.key]}>
+                      <StylePicker key={`${detail.id}/style`} model={detail.id} value={values[styleField.key] as string | undefined} onChange={(v) => setValue(styleField.key, v)} error={errors[styleField.key]} />
+                    </ComposerChip>
+                  )}
+                  {detail &&
+                    mainSettings.map((f) => (
+                      <ComposerChip key={`${detail.id}/${f.key}`} label={humanize(f.key, t.controls.fields)} value={chipValue(f, values[f.key], t)} active={!!errors[f.key]}>
+                        <FieldControl field={f} value={values[f.key]} onChange={(v) => setValue(f.key, v)} error={errors[f.key]} />
+                      </ComposerChip>
+                    ))}
+                  {detail && cinemaKeys.length > 0 && (
+                    <ComposerChip wide value={t.studio.advanced}>
+                      <CinemaControls key={detail.id} keys={cinemaKeys} values={values} setValue={setValue} extra={cinemaExtra} setExtra={setCinemaExtra} />
+                    </ComposerChip>
+                  )}
+                  {detail && moreSettings.length > 0 && (
+                    <ComposerChip wide icon={<SlidersHorizontal className="size-3.5" />} value={`${t.studio.advanced} (${moreSettings.length})`} active={moreSettings.some((f) => errors[f.key])}>
+                      <div className="flex flex-col gap-2">
+                        {moreSettings.map((f) => (
+                          <FieldControl key={`${detail.id}/${f.key}`} field={f} value={values[f.key]} onChange={(v) => setValue(f.key, v)} error={errors[f.key]} />
+                        ))}
+                      </div>
+                    </ComposerChip>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!detail || submitting}
+                className="flex w-32 shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl bg-gradient-to-b from-[#e3ff4d] to-lime text-ink shadow-[inset_0_-4px_0_rgba(80,100,0,0.35)] transition-[filter,transform] hover:brightness-105 active:translate-y-px disabled:opacity-50 sm:w-36"
+              >
+                {submitting ? (
+                  <Loader2 className="size-5 animate-spin" />
+                ) : (
+                  <>
+                    <span className="text-[13px] font-bold tracking-wide uppercase">{confirmUnknown === estimateKey ? t.studio.generateAnyway : t.studio.generate}</span>
+                    {costShort(current?.value ?? null) && <span className="text-[12px] font-semibold opacity-80">{costShort(current?.value ?? null)}</span>}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <ModelPicker
+          open={pickerOpen}
+          models={modeModels}
+          selected={modelId}
+          onSelect={(id) => {
+            idempotency.current = null;
+            setChosen((c) => ({ ...c, [`${tab.key}/${mode.key}`]: id }));
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 lg:h-[calc(100dvh-56px)] lg:flex-none lg:flex-row">
       {/* Panel izquierdo */}
@@ -726,5 +970,41 @@ function ToolbarTab({ active, onClick, icon, children }: { active: boolean; onCl
       {icon}
       {children}
     </button>
+  );
+}
+
+/** Valor corto de un ajuste para su chip del compositor. */
+function chipValue(f: Exclude<Field, { kind: "prompt" } | { kind: "media" }>, v: unknown, t: ReturnType<typeof useI18n>["t"]): string {
+  const label = humanize(f.key, t.controls.fields);
+  if (v === undefined || v === null || v === "") return `${label}: ${t.controls.auto}`;
+  if (f.kind === "toggle") return `${label}: ${v ? t.controls.on : t.controls.off}`;
+  if (f.kind === "enum") return formatOption(f.key, v as string | number, t.controls.options);
+  return `${label}: ${String(v)}`;
+}
+
+/** Lienzo vacío de Imagen, como el de Higgsfield: fotos en abanico y «Empieza a crear con» el modelo. */
+function StartCreating({ art, model, body }: { art: string[]; model: string; body: string }) {
+  const { t } = useI18n();
+  const photos = [...new Set(art)].slice(0, 4);
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+      <div className="flex items-center">
+        {photos.map((src, i) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={src}
+            src={src}
+            alt=""
+            className={clsx(
+              "-mx-2 h-36 w-28 rounded-2xl border-2 border-surface-5 object-cover shadow-2xl sm:h-40 sm:w-32",
+              ["-rotate-8", "rotate-3", "-rotate-2", "rotate-8"][i],
+            )}
+          />
+        ))}
+      </div>
+      <p className="headline mt-6 text-[28px] leading-tight uppercase sm:text-[34px]">{t.studio.startWith}</p>
+      {model && <p className="headline text-[28px] leading-tight text-lime uppercase sm:text-[34px]">{model}</p>}
+      <p className="mt-2 max-w-lg text-[15px] text-fg-3">{body}</p>
+    </div>
   );
 }
