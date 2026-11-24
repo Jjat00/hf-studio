@@ -1,5 +1,8 @@
 import {
   AudioLines,
+  Bot,
+  BookOpen,
+  Swords,
   Boxes,
   Brush,
   Clapperboard,
@@ -38,7 +41,9 @@ export type MenuEntry = { title: L; description: L; href: string; icon: LucideIc
 /** Tarjeta grande de la fila superior del panel (con arte, o con un icono si no hay imagen). */
 export type MenuCard = { title: L; href: string; art?: string; icon: LucideIcon };
 export type MegaMenu = {
-  key: "image" | "video" | "audio";
+  key: "image" | "video" | "audio" | "agentic" | "studios";
+  /** Títulos propios de las columnas (por omisión «Funciones» y «Modelos»); una columna vacía no se muestra. */
+  titles?: [L, L];
   href: string;
   cards: MenuCard[];
   features: MenuEntry[];
@@ -169,5 +174,42 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Eleven Music", "Eleven Music"), description: l("Música con o sin letra", "Music with or without lyrics"), href: "/audio?tab=music", icon: Music },
       { title: l("Eleven Sound Effects", "Eleven Sound Effects"), description: l("Efectos y ambientes en bucle", "Effects and loopable ambiences"), href: "/audio?tab=sound-effects", icon: Volume2 },
     ],
+  },
+  {
+    key: "agentic",
+    href: "/supercomputer",
+    titles: [l("Para agentes", "For agents"), l("Recursos", "Resources")],
+    cards: [
+      { title: l("Supercomputer", "Supercomputer"), href: "/supercomputer", icon: Bot },
+      { title: l("Katana", "Katana"), href: "/katana", art: "/art/presets/morph.webp", icon: Swords },
+      { title: l("Content Factory", "Content Factory"), href: "/factory", art: "/factory/neon-grid.jpg", icon: Factory },
+      { title: l("Spaces", "Spaces"), href: "/spaces", icon: Workflow },
+    ],
+    promo: { title: l("Supercomputer", "Supercomputer"), description: l("Un agente que elige modelos y te propone; generas con un clic", "An agent that picks models and proposes; you generate with one click"), href: "/supercomputer", icon: Bot },
+    features: [
+      { title: l("Skills", "Skills"), description: l("Recetas que el agente sigue con /nombre", "Recipes the agent follows with /name"), href: "/skills", icon: Sparkles },
+      { title: l("MCP", "MCP"), description: l("Claude Code y Codex generan por ti", "Claude Code and Codex create for you"), href: "/mcp", icon: Bot },
+      { title: l("Elementos", "Elements"), description: l("Personajes y productos reutilizables", "Reusable characters and products"), href: "/elements", icon: Boxes },
+    ],
+    models: [
+      { title: l("Casos de uso", "Use cases"), description: l("Recetas listas por objetivo", "Ready-made recipes by goal"), href: "/use-cases", icon: BookOpen },
+      { title: l("Presets", "Presets"), description: l("Recetas guardadas con su entrada", "Saved recipes with their input"), href: "/presets", icon: Layers },
+      { title: l("Apps", "Apps"), description: l("Efectos de un clic", "One-click effects"), href: "/presets?c=Apps", icon: Wand2 },
+    ],
+  },
+  {
+    key: "studios",
+    href: "/cinema",
+    cards: [
+      { title: l("Cinema Studio", "Cinema Studio"), href: "/cinema", art: "/art/use-cases/director-scene.webp", icon: Clapperboard },
+      { title: l("Ads Studio", "Ads Studio"), href: "/image?tab=create&mode=ads", art: "/art/presets/hero-shot.webp", icon: Megaphone },
+      { title: l("Content Factory", "Content Factory"), href: "/factory", art: "/factory/neon-grid.jpg", icon: Factory },
+      { title: l("AI Influencer", "AI Influencer"), href: "/influencer", art: "/art/presets/ai-influencer.webp", icon: UserRound },
+      { title: l("Genjutsu", "Genjutsu"), href: "/video?tab=genjutsu", art: "/art/explore/genjutsu.webp", icon: Sparkles },
+      { title: l("Katana", "Katana"), href: "/katana", art: "/art/presets/morph.webp", icon: Swords },
+    ],
+    promo: { title: l("Casos de uso", "Use cases"), description: l("Recetas paso a paso para cada estudio", "Step-by-step recipes for every studio"), href: "/use-cases", icon: BookOpen },
+    features: [],
+    models: [],
   },
 ];

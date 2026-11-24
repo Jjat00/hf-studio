@@ -30,6 +30,8 @@ const PRIMARY: Item[] = [
   { href: "/video", label: "video", mega: "video", match: (p, q) => p.startsWith("/video") && tabIs(q, null, "create", "edit", "motion") },
   { href: "/audio", label: "audio", mega: "audio", match: (p) => ["/audio", "/voice", "/voices", "/sounds"].some((r) => p === r || p.startsWith(r + "/")) },
   { href: "/mcp", label: "mcp", match: (p) => p.startsWith("/mcp") },
+  { href: "/supercomputer", label: "agentic", mega: "agentic", match: (p) => ["/supercomputer", "/skills", "/katana", "/spaces", "/flows"].some((r) => p.startsWith(r)) },
+  { href: "/cinema", label: "studios", mega: "studios", match: (p) => ["/cinema", "/projects", "/factory", "/influencer"].some((r) => p.startsWith(r)) },
 ];
 const PRODUCTS: Item[] = [
   { href: "/cinema", label: "cinema", badge: "new", match: (p) => p.startsWith("/cinema") || p.startsWith("/projects") },
@@ -140,7 +142,7 @@ function MegaPanel({ menu, onClose }: { menu: MegaMenu; onClose: () => void }) {
   const Promo = menu.promo.icon;
   return (
     <div className="thin-scrollbar max-h-[calc(100dvh-5rem)] w-[min(720px,calc(100vw-1rem))] overflow-y-auto rounded-2xl border border-line-2 bg-surface-3 p-3 shadow-2xl">
-      <div className={clsx("grid gap-3 border-b border-line pb-3", menu.cards.length === 3 ? "grid-cols-3" : "grid-cols-4")}>
+      <div className={clsx("grid gap-3 border-b border-line pb-3", menu.cards.length % 3 === 0 ? "grid-cols-3" : "grid-cols-4")}>
         {menu.cards.map((c) => {
           const Icon = c.icon;
           return (
@@ -158,10 +160,13 @@ function MegaPanel({ menu, onClose }: { menu: MegaMenu; onClose: () => void }) {
           );
         })}
       </div>
-      <div className="grid grid-cols-2 gap-4 py-3">
-        <MenuColumn title={t.nav.features} entries={features} onClose={onClose} />
-        <MenuColumn title={t.nav.modelsCol} entries={menu.models} onClose={onClose} />
-      </div>
+      {(features.length > 0 || menu.models.length > 0) && (
+        <div className="grid grid-cols-2 gap-4 pt-3">
+          {features.length > 0 && <MenuColumn title={menu.titles?.[0][locale] ?? t.nav.features} entries={features} onClose={onClose} />}
+          {menu.models.length > 0 && <MenuColumn title={menu.titles?.[1][locale] ?? t.nav.modelsCol} entries={menu.models} onClose={onClose} />}
+        </div>
+      )}
+      <div className="pt-3" />
       <Link
         href={menu.promo.href}
         onClick={onClose}
@@ -233,12 +238,6 @@ function NavLinks() {
           </div>
         )}
       </div>
-      <span className="mx-2 hidden h-4 w-px shrink-0 bg-line-2 lg:block" />
-      <div className="hide-scrollbar hidden min-w-0 items-center overflow-x-auto lg:flex">
-        {PRODUCTS.map((item) => (
-          <NavLink key={item.href} item={item} active={isActive(item)} />
-        ))}
-      </div>
       <button
         type="button"
         onClick={() => {
@@ -265,11 +264,11 @@ function NavLinks() {
               <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
             ))}
           </div>
-          <div className="grid grid-cols-1 gap-3 border-b border-line py-3 sm:grid-cols-3 lg:hidden">
+          <div className="grid grid-cols-1 gap-3 border-b border-line py-3 sm:grid-cols-3 lg:hidden">{/* Imagen, Video, Audio, Agentes y Estudios */}
             {MEGA_MENUS.map((m) => (
               <div key={m.key}>
                 <p className="px-2.5 pb-1 text-[11px] font-semibold tracking-wider text-fg-4 uppercase">{t.nav[m.key]}</p>
-                {m.features.map((e) => (
+                {(m.features.length ? m.features : m.cards).map((e) => (
                   <Link key={e.href + e.title.en} href={e.href} onClick={close} className="block rounded-lg px-2.5 py-1.5 text-sm text-fg-3 hover:bg-surface-4 hover:text-fg">
                     {e.title[locale]}
                   </Link>
@@ -277,8 +276,8 @@ function NavLinks() {
               </div>
             ))}
           </div>
-          {/* En escritorio estrecho la fila de productos se recorta: aquí siempre están todos. */}
-          <div className="hidden border-b border-line pb-3 lg:block min-[1800px]:hidden">
+          {/* Los productos van en Agentes y Estudios (como en Higgsfield); aquí también, todos juntos. */}
+          <div className="hidden border-b border-line pb-3 lg:block">
             {PRODUCTS.map((item) => (
               <NavLink key={item.href} item={item} active={isActive(item)} onClick={close} block />
             ))}
