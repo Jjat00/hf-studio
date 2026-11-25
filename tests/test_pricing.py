@@ -359,3 +359,14 @@ def test_rates_per_video_second_with_4k_and_hdr():
     )
     with_video = approximate(refs, {"duration": 5, "resolution": "720p", "video_urls": ["v"]}, {})
     assert with_video["usd"] == pytest.approx(5 * 0.3264)
+
+
+def test_flat_rate_per_requested_second():
+    """MAGI-2 (Higgsfield, 2026-11-24): una sola tarifa por segundo pedido, con el audio incluido."""
+    import pytest
+
+    from hf_studio.pricing import approximate
+
+    text = "USD 0.08/sec. 1 concurrent generation per account across all MAGI-2 modes. Contact sales to increase the limit."
+    assert approximate(text, {"duration": 30}, {})["usd"] == pytest.approx(2.4)
+    assert approximate(text, {}, {})["usd"] == pytest.approx(0.4)  # 5 s por omisión

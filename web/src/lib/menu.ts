@@ -65,7 +65,7 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Ads Studio", "Ads Studio"), href: "/image?tab=create&mode=ads", art: "/art/presets/hero-shot.webp", icon: Megaphone },
       { title: l("AI Influencer", "AI Influencer"), href: "/influencer", art: "/art/presets/ai-influencer.webp", icon: UserRound },
     ],
-    promo: { title: l("Kling Image 4.0 Series", "Kling Image 4.0 Series"), description: l("De 2 a 10 imágenes coherentes con un solo prompt", "2 to 10 coherent images from one prompt"), href: img("kling-image/v4.0/text-to-image/series"), icon: Layers, badge: "NEW" },
+    promo: { title: l("Kling Image 4.0 Series", "Kling Image 4.0 Series"), description: l("De 2 a 10 imágenes coherentes con un solo prompt", "2 to 10 coherent images from one prompt"), href: img("kling-image/v4.0/text-to-image/series"), icon: Layers },
     features: [
       { title: l("Crear imagen", "Create Image"), description: l("Genera imágenes con IA", "Generate AI images"), href: "/image", icon: ImagePlus },
       { title: l("Editar imagen", "Edit Image"), description: l("Cambia partes de una foto con texto", "Change parts of a photo with text"), href: "/image?tab=create&mode=edit", icon: Brush },
@@ -79,8 +79,8 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Reencuadrar", "Reframe"), description: l("Lleva una foto a cualquier formato", "Take a photo to any aspect ratio"), href: "/presets/reframe-image", icon: Crop },
     ],
     models: [
-      { title: l("Kling Image 4.0 Series", "Kling Image 4.0 Series"), description: l("De 2 a 10 imágenes coherentes: storyboards y colecciones", "2 to 10 coherent images: storyboards and collections"), href: img("kling-image/v4.0/text-to-image/series"), icon: Layers, badge: "NEW" },
-      { title: l("Soul 2 desde una imagen", "Soul 2 Image to Image"), description: l("Retratos y escenas Soul guiados por una foto", "Soul portraits and scenes guided by a photo"), href: img("higgsfield-ai/soul/v2/image-to-image"), icon: ImagePlus, badge: "NEW" },
+      { title: l("Kling Image 4.0 Series", "Kling Image 4.0 Series"), description: l("De 2 a 10 imágenes coherentes: storyboards y colecciones", "2 to 10 coherent images: storyboards and collections"), href: img("kling-image/v4.0/text-to-image/series"), icon: Layers },
+      { title: l("Soul 2 desde una imagen", "Soul 2 Image to Image"), description: l("Retratos y escenas Soul guiados por una foto", "Soul portraits and scenes guided by a photo"), href: img("higgsfield-ai/soul/v2/image-to-image"), icon: ImagePlus },
       { title: l("Kling Image 4.0", "Kling Image 4.0"), description: l("Imágenes realistas y con texto, hasta 8K", "Realistic, text-rich images up to 8K"), href: img("kling-image/v4.0/text-to-image"), icon: ImagePlus },
       { title: l("Kling Long Image", "Kling Long Image"), description: l("Una página de producto o una web en una sola imagen", "A product page or a web page in one tall image"), href: img("kling-image/v4.0/long-image/ecommerce"), icon: Layers },
       { title: l("Seedream 5.5", "Seedream 5.5"), description: l("El nuevo Seedream, con fondo transparente", "The new Seedream, with transparent backgrounds"), href: img("bytedance/seedream-5.5/text-to-image"), icon: ImagePlus },
@@ -108,7 +108,7 @@ export const MEGA_MENUS: MegaMenu[] = [
       { title: l("Cinema Studio", "Cinema Studio"), href: "/cinema", art: "/art/use-cases/director-scene.webp", icon: Clapperboard },
       { title: l("Genjutsu", "Genjutsu"), href: "/video?tab=genjutsu", art: "/art/explore/genjutsu.webp", icon: Sparkles },
     ],
-    promo: { title: l("Seedance 2.5", "Seedance 2.5"), description: l("Videos de calidad de cine de hasta 30 segundos", "Cinematic grade videos up to 30 seconds"), href: vid("bytedance/seedance-2.5/text-to-video"), icon: AudioLines },
+    promo: { title: l("MAGI-2", "MAGI-2"), description: l("1080p con sonido hasta 30 s, a 0,08 USD por segundo", "1080p with sound up to 30 s, $0.08 per second"), href: vid("sand/magi-2/text-to-video"), icon: Film, badge: "NEW" },
     features: [
       { title: l("Crear video", "Create Video"), description: l("Genera videos con IA", "Generate AI videos"), href: "/video", icon: Video },
       { title: l("Cinema Studio", "Cinema Studio"), description: l("Video cinematográfico con referencias", "Cinematic video from your references"), href: vid("higgsfield/cinema-studio/4.0"), icon: Clapperboard },
@@ -126,9 +126,10 @@ export const MEGA_MENUS: MegaMenu[] = [
     ],
     models: [
       { title: l("Seedance 2.5", "Seedance 2.5"), description: l("Videos cinematográficos de hasta 30 segundos", "Cinematic videos up to 30 seconds"), href: vid("bytedance/seedance-2.5/text-to-video"), icon: AudioLines, badge: "TOP" },
+      { title: l("MAGI-2", "MAGI-2"), description: l("Video 1080p con sonido de 4 a 30 s, desde texto, fotogramas o referencias", "1080p video with sound, 4 to 30 s, from text, frames or references"), href: vid("sand/magi-2/text-to-video"), icon: Film, badge: "NEW" },
       { title: l("Seedance 2.5 Flash", "Seedance 2.5 Flash"), description: l("Seedance 2.5 rápido y barato, hasta 30 s a 720p", "Fast, cheaper Seedance 2.5, up to 30 s at 720p"), href: vid("bytedance/seedance-2.5-flash/text-to-video"), icon: AudioLines },
       { title: l("Higgsfield Genjutsu", "Higgsfield Genjutsu"), description: l("Transfiere movimiento, cambia objetos o el estilo de un video (también en Light, más barato)", "Transfer motion, swap objects or restyle a video (also Light, cheaper)"), href: "/video?tab=genjutsu", icon: Sparkles },
-      { title: l("Kling 4.0", "Kling 4.0"), description: l("Escenas de hasta 30 s con referencias y edición, ahora en 4K y HDR", "Up to 30s scenes with references and editing, now in 4K and HDR"), href: vid("kling-video/v4.0/text-to-video"), icon: Film, badge: "NEW" },
+      { title: l("Kling 4.0", "Kling 4.0"), description: l("Escenas de hasta 30 s con referencias y edición, ahora en 4K y HDR", "Up to 30s scenes with references and editing, now in 4K and HDR"), href: vid("kling-video/v4.0/text-to-video"), icon: Film },
       { title: l("Kling 4.0 Flash", "Kling 4.0 Flash"), description: l("Kling 4.0 más rápido y barato, de 3 a 20 s", "Faster, cheaper Kling 4.0, 3 to 20 s"), href: vid("kling-video/v4.0-flash/text-to-video"), icon: Film },
       { title: l("Kling 3.0", "Kling 3.0"), description: l("Videos cinematográficos con audio", "Cinematic videos with audio"), href: vid("kling-video/v3.0/pro/text-to-video"), icon: Film },
       { title: l("Kling Motion Control", "Kling Motion Control"), description: l("Transfiere el movimiento de un video a una imagen", "Transfer motion from video to image"), href: "/video?tab=motion", icon: Move },

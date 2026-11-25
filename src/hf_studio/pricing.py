@@ -130,6 +130,10 @@ def approximate(
     missing: list[str] = []
     text = description
 
+    # A0) Tarifa única por segundo pedido (MAGI-2, 2026-11-24): «USD 0.08/sec. 1 concurrent generation per account…».
+    if m := re.search(r"USD (\d+(?:\.\d+)?)/sec\b", text):
+        return {"usd": seconds * float(m.group(1)), "basis": f"{seconds:g}s × ${m.group(1)}/s", "missing": []}
+
     # A) Por segundo generado según resolución.
     if m := re.search(r"per generated second by resolution: (.*?)\. ", text):
         rates = dict(re.findall(r"(\d+p) " + MONEY, m.group(1)))
