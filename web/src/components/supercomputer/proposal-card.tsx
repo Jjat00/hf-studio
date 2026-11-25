@@ -94,11 +94,43 @@ function Tile({
   aspect: string;
   video: boolean;
   onUpdate: (g: Generation) => void;
-  onOpen: () => void;
+  onOpen: (index?: number) => void;
 }) {
   const { t } = useI18n();
   useJob(jobId, onUpdate);
-  const out = job?.status === "completed" ? job.outputs.find((o) => o.kind === "video" || o.kind === "image") : undefined;
+  const outs = job?.status === "completed" ? job.outputs.filter((o) => o.kind === "video" || o.kind === "image") : [];
+  const out = outs[0];
+  // Una sola generación con varias salidas (serie o lote): se muestran todas en mosaico, cada una abre el visor.
+  if (outs.length > 1) {
+    return (
+      <div className="space-y-1.5">
+        <div className="relative grid grid-cols-2 gap-1.5">
+          {outs.map((o, i) => (
+            <div key={o.url} className="group/out relative overflow-hidden rounded-xl bg-surface-3" style={{ aspectRatio: aspect }}>
+              {o.kind === "video" ? (
+                <video src={outputSrc(o)} controls playsInline className="size-full bg-black object-contain" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={outputSrc(o)} alt={`${label} · ${i + 1}`} onClick={() => onOpen(i)} className="size-full cursor-zoom-in object-cover" />
+              )}
+              <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] font-medium text-white">
+                {i + 1}/{outs.length}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5">
+            {job && <StatusPill g={job} />}
+            {job?.provider && <span className="truncate text-[11px] text-fg-4">{t.cost.via(providerTitle(job.provider))}</span>}
+          </span>
+          <Link href={`/history/${jobId}`} title={t.supercomputer.openDetail} className="text-fg-3 hover:text-fg">
+            <ExternalLink className="size-3.5" />
+          </Link>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="space-y-1.5">
       <div className="group/out relative overflow-hidden rounded-xl bg-surface-3" style={{ aspectRatio: aspect }}>
@@ -108,13 +140,13 @@ function Tile({
               <video src={outputSrc(out)} controls playsInline className="size-full bg-black object-contain" />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={outputSrc(out)} alt={label} onClick={onOpen} className="size-full cursor-zoom-in object-cover" />
+              <img src={outputSrc(out)} alt={label} onClick={() => onOpen()} className="size-full cursor-zoom-in object-cover" />
             )}
             <button
               type="button"
               aria-label={t.supercomputer.enlarge}
               title={t.supercomputer.enlarge}
-              onClick={onOpen}
+              onClick={() => onOpen()}
               className="absolute top-2 right-2 rounded-lg bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover/out:opacity-100 hover:bg-black/80 focus-visible:opacity-100"
             >
               <Maximize2 className="size-4" />
@@ -311,14 +343,13 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
   // Por dónde va a salir: el proveedor más barato con clave (el router lo elige igual al generar).
   const chosen = estimate?.options?.find((o) => o.provider === estimate.provider) ?? estimate?.options?.[0];
   const others = (estimate?.options?.length ?? 0) - 1;
+  // Todas las salidas de cada generación: una serie (Kling Image Series) o un lote (batch_size) trae varias.
   const viewable: Viewable[] = jobIds
-    .map((id) => jobs[id]?.status === "completed" ? jobs[id].outputs.find((o) => o.kind === "video" || o.kind === "image") : undefined)
-    .filter((o) => o !== undefined)
+    .flatMap((id) => (jobs[id]?.status === "completed" ? jobs[id].outputs.filter((o) => o.kind === "video" || o.kind === "image") : []))
     .map((o) => ({ src: outputSrc(o), kind: o.kind === "video" ? "video" : "image" }));
 
-  function openJob(id: string) {
-    const g = jobs[id];
-    const out = g?.outputs.find((o) => o.kind === "video" || o.kind === "image");
+  function openJob(id: string, index = 0) {
+    const out = jobs[id]?.outputs.filter((o) => o.kind === "video" || o.kind === "image")[index];
     const at = out ? viewable.findIndex((v) => v.src === outputSrc(out)) : -1;
     if (at >= 0) setViewing(at);
   }
@@ -382,7 +413,7 @@ export function ProposalCard({ chatId, proposal }: { chatId: string; proposal: C
                 aspect={ratio}
                 video={proposal.output === "video"}
                 onUpdate={onUpdate}
-                onOpen={() => openJob(id)}
+                onOpen={(index) => openJob(id, index)}
               />
             ))}
           </div>
